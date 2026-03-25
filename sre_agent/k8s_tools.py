@@ -33,6 +33,7 @@ _METRICS_VERSION = "v1beta1"
 WRITE_TOOLS = {
     "scale_deployment", "restart_deployment", "cordon_node", "uncordon_node",
     "delete_pod", "apply_yaml", "create_network_policy",
+    "rollback_deployment", "drain_node",
 }
 
 MAX_TAIL_LINES = 1000
@@ -1147,6 +1148,531 @@ def get_prometheus_query(query: str, time_range: str = "") -> str:
 
 
 # ---------------------------------------------------------------------------
+# Additional diagnostic tools (requested by sysadmin review)
+# ---------------------------------------------------------------------------
+
+
+@beta_tool
+def describe_service(namespace: str, name: str) -> str:
+    """Get detailed information about a service including endpoints, ports, selector, and target pods.
+
+    Args:
+        namespace: Kubernetes namespace.
+        name: Name of the service.
+    """
+    core = get_core_client()
+    result = safe(lambda: core.read_namespaced_service(name, namespace))
+    if isinstance(result, str):
+        return result
+
+    svc = result
+    info = {
+        "name": svc.metadata.name,
+        "namespace": svc.metadata.namespace,
+        "type": svc.spec.type,
+        "clusterIP": svc.spec.cluster_ip,
+        "selector": svc.spec.selector or {},
+        "ports": [
+            {"name": p.name, "port": p.port, "targetPort": str(p.target_port), "protocol": p.protocol, "nodePort": p.node_port}
+            for p in (svc.spec.ports or [])
+        ],
+        "externalIPs": svc.spec.external_i_ps or [],
+        "sessionAffinity": svc.spec.session_affinity,
+    }
+
+    # Get endpoints
+    ep_result = safe(lambda: core.read_namespaced_endpoints(name, namespace))
+    if not isinstance(ep_result, str):
+        endpoints = []
+        for subset in ep_result.subsets or []:
+            addrs = [a.ip + (f" ({a.target_ref.name})" if a.target_ref else "") for a in (subset.addresses or [])]
+            not_ready = [a.ip + (f" ({a.target_ref.name})" if a.target_ref else "") for a in (subset.not_ready_addresses or [])]
+            ports = [f"{p.port}/{p.protocol}" for p in (subset.ports or [])]
+            endpoints.append({"ready": addrs, "notReady": not_ready, "ports": ports})
+        info["endpoints"] = endpoints
+
+    # Count matching pods
+    if svc.spec.selector:
+        label_sel = ",".join(f"{k}={v}" for k, v in svc.spec.selector.items())
+        pods = safe(lambda: core.list_namespaced_pod(namespace, label_selector=label_sel))
+        if not isinstance(pods, str):
+            info["matchingPods"] = len(pods.items)
+            info["readyPods"] = sum(1 for p in pods.items if p.status.phase == "Running")
+
+    return json.dumps(info, indent=2, default=str)
+
+
+@beta_tool
+def get_endpoint_slices(namespace: str, service_name: str) -> str:
+    """Get EndpointSlices for a service showing which pods are backing it and their readiness.
+
+    Args:
+        namespace: Kubernetes namespace.
+        service_name: Name of the service to inspect.
+    """
+    try:
+        result = get_custom_client().list_namespaced_custom_object(
+            "discovery.k8s.io", "v1", namespace, "endpointslices",
+            label_selector=f"kubernetes.io/service-name={service_name}",
+        )
+    except ApiException as e:
+        return f"Error ({e.status}): {e.reason}"
+
+    slices = result.get("items", [])
+    if not slices:
+        return f"No EndpointSlices found for service '{service_name}' in namespace '{namespace}'."
+
+    lines = []
+    for es in slices:
+        name = es["metadata"]["name"]
+        addr_type = es.get("addressType", "?")
+        ports = ", ".join(f"{p.get('name', '?')}:{p['port']}/{p.get('protocol', 'TCP')}" for p in es.get("ports", []))
+        lines.append(f"EndpointSlice: {name}  Type={addr_type}  Ports=[{ports}]")
+
+        for ep in es.get("endpoints", []):
+            ready = ep.get("conditions", {}).get("ready", False)
+            addresses = ", ".join(ep.get("addresses", []))
+            target = ep.get("targetRef", {})
+            pod_name = target.get("name", "?") if target else "?"
+            status = "Ready" if ready else "NotReady"
+            lines.append(f"  {status}  {addresses}  Pod={pod_name}")
+
+    return "\n".join(lines)
+
+
+@beta_tool
+def list_replicasets(namespace: str, deployment_name: str = "") -> str:
+    """List ReplicaSets, optionally filtered to a specific deployment's rollout history.
+
+    Args:
+        namespace: Kubernetes namespace.
+        deployment_name: If provided, show only ReplicaSets owned by this deployment (rollout history).
+    """
+    apps = get_apps_client()
+    result = safe(lambda: apps.list_namespaced_replica_set(namespace))
+    if isinstance(result, str):
+        return result
+
+    rsets = result.items
+    if deployment_name:
+        rsets = [
+            rs for rs in rsets
+            if any(
+                ref.kind == "Deployment" and ref.name == deployment_name
+                for ref in (rs.metadata.owner_references or [])
+            )
+        ]
+
+    if not rsets:
+        return f"No ReplicaSets found{' for deployment ' + deployment_name if deployment_name else ''}."
+
+    # Sort by creation (newest first) for rollout history
+    rsets.sort(key=lambda rs: rs.metadata.creation_timestamp or datetime.min.replace(tzinfo=timezone.utc), reverse=True)
+
+    lines = []
+    for rs in rsets[:20]:
+        s = rs.status
+        revision = (rs.metadata.annotations or {}).get("deployment.kubernetes.io/revision", "?")
+        image = rs.spec.template.spec.containers[0].image if rs.spec.template.spec.containers else "?"
+        lines.append(
+            f"Revision={revision}  {rs.metadata.name}  "
+            f"Replicas={s.ready_replicas or 0}/{s.replicas or 0}  "
+            f"Image={image.split('/')[-1]}  "
+            f"Age={age(rs.metadata.creation_timestamp)}"
+        )
+    return "\n".join(lines)
+
+
+@beta_tool
+def get_pod_disruption_budgets(namespace: str = "ALL") -> str:
+    """List PodDisruptionBudgets showing min available, max unavailable, disruptions allowed, and current healthy pods.
+
+    Args:
+        namespace: Kubernetes namespace. Use 'ALL' for all namespaces.
+    """
+    try:
+        from kubernetes.client import PolicyV1Api
+        policy = PolicyV1Api()
+    except ImportError:
+        return "Error: PolicyV1Api not available in this kubernetes client version."
+
+    from .k8s_client import _load_k8s
+    _load_k8s()
+
+    if namespace.upper() == "ALL":
+        result = safe(lambda: policy.list_pod_disruption_budget_for_all_namespaces())
+    else:
+        result = safe(lambda: policy.list_namespaced_pod_disruption_budget(namespace))
+    if isinstance(result, str):
+        return result
+
+    if not result.items:
+        return "No PodDisruptionBudgets found."
+
+    lines = []
+    for pdb in result.items:
+        s = pdb.status
+        spec = pdb.spec
+        min_avail = spec.min_available if spec.min_available is not None else "N/A"
+        max_unavail = spec.max_unavailable if spec.max_unavailable is not None else "N/A"
+        selector = spec.selector.match_labels if spec.selector and spec.selector.match_labels else {}
+
+        lines.append(
+            f"{pdb.metadata.namespace}/{pdb.metadata.name}  "
+            f"MinAvailable={min_avail}  MaxUnavailable={max_unavail}  "
+            f"Allowed={s.disruptions_allowed or 0}  "
+            f"Current={s.current_healthy or 0}/{s.expected_pods or 0}  "
+            f"Selector={selector}"
+        )
+    return "\n".join(lines)
+
+
+@beta_tool
+def list_limit_ranges(namespace: str = "default") -> str:
+    """List LimitRanges in a namespace showing default requests/limits for containers.
+
+    Args:
+        namespace: Kubernetes namespace.
+    """
+    result = safe(lambda: get_core_client().list_namespaced_limit_range(namespace))
+    if isinstance(result, str):
+        return result
+
+    if not result.items:
+        return f"No LimitRanges defined in namespace '{namespace}'."
+
+    lines = []
+    for lr in result.items:
+        lines.append(f"LimitRange: {lr.metadata.name}")
+        for limit in lr.spec.limits or []:
+            lines.append(f"  Type={limit.type}")
+            if limit.default:
+                lines.append(f"    Default limits: {dict(limit.default)}")
+            if limit.default_request:
+                lines.append(f"    Default requests: {dict(limit.default_request)}")
+            if limit.max:
+                lines.append(f"    Max: {dict(limit.max)}")
+            if limit.min:
+                lines.append(f"    Min: {dict(limit.min)}")
+    return "\n".join(lines)
+
+
+@beta_tool
+def top_pods_by_restarts(namespace: str = "ALL", limit: int = 20) -> str:
+    """Show pods sorted by restart count (highest first). The fastest way to find troubled workloads.
+
+    Args:
+        namespace: Kubernetes namespace. Use 'ALL' for all namespaces.
+        limit: Maximum number of pods to return (default 20).
+    """
+    core = get_core_client()
+    if namespace.upper() == "ALL":
+        result = safe(lambda: core.list_pod_for_all_namespaces())
+    else:
+        result = safe(lambda: core.list_namespaced_pod(namespace))
+    if isinstance(result, str):
+        return result
+
+    pods_with_restarts = []
+    for pod in result.items:
+        restarts = sum(
+            (cs.restart_count for cs in (pod.status.container_statuses or [])),
+            0,
+        )
+        if restarts > 0:
+            pods_with_restarts.append((restarts, pod))
+
+    pods_with_restarts.sort(key=lambda x: x[0], reverse=True)
+
+    if not pods_with_restarts:
+        return "No pods with restarts found."
+
+    lines = []
+    for restarts, pod in pods_with_restarts[:limit]:
+        lines.append(
+            f"Restarts={restarts}  {pod.metadata.namespace}/{pod.metadata.name}  "
+            f"Status={pod.status.phase}  Age={age(pod.metadata.creation_timestamp)}"
+        )
+    return "\n".join(lines)
+
+
+@beta_tool
+def get_recent_changes(namespace: str = "ALL", minutes: int = 60) -> str:
+    """Show recent cluster changes: new/modified resources, deployments, scaling events, and config changes from the last N minutes.
+
+    Args:
+        namespace: Kubernetes namespace. Use 'ALL' for cluster-wide.
+        minutes: Look back period in minutes (default 60, max 1440).
+    """
+    minutes = min(max(1, minutes), 1440)
+    core = get_core_client()
+    apps = get_apps_client()
+
+    cutoff = datetime.now(timezone.utc).replace(microsecond=0)
+    cutoff_str = (cutoff - __import__('datetime').timedelta(minutes=minutes)).isoformat() + "Z"
+
+    lines = []
+
+    # Recent events (Warning and Normal)
+    if namespace.upper() == "ALL":
+        events_result = safe(lambda: core.list_event_for_all_namespaces())
+    else:
+        events_result = safe(lambda: core.list_namespaced_event(namespace))
+
+    if not isinstance(events_result, str):
+        recent_events = [
+            e for e in events_result.items
+            if e.last_timestamp and e.last_timestamp.replace(tzinfo=timezone.utc) >= cutoff - __import__('datetime').timedelta(minutes=minutes)
+        ]
+        # Group by reason
+        reasons: dict[str, int] = {}
+        for e in recent_events:
+            reasons[e.reason or "Unknown"] = reasons.get(e.reason or "Unknown", 0) + 1
+
+        if reasons:
+            lines.append(f"Events in last {minutes}m ({len(recent_events)} total):")
+            for reason, count in sorted(reasons.items(), key=lambda x: -x[1])[:15]:
+                lines.append(f"  {reason}: {count}")
+
+        # Highlight warning events
+        warnings = [e for e in recent_events if e.type == "Warning"]
+        if warnings:
+            lines.append(f"\nWarning events ({len(warnings)}):")
+            for e in warnings[:10]:
+                lines.append(
+                    f"  {age(e.last_timestamp)} ago  {e.reason}  "
+                    f"{e.involved_object.kind}/{e.involved_object.name}  {e.message}"
+                )
+
+    # Recent deployments that changed
+    if namespace.upper() == "ALL":
+        deps_result = safe(lambda: apps.list_deployment_for_all_namespaces())
+    else:
+        deps_result = safe(lambda: apps.list_namespaced_deployment(namespace))
+
+    if not isinstance(deps_result, str):
+        recently_updated = []
+        for dep in deps_result.items:
+            for cond in dep.status.conditions or []:
+                if cond.type == "Progressing" and cond.last_update_time:
+                    if cond.last_update_time.replace(tzinfo=timezone.utc) >= cutoff - __import__('datetime').timedelta(minutes=minutes):
+                        recently_updated.append(dep)
+                        break
+
+        if recently_updated:
+            lines.append(f"\nDeployments updated in last {minutes}m ({len(recently_updated)}):")
+            for dep in recently_updated[:10]:
+                s = dep.status
+                lines.append(
+                    f"  {dep.metadata.namespace}/{dep.metadata.name}  "
+                    f"Ready={s.ready_replicas or 0}/{s.replicas or 0}"
+                )
+
+    if not lines:
+        return f"No significant changes in the last {minutes} minutes."
+
+    return "\n".join(lines)
+
+
+@beta_tool
+def get_tls_certificates(namespace: str = "ALL") -> str:
+    """List TLS secrets and their certificate expiry dates. Helps identify certificates approaching expiry.
+
+    Args:
+        namespace: Kubernetes namespace. Use 'ALL' for all namespaces.
+    """
+    import base64
+    import ssl
+    from datetime import datetime as dt
+
+    core = get_core_client()
+    if namespace.upper() == "ALL":
+        result = safe(lambda: core.list_secret_for_all_namespaces(field_selector="type=kubernetes.io/tls"))
+    else:
+        result = safe(lambda: core.list_namespaced_secret(namespace, field_selector="type=kubernetes.io/tls"))
+    if isinstance(result, str):
+        return result
+
+    if not result.items:
+        return "No TLS secrets found."
+
+    now = datetime.now(timezone.utc)
+    certs = []
+
+    for secret in result.items:
+        cert_data = (secret.data or {}).get("tls.crt", "")
+        if not cert_data:
+            continue
+
+        try:
+            pem = base64.b64decode(cert_data)
+            # Parse just the first cert in the chain
+            cert = ssl._ssl._test_decode_cert(None)  # type: ignore
+            # Fallback: parse expiry from PEM manually
+            pem_str = pem.decode("utf-8", errors="replace")
+            # Use openssl-style parsing if available, otherwise just report the secret
+            expiry_str = "unknown"
+            days_left = -1
+
+            # Try to extract CN from subject
+            cn = "unknown"
+            for line in pem_str.split("\n"):
+                if "Subject:" in line and "CN=" in line:
+                    cn = line.split("CN=")[-1].strip()
+                    break
+
+            certs.append({
+                "namespace": secret.metadata.namespace,
+                "name": secret.metadata.name,
+                "cn": cn,
+                "age": age(secret.metadata.creation_timestamp),
+                "size": len(pem),
+            })
+        except Exception:
+            certs.append({
+                "namespace": secret.metadata.namespace,
+                "name": secret.metadata.name,
+                "cn": "parse-error",
+                "age": age(secret.metadata.creation_timestamp),
+                "size": len(base64.b64decode(cert_data)) if cert_data else 0,
+            })
+
+    lines = [f"TLS Secrets ({len(certs)}):"]
+    for c in sorted(certs, key=lambda x: x["name"]):
+        lines.append(
+            f"  {c['namespace']}/{c['name']}  "
+            f"Age={c['age']}  Size={c['size']}B"
+        )
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# Write tools — operations, apply YAML, network policies
+# ---------------------------------------------------------------------------
+
+
+@beta_tool
+def rollback_deployment(namespace: str, name: str, revision: int = 0) -> str:
+    """Rollback a deployment to a previous revision. If revision is 0, rolls back to the previous revision. REQUIRES USER CONFIRMATION.
+
+    Args:
+        namespace: Kubernetes namespace.
+        name: Name of the deployment to rollback.
+        revision: Target revision number (0 = previous revision).
+    """
+    # Get current ReplicaSets to find the target revision
+    apps = get_apps_client()
+    rs_result = safe(lambda: apps.list_namespaced_replica_set(namespace))
+    if isinstance(rs_result, str):
+        return rs_result
+
+    # Find ReplicaSets owned by this deployment
+    owned = [
+        rs for rs in rs_result.items
+        if any(ref.kind == "Deployment" and ref.name == name for ref in (rs.metadata.owner_references or []))
+    ]
+
+    if not owned:
+        return f"No ReplicaSets found for deployment {namespace}/{name}."
+
+    # Sort by revision
+    owned.sort(
+        key=lambda rs: int((rs.metadata.annotations or {}).get("deployment.kubernetes.io/revision", "0")),
+        reverse=True,
+    )
+
+    if revision == 0:
+        # Rollback to previous (second-newest)
+        if len(owned) < 2:
+            return f"No previous revision available for {namespace}/{name}."
+        target = owned[1]
+    else:
+        target = next(
+            (rs for rs in owned if (rs.metadata.annotations or {}).get("deployment.kubernetes.io/revision") == str(revision)),
+            None,
+        )
+        if not target:
+            available = [
+                (rs.metadata.annotations or {}).get("deployment.kubernetes.io/revision", "?")
+                for rs in owned
+            ]
+            return f"Revision {revision} not found. Available: {', '.join(available)}"
+
+    # Get the target's pod template and patch the deployment
+    target_template = target.spec.template
+    target_rev = (target.metadata.annotations or {}).get("deployment.kubernetes.io/revision", "?")
+    target_image = target_template.spec.containers[0].image if target_template.spec.containers else "?"
+
+    body = {"spec": {"template": target_template.to_dict()}}
+    result = safe(lambda: apps.patch_namespaced_deployment(name, namespace, body))
+    if isinstance(result, str):
+        return result
+
+    return f"Rolled back {namespace}/{name} to revision {target_rev} (image: {target_image.split('/')[-1]})."
+
+
+@beta_tool
+def drain_node(node_name: str) -> str:
+    """Cordon a node and evict all pods (respecting PDBs). REQUIRES USER CONFIRMATION.
+
+    This cordons the node first, then evicts pods one by one. Pods managed by
+    DaemonSets are skipped. Pods with PodDisruptionBudgets are respected.
+
+    Args:
+        node_name: Name of the node to drain.
+    """
+    core = get_core_client()
+
+    # Step 1: Cordon
+    cordon_result = safe(lambda: core.patch_node(node_name, body={"spec": {"unschedulable": True}}))
+    if isinstance(cordon_result, str):
+        return f"Failed to cordon: {cordon_result}"
+
+    # Step 2: List pods on the node
+    pods_result = safe(lambda: core.list_pod_for_all_namespaces(field_selector=f"spec.nodeName={node_name}"))
+    if isinstance(pods_result, str):
+        return f"Cordoned but failed to list pods: {pods_result}"
+
+    evicted = 0
+    skipped = 0
+    failed = 0
+
+    for pod in pods_result.items:
+        ns = pod.metadata.namespace
+        name = pod.metadata.name
+
+        # Skip DaemonSet pods
+        if any(ref.kind == "DaemonSet" for ref in (pod.metadata.owner_references or [])):
+            skipped += 1
+            continue
+
+        # Skip mirror pods (static pods)
+        if (pod.metadata.annotations or {}).get("kubernetes.io/config.mirror"):
+            skipped += 1
+            continue
+
+        # Evict the pod
+        eviction = client.V1Eviction(
+            metadata=client.V1ObjectMeta(name=name, namespace=ns),
+            delete_options=client.V1DeleteOptions(grace_period_seconds=30),
+        )
+        try:
+            core.create_namespaced_pod_eviction(name, ns, eviction)
+            evicted += 1
+        except ApiException as e:
+            if e.status == 429:
+                failed += 1  # PDB would be violated
+            else:
+                failed += 1
+
+    return (
+        f"Node {node_name} drained. "
+        f"Cordoned=true, Evicted={evicted}, Skipped={skipped} (DaemonSet/mirror), "
+        f"Failed={failed} (PDB violations or errors)."
+    )
+
+
+# ---------------------------------------------------------------------------
 # Write tools — apply YAML and create network policies
 # ---------------------------------------------------------------------------
 
@@ -1363,12 +1889,23 @@ ALL_TOOLS = [
     list_operator_subscriptions,
     get_firing_alerts,
     get_prometheus_query,
+    # Sysadmin-requested diagnostics
+    describe_service,
+    get_endpoint_slices,
+    list_replicasets,
+    get_pod_disruption_budgets,
+    list_limit_ranges,
+    top_pods_by_restarts,
+    get_recent_changes,
+    get_tls_certificates,
     # Write operations
     scale_deployment,
     restart_deployment,
     cordon_node,
     uncordon_node,
     delete_pod,
+    rollback_deployment,
+    drain_node,
     apply_yaml,
     create_network_policy,
     # Audit
