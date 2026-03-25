@@ -18,6 +18,9 @@ _SRE_READ_TOOL_NAMES = {
     "get_cluster_operators", "get_configmap",
     "list_statefulsets", "list_daemonsets", "list_ingresses", "list_routes",
     "list_hpas", "list_operator_subscriptions", "get_firing_alerts",
+    "describe_service", "get_endpoint_slices", "get_pod_disruption_budgets",
+    "list_limit_ranges", "get_tls_certificates", "get_pod_metrics",
+    "get_node_metrics", "get_prometheus_query",
 }
 _READ_TOOLS = [t for t in SRE_TOOLS if t.name in _SRE_READ_TOOL_NAMES]
 

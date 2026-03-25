@@ -20,7 +20,24 @@ rules:
       - persistentvolumeclaims
       - resourcequotas
       - serviceaccounts
+      - endpoints
+      - limitranges
     verbs: ["get", "list", "watch"]
+  # EndpointSlices
+  - apiGroups: ["discovery.k8s.io"]
+    resources:
+      - endpointslices
+    verbs: ["get", "list"]
+  # PodDisruptionBudgets
+  - apiGroups: ["policy"]
+    resources:
+      - poddisruptionbudgets
+    verbs: ["get", "list"]
+  # Pod eviction (for drain_node)
+  - apiGroups: [""]
+    resources:
+      - pods/eviction
+    verbs: ["create"]
   # RBAC read access (security scanning)
   - apiGroups: ["rbac.authorization.k8s.io"]
     resources:
