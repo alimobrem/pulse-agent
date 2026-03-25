@@ -247,94 +247,116 @@ async def websocket_agent(websocket: WebSocket, mode: str):
         tool_map = SEC_TOOL_MAP
         write_tools = set()
 
+    # Message queue for incoming messages while agent is running
+    incoming: asyncio.Queue = asyncio.Queue()
+    agent_running = False
+
+    async def _receive_loop():
+        """Receive messages from the WebSocket and route them."""
+        nonlocal agent_running
+        try:
+            while True:
+                raw = await websocket.receive_text()
+                if len(raw) > MAX_MESSAGE_SIZE:
+                    await websocket.send_json({"type": "error", "message": "Message too large"})
+                    continue
+                try:
+                    data = json.loads(raw)
+                except json.JSONDecodeError:
+                    await websocket.send_json({"type": "error", "message": "Invalid JSON"})
+                    continue
+
+                msg_type = data.get("type")
+
+                # Confirm responses are handled immediately (even while agent runs)
+                if msg_type == "confirm_response":
+                    future = _pending_confirms.get(ws_id)
+                    if future and not future.done():
+                        future.get_loop().call_soon_threadsafe(
+                            future.set_result, data.get("approved", False)
+                        )
+                    continue
+
+                if msg_type == "clear":
+                    messages.clear()
+                    await websocket.send_json({"type": "cleared"})
+                    continue
+
+                # Queue other messages for the main loop
+                await incoming.put(data)
+        except WebSocketDisconnect:
+            await incoming.put(None)  # Signal disconnect
+        except Exception:
+            await incoming.put(None)
+
+    # Start the receive loop as a concurrent task
+    receive_task = asyncio.create_task(_receive_loop())
+
     try:
         while True:
-            raw = await websocket.receive_text()
-
-            # Guard against oversized messages
-            if len(raw) > MAX_MESSAGE_SIZE:
-                await websocket.send_json({"type": "error", "message": "Message too large"})
-                continue
-
-            try:
-                data = json.loads(raw)
-            except json.JSONDecodeError:
-                await websocket.send_json({"type": "error", "message": "Invalid JSON"})
-                continue
+            data = await incoming.get()
+            if data is None:
+                break  # Client disconnected
 
             msg_type = data.get("type")
-
-            if msg_type == "clear":
-                messages.clear()
-                await websocket.send_json({"type": "cleared"})
+            if msg_type != "message":
                 continue
 
-            if msg_type == "confirm_response":
-                future = _pending_confirms.get(ws_id)
-                if future and not future.done():
-                    future.get_loop().call_soon_threadsafe(
-                        future.set_result, data.get("approved", False)
+            # Rate limiting
+            now = time.time()
+            message_timestamps[:] = [t for t in message_timestamps if now - t < 60]
+            if len(message_timestamps) >= MAX_MESSAGES_PER_MINUTE:
+                await websocket.send_json({"type": "error", "message": "Rate limited. Max 10 messages per minute."})
+                continue
+            message_timestamps.append(now)
+
+            content = data.get("content", "").strip()
+            if not content:
+                continue
+
+            # Context from Pulse UI — ensures namespace/resource are explicit
+            context = data.get("context")
+            if context and isinstance(context, dict):
+                kind = _sanitize_context_field(context.get("kind", ""))
+                ns = _sanitize_context_field(context.get("namespace", ""))
+                name = _sanitize_context_field(context.get("name", ""))
+                if kind or name or ns:
+                    context_parts = []
+                    if kind and name:
+                        context_parts.append(f"Resource: {kind}/{name}")
+                    elif name:
+                        context_parts.append(f"Resource: {name}")
+                    if ns:
+                        context_parts.append(f"Namespace: {ns}")
+                    context_str = ", ".join(context_parts)
+                    content = (
+                        f"[UI Context: {context_str}]\n"
+                        f"IMPORTANT: Use namespace='{ns}' for any operations on this resource. "
+                        f"Do NOT default to 'default' namespace.\n\n{content}"
                     )
-                continue
 
-            if msg_type == "message":
-                # Rate limiting
-                now = time.time()
-                message_timestamps[:] = [t for t in message_timestamps if now - t < 60]
-                if len(message_timestamps) >= MAX_MESSAGES_PER_MINUTE:
-                    await websocket.send_json({"type": "error", "message": "Rate limited. Max 10 messages per minute."})
-                    continue
-                message_timestamps.append(now)
+            messages.append({"role": "user", "content": content})
 
-                content = data.get("content", "").strip()
-                if not content:
-                    continue
+            try:
+                full_response = await _run_agent_ws(
+                    websocket, messages, system_prompt,
+                    tool_defs, tool_map, write_tools,
+                )
+                messages.append({"role": "assistant", "content": full_response})
+                await websocket.send_json({
+                    "type": "done",
+                    "full_response": full_response,
+                })
+            except Exception as e:
+                logger.exception("Agent error")
+                messages.pop()
+                await websocket.send_json({
+                    "type": "error",
+                    "message": "Agent encountered an error. Please try again.",
+                })
 
-                # Context from Pulse UI — ensures namespace/resource are explicit
-                context = data.get("context")
-                if context and isinstance(context, dict):
-                    kind = _sanitize_context_field(context.get("kind", ""))
-                    ns = _sanitize_context_field(context.get("namespace", ""))
-                    name = _sanitize_context_field(context.get("name", ""))
-                    if kind or name or ns:
-                        context_parts = []
-                        if kind and name:
-                            context_parts.append(f"Resource: {kind}/{name}")
-                        elif name:
-                            context_parts.append(f"Resource: {name}")
-                        if ns:
-                            context_parts.append(f"Namespace: {ns}")
-                        context_str = ", ".join(context_parts)
-                        content = (
-                            f"[UI Context: {context_str}]\n"
-                            f"IMPORTANT: Use namespace='{ns}' for any operations on this resource. "
-                            f"Do NOT default to 'default' namespace.\n\n{content}"
-                        )
-
-                messages.append({"role": "user", "content": content})
-
-                try:
-                    full_response = await _run_agent_ws(
-                        websocket, messages, system_prompt,
-                        tool_defs, tool_map, write_tools,
-                    )
-                    messages.append({"role": "assistant", "content": full_response})
-                    await websocket.send_json({
-                        "type": "done",
-                        "full_response": full_response,
-                    })
-                except Exception as e:
-                    logger.exception("Agent error")
-                    messages.pop()  # Remove failed user message
-                    await websocket.send_json({
-                        "type": "error",
-                        "message": "Agent encountered an error. Please try again.",
-                    })
-                continue
-
-    except WebSocketDisconnect:
-        logger.info("Client disconnected")
     except Exception:
         logger.exception("WebSocket error")
     finally:
+        receive_task.cancel()
         _pending_confirms.pop(ws_id, None)
