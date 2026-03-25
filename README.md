@@ -1,8 +1,15 @@
 # Pulse Agent
 
+<p>
+  <a href="https://github.com/alimobrem/pulse-agent/releases/tag/v1.0.0"><img src="https://img.shields.io/badge/release-v1.0.0-2563eb?style=for-the-badge" alt="Version"></a>
+  <img src="https://img.shields.io/badge/tools-54-10b981?style=for-the-badge" alt="Tools">
+  <img src="https://img.shields.io/badge/tests-152-10b981?style=for-the-badge" alt="Tests">
+  <img src="https://img.shields.io/badge/license-MIT-6366f1?style=for-the-badge" alt="License">
+</p>
+
 AI-powered OpenShift/Kubernetes SRE and Security Agent built on Claude.
 
-Pulse Agent connects directly to your cluster's Kubernetes API and uses Claude Opus to diagnose issues, triage incidents, manage resources, execute runbooks, and perform security audits — all through a conversational interface. It learns from past interactions to get smarter over time.
+Pulse Agent connects directly to your cluster's Kubernetes API and uses Claude Opus to diagnose issues, triage incidents, manage resources, execute runbooks, and perform security audits — all through a conversational interface. Integrates with [OpenShift Pulse](https://github.com/alimobrem/OpenshiftPulse) for rich UI rendering, or runs standalone as a CLI.
 
 ## Features
 
@@ -73,6 +80,10 @@ export ANTHROPIC_API_KEY=sk-ant-...
 | `PULSE_AGENT_MEMORY` | Enable self-improving memory (`1`/`true`) | disabled |
 | `PULSE_AGENT_MEMORY_PATH` | SQLite database path | `~/.pulse_agent/memory.db` |
 | `PULSE_AGENT_TRUSTED_REGISTRIES` | Comma-separated trusted image registry prefixes | Red Hat, Quay, OpenShift |
+| `PULSE_AGENT_HARNESS` | Enable Claude harness optimizations | `1` (enabled) |
+| `PULSE_AGENT_WS_TOKEN` | WebSocket authentication token (required for API mode) | |
+| `PULSE_AGENT_CB_THRESHOLD` | Circuit breaker failure threshold | `3` |
+| `PULSE_AGENT_CB_TIMEOUT` | Circuit breaker recovery timeout (seconds) | `60` |
 
 ### Run
 
@@ -209,6 +220,83 @@ PULSE_AGENT_MEMORY=1 python -m sre_agent.main
 | Safety | 20% | 0 rejected tool calls |
 | Speed | 10% | Under 60 seconds |
 
+## Claude Harness
+
+Built-in optimizations for getting the most out of Claude (`PULSE_AGENT_HARNESS=1`, on by default):
+
+| Feature | What It Does | Impact |
+|---------|-------------|--------|
+| **Dynamic Tool Selection** | Categorizes 54 tools into 8 groups, loads only relevant ones per query | 54→15-25 tools, faster + cheaper |
+| **Prompt Caching** | Marks system prompt + runbooks with `cache_control: ephemeral` | ~90% cost reduction on context |
+| **Cluster Context Injection** | Pre-fetches node count, namespaces, OCP version, failing pods, firing alerts | Saves 2-3 tool calls per query |
+| **Component Rendering Hints** | Guides Claude to focus on analysis, not data formatting | Cleaner responses |
+
+### Tool Categories
+
+| Category | Keywords | Example Tools |
+|----------|----------|---------------|
+| diagnostics | health, crash, error, failing | list_pods, get_events, get_firing_alerts |
+| workloads | deploy, scale, rollback, job | list_deployments, scale_deployment, list_jobs |
+| networking | service, route, dns, ingress | describe_service, list_routes, get_endpoint_slices |
+| security | rbac, scc, audit, privilege | scan_pod_security, scan_rbac_risks |
+| storage | pvc, volume, disk | get_persistent_volume_claims, get_resource_quotas |
+| monitoring | metric, prometheus, alert, cpu | get_prometheus_query, get_pod_metrics |
+| operations | drain, cordon, apply, yaml | drain_node, apply_yaml, cordon_node |
+| gitops | git, argo, drift, pr | detect_gitops_drift, propose_git_change |
+
+## WebSocket API
+
+The agent exposes a WebSocket API for integration with web UIs.
+
+```bash
+pulse-agent-api  # Starts on port 8080
+```
+
+### Endpoints
+
+| Endpoint | Description |
+|----------|-------------|
+| `GET /healthz` | Health check |
+| `GET /version` | Protocol version, tool count, features |
+| `GET /tools` | List all available tools |
+| `WS /ws/sre?token=...` | SRE agent WebSocket |
+| `WS /ws/security?token=...` | Security scanner WebSocket |
+
+### WebSocket Protocol
+
+**Client → Server:**
+- `{"type": "message", "content": "...", "context": {"kind": "Pod", "name": "...", "namespace": "..."}}`
+- `{"type": "confirm_response", "approved": true}`
+- `{"type": "clear"}`
+
+**Server → Client:**
+- `{"type": "text_delta", "text": "..."}` — Streaming text
+- `{"type": "thinking_delta", "thinking": "..."}` — Agent reasoning
+- `{"type": "tool_use", "tool": "..."}` — Tool invocation
+- `{"type": "component", "spec": {...}, "tool": "..."}` — Rich UI component
+- `{"type": "confirm_request", "tool": "...", "input": {...}}` — Write op confirmation
+- `{"type": "done", "full_response": "..."}` — Turn complete
+- `{"type": "error", "message": "..."}` — Error
+
+### Component Specs
+
+Tools can return structured UI specs alongside text. The [Pulse UI](https://github.com/alimobrem/OpenshiftPulse) renders these as interactive tables, charts, and cards inline in the chat.
+
+```python
+# Tool returns (text_for_claude, component_spec_for_ui)
+return (text, {"kind": "data_table", "title": "Pods", "columns": [...], "rows": [...]})
+```
+
+Supported: `data_table`, `info_card_grid`, `badge_list`, `status_list`, `key_value`, `chart`.
+
+## Compatibility
+
+| Pulse Agent | OpenShift Pulse UI | Protocol |
+|------------|-------------------|----------|
+| v1.0.0 | v5.3.0+ | 1 |
+
+The `/version` endpoint returns the protocol version. The UI checks this on connect and warns on mismatch.
+
 ## Deploy to Cluster
 
 ### Build Image
@@ -257,8 +345,9 @@ sre_agent/
 ├── agent.py             # Shared agent loop, Claude API client, audit logging
 ├── security_agent.py    # Security scanner (read-only, delegates to shared loop)
 ├── k8s_client.py        # Shared Kubernetes client with lazy initialization
-├── k8s_tools.py         # 35 Kubernetes/OpenShift tools (@beta_tool)
+├── k8s_tools.py         # 35+ Kubernetes/OpenShift tools (@beta_tool)
 ├── security_tools.py    # 9 security scanning tools (@beta_tool)
+├── harness.py           # Claude harness: tool selection, prompt caching, cluster context
 ├── units.py             # Kubernetes resource unit parsing (CPU, memory)
 ├── runbooks.py          # Built-in SRE runbooks and alert triage context
 └── memory/              # Self-improving agent layer
@@ -275,10 +364,11 @@ chart/                   # Helm chart
 ├── values.yaml
 └── templates/
     ├── deployment.yaml          # Pod with security context + health probes
+    ├── service.yaml             # ClusterIP on port 8080
     ├── serviceaccount.yaml
-    ├── clusterrole.yaml         # Least-privilege RBAC
+    ├── clusterrole.yaml         # Least-privilege RBAC (no wildcards)
     ├── clusterrolebinding.yaml
-    └── networkpolicy.yaml       # Egress-only (DNS + HTTPS)
+    └── networkpolicy.yaml       # Ingress on 8080, egress DNS + HTTPS
 ```
 
 ## Testing
@@ -290,6 +380,16 @@ python -m pytest tests/ -v
 
 152 tests covering all tools, agent loop safety mechanisms, unit parsing, and the memory system. All tests run without a cluster or API key (fully mocked).
 
-## License
+---
 
-MIT
+<p align="center">
+  <strong>54 tools</strong> &bull; <strong>10 runbooks</strong> &bull; <strong>8 tool categories</strong> &bull; <strong>152 tests</strong> &bull; <strong>Protocol v1</strong>
+</p>
+
+<p align="center">
+  <a href="https://github.com/alimobrem/pulse-agent/releases">Releases</a> &bull;
+  <a href="https://github.com/alimobrem/OpenshiftPulse">Pulse UI</a> &bull;
+  <a href="https://github.com/alimobrem/pulse-agent/issues">Issues</a>
+</p>
+
+<p align="center">MIT License</p>
