@@ -289,7 +289,7 @@ def fleet_list_deployments(namespace: str = "default") -> str:
 
 @beta_tool
 def fleet_get_alerts() -> str:
-    """Get firing alerts across ALL managed clusters in the fleet."""
+    """Get firing alerts from the local (hub) cluster. Managed cluster alerts require direct Alertmanager access which is not yet supported."""
     clusters = _get_managed_clusters()
     if not clusters:
         return "No managed clusters found."
@@ -325,15 +325,43 @@ def fleet_get_alerts() -> str:
     return summary
 
 
+# Map kind -> (client_getter, read_method_name) for fleet_compare_resource
+_KIND_READERS: dict[str, tuple[str, str]] = {
+    "deployment": ("apps", "read_namespaced_deployment"),
+    "statefulset": ("apps", "read_namespaced_stateful_set"),
+    "daemonset": ("apps", "read_namespaced_daemon_set"),
+    "configmap": ("core", "read_namespaced_config_map"),
+    "service": ("core", "read_namespaced_service"),
+    "secret": ("core", "read_namespaced_secret"),
+    "serviceaccount": ("core", "read_namespaced_service_account"),
+}
+
+
+def _read_resource(kind: str, name: str, namespace: str, core=None, apps=None):
+    """Read a resource by kind using the appropriate client."""
+    core = core or get_core_client()
+    apps = apps or get_apps_client()
+    clients = {"core": core, "apps": apps}
+
+    reader = _KIND_READERS.get(kind.lower())
+    if reader:
+        client_key, method = reader
+        return getattr(clients[client_key], method)(name, namespace)
+    return f"Unsupported kind for comparison: {kind}. Supported: {', '.join(k.title() for k in _KIND_READERS)}"
+
+
 @beta_tool
 def fleet_compare_resource(kind: str, name: str, namespace: str = "default") -> str:
     """Compare a specific resource across all managed clusters to detect configuration drift.
 
     Args:
-        kind: Resource kind (Deployment, ConfigMap, Service, etc.)
+        kind: Resource kind (Deployment, StatefulSet, DaemonSet, ConfigMap, Service, Secret, ServiceAccount)
         name: Resource name.
         namespace: Kubernetes namespace.
     """
+    if kind.lower() not in _KIND_READERS:
+        return f"Unsupported kind: {kind}. Supported: {', '.join(k.title() for k in _KIND_READERS)}"
+
     clusters = _get_managed_clusters()
     if not clusters:
         return "No managed clusters found."
@@ -342,19 +370,7 @@ def fleet_compare_resource(kind: str, name: str, namespace: str = "default") -> 
 
     # Fetch from local cluster
     try:
-        core = get_core_client()
-        apps = get_apps_client()
-
-        if kind.lower() == "deployment":
-            result = apps.read_namespaced_deployment(name, namespace)
-        elif kind.lower() == "configmap":
-            result = core.read_namespaced_config_map(name, namespace)
-        elif kind.lower() == "service":
-            result = core.read_namespaced_service(name, namespace)
-        else:
-            result = get_custom_client().get_namespaced_custom_object(
-                group="", version="v1", namespace=namespace, plural=f"{kind.lower()}s", name=name
-            )
+        result = _read_resource(kind, name, namespace)
 
         if hasattr(result, "to_dict"):
             resources["local"] = result.to_dict()
@@ -371,17 +387,11 @@ def fleet_compare_resource(kind: str, name: str, namespace: str = "default") -> 
         try:
             proxy_core = _proxy_core_client(cluster["name"])
             proxy_apps = _proxy_apps_client(cluster["name"])
+            result = _read_resource(kind, name, namespace, core=proxy_core, apps=proxy_apps)
 
-            if kind.lower() == "deployment":
-                result = proxy_apps.read_namespaced_deployment(name, namespace)
-            elif kind.lower() == "configmap":
-                result = proxy_core.read_namespaced_config_map(name, namespace)
-            elif kind.lower() == "service":
-                result = proxy_core.read_namespaced_service(name, namespace)
-            else:
-                result = {"error": f"Unsupported kind for fleet comparison: {kind}"}
-
-            if hasattr(result, "to_dict"):
+            if isinstance(result, str):
+                resources[cluster["name"]] = {"error": result}
+            elif hasattr(result, "to_dict"):
                 resources[cluster["name"]] = result.to_dict()
             else:
                 resources[cluster["name"]] = result
