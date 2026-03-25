@@ -1705,6 +1705,15 @@ def apply_yaml(yaml_content: str, namespace: str = "", dry_run: bool = True) -> 
     if not name:
         return "Error: Resource must have metadata.name."
 
+    # Block sensitive resource types to prevent privilege escalation
+    _BLOCKED_KINDS = {
+        "ClusterRole", "ClusterRoleBinding", "Role", "RoleBinding",
+        "Secret", "ServiceAccount", "Pod", "Namespace",
+        "MutatingWebhookConfiguration", "ValidatingWebhookConfiguration",
+    }
+    if kind in _BLOCKED_KINDS:
+        return f"Error: Creating/modifying {kind} resources is not allowed via apply_yaml for security reasons."
+
     # Build API path
     if "/" in api_version:
         group, version = api_version.split("/", 1)

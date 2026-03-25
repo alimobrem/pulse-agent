@@ -50,13 +50,18 @@ def _sanitize_context_field(value: str) -> str:
     if not isinstance(value, str):
         return ""
     if not _SAFE_CONTEXT.match(value):
-        return value[:253].replace('\n', ' ').replace('\r', ' ')
+        return ""  # Strict reject: non-matching values are dropped entirely
     return value
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Verify k8s connectivity on startup."""
+    """Verify k8s connectivity and auth config on startup."""
+    if not os.environ.get("PULSE_AGENT_WS_TOKEN"):
+        logger.critical(
+            "PULSE_AGENT_WS_TOKEN is not set. WebSocket endpoint is UNAUTHENTICATED. "
+            "Set this variable or connections will be rejected."
+        )
     try:
         from .k8s_client import get_core_client
         get_core_client().list_namespace(limit=1)
@@ -196,13 +201,16 @@ async def websocket_agent(websocket: WebSocket, mode: str):
         await websocket.close(code=4000, reason="Invalid mode. Use 'sre' or 'security'.")
         return
 
-    # Token authentication
+    # Token authentication — mandatory unless explicitly disabled
+    import hmac
     expected_token = os.environ.get("PULSE_AGENT_WS_TOKEN", "")
-    if expected_token:
-        client_token = websocket.query_params.get("token", "")
-        if client_token != expected_token:
-            await websocket.close(code=4001, reason="Unauthorized. Invalid or missing token.")
-            return
+    if not expected_token:
+        await websocket.close(code=4001, reason="Server not configured. PULSE_AGENT_WS_TOKEN is required.")
+        return
+    client_token = websocket.query_params.get("token", "")
+    if not hmac.compare_digest(client_token, expected_token):
+        await websocket.close(code=4001, reason="Unauthorized. Invalid or missing token.")
+        return
 
     await websocket.accept()
     ws_id = id(websocket)

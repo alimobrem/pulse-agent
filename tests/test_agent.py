@@ -226,7 +226,10 @@ class TestIterationGuard:
 
 class TestWriteToolSet:
     def test_all_write_tools_accounted_for(self):
-        assert WRITE_TOOLS == {"scale_deployment", "restart_deployment", "cordon_node", "uncordon_node", "delete_pod", "apply_yaml", "create_network_policy"}
+        expected = {"scale_deployment", "restart_deployment", "cordon_node", "uncordon_node",
+                    "delete_pod", "apply_yaml", "create_network_policy",
+                    "rollback_deployment", "drain_node"}
+        assert WRITE_TOOLS == expected
 
     def test_read_tools_not_in_write_set(self):
         read_tools = {"list_pods", "list_nodes", "get_events", "describe_pod", "list_namespaces"}
