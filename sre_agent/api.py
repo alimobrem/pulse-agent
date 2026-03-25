@@ -79,9 +79,22 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="Pulse Agent API", version="0.2.0", lifespan=lifespan)
 
 
+PROTOCOL_VERSION = "1"
+
 @app.get("/healthz")
 async def healthz():
     return {"status": "ok"}
+
+
+@app.get("/version")
+async def version():
+    """API protocol version. UI checks this on connect to detect mismatches."""
+    return {
+        "protocol": PROTOCOL_VERSION,
+        "agent": "0.3.0",
+        "tools": len(SRE_ALL_TOOLS) + len(SEC_ALL_TOOLS),
+        "features": ["component_specs", "ws_token_auth", "rate_limiting"],
+    }
 
 
 @app.get("/tools")
