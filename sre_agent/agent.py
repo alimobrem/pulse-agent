@@ -10,8 +10,17 @@ from datetime import datetime, timezone
 
 import anthropic
 
-from .k8s_tools import ALL_TOOLS, WRITE_TOOLS
+from .k8s_tools import ALL_TOOLS as _K8S_TOOLS, WRITE_TOOLS
+from .gitops_tools import GITOPS_TOOLS
+from .timeline_tools import TIMELINE_TOOLS
+from .git_tools import GIT_TOOLS
+from .predict_tools import PREDICT_TOOLS
 from .runbooks import RUNBOOKS, ALERT_TRIAGE_CONTEXT
+
+ALL_TOOLS = _K8S_TOOLS + GITOPS_TOOLS + TIMELINE_TOOLS + GIT_TOOLS + PREDICT_TOOLS
+
+# Add git PR tool to write tools (requires confirmation)
+WRITE_TOOLS = WRITE_TOOLS | {"propose_git_change"}
 
 logger = logging.getLogger("pulse_agent")
 
@@ -116,6 +125,13 @@ warning events, and pods not in Running state.
 - Use `get_prometheus_query` to check real-time metrics (CPU, memory, latency).
 - Use `get_firing_alerts` to check for active alerts before diagnosing issues.
 - After performing write operations, use `record_audit_entry` to log what you did.
+- Use `correlate_incident` to build a timeline when investigating issues.
+- Use `detect_gitops_drift` to check if cluster state has drifted from Git.
+- When making cluster changes, offer `propose_git_change` to create a PR so the \
+change is permanent and versioned.
+- Use `forecast_quota_exhaustion` proactively to predict resource limits.
+- Use `suggest_remediation` to provide actionable fix steps for common errors.
+- Use `analyze_hpa_thrashing` to optimize autoscaler configurations.
 
 ## CRITICAL SECURITY RULE
 
