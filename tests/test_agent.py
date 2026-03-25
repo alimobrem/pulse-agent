@@ -64,21 +64,32 @@ class TestExecuteTool:
         tool = MagicMock()
         tool.call.return_value = "result data"
         tool_map = {"my_tool": tool}
-        result = _execute_tool("my_tool", {"arg": "val"}, tool_map)
-        assert result == "result data"
+        text, component = _execute_tool("my_tool", {"arg": "val"}, tool_map)
+        assert text == "result data"
+        assert component is None
         tool.call.assert_called_once_with({"arg": "val"})
 
+    def test_success_with_component(self):
+        tool = MagicMock()
+        tool.call.return_value = ("result data", {"kind": "data_table"})
+        tool_map = {"my_tool": tool}
+        text, component = _execute_tool("my_tool", {}, tool_map)
+        assert text == "result data"
+        assert component == {"kind": "data_table"}
+
     def test_unknown_tool(self):
-        result = _execute_tool("nonexistent", {}, {})
-        assert "unknown tool" in result
+        text, component = _execute_tool("nonexistent", {}, {})
+        assert "unknown tool" in text
+        assert component is None
 
     def test_exception_returns_type_only(self):
         tool = MagicMock()
         tool.call.side_effect = ValueError("secret details here")
         tool_map = {"bad_tool": tool}
-        result = _execute_tool("bad_tool", {}, tool_map)
-        assert "ValueError" in result
-        assert "secret details" not in result
+        text, component = _execute_tool("bad_tool", {}, tool_map)
+        assert "ValueError" in text
+        assert "secret details" not in text
+        assert component is None
 
 
 class TestConfirmationGate:

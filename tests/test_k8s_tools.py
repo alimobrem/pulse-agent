@@ -69,13 +69,18 @@ class TestListNamespaces:
         assert "Error (403)" in result
 
 
+def _text(result):
+    """Extract text from tool result (handles both str and (str, component) tuple)."""
+    return result[0] if isinstance(result, tuple) else result
+
+
 class TestListPods:
     def test_returns_pods(self, mock_k8s):
         mock_k8s["core"].list_namespaced_pod.return_value = _list_result([
             _make_pod("web-1"),
             _make_pod("web-2", restarts=5),
         ])
-        result = list_pods.call({"namespace": "default"})
+        result = _text(list_pods.call({"namespace": "default"}))
         assert "web-1" in result
         assert "web-2" in result
         assert "Restarts=5" in result
@@ -84,7 +89,7 @@ class TestListPods:
         mock_k8s["core"].list_pod_for_all_namespaces.return_value = _list_result([
             _make_pod("pod-a", namespace="ns1"),
         ])
-        result = list_pods.call({"namespace": "ALL"})
+        result = _text(list_pods.call({"namespace": "ALL"}))
         assert "ns1/pod-a" in result
 
     def test_with_selectors(self, mock_k8s):
@@ -165,7 +170,7 @@ class TestGetEvents:
             _make_event(reason="Pulled", message="Pulled image nginx", event_type="Normal"),
             _make_event(reason="BackOff", message="Back-off restarting", event_type="Warning"),
         ])
-        result = get_events.call({"namespace": "default"})
+        result = _text(get_events.call({"namespace": "default"}))
         assert "Pulled" in result
         assert "BackOff" in result
 
@@ -177,7 +182,7 @@ class TestGetEvents:
 
     def test_all_namespaces(self, mock_k8s):
         mock_k8s["core"].list_event_for_all_namespaces.return_value = _list_result([])
-        result = get_events.call({"namespace": "ALL"})
+        result = _text(get_events.call({"namespace": "ALL"}))
         assert "No events found" in result
 
 
@@ -186,7 +191,7 @@ class TestListDeployments:
         mock_k8s["apps"].list_namespaced_deployment.return_value = _list_result([
             _make_deployment("nginx", ready=3),
         ])
-        result = list_deployments.call({"namespace": "default"})
+        result = _text(list_deployments.call({"namespace": "default"}))
         assert "nginx" in result
         assert "Ready=3/3" in result
 
@@ -194,7 +199,7 @@ class TestListDeployments:
         mock_k8s["apps"].list_deployment_for_all_namespaces.return_value = _list_result([
             _make_deployment("api", namespace="prod"),
         ])
-        result = list_deployments.call({"namespace": "ALL"})
+        result = _text(list_deployments.call({"namespace": "ALL"}))
         assert "prod/api" in result
 
 
