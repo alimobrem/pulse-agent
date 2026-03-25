@@ -350,6 +350,16 @@ async def websocket_agent(websocket: WebSocket, mode: str):
             if not content:
                 continue
 
+            # Fleet mode — prefix content with fleet context
+            fleet_mode = data.get("fleet", False)
+            if fleet_mode:
+                content = (
+                    "[FLEET MODE: This query spans all managed clusters. "
+                    "Use fleet_* tools (fleet_list_pods, fleet_list_deployments, fleet_compare_resource, etc.) "
+                    "to query across clusters. Do NOT use single-cluster tools unless the user specifies a cluster.]\n\n"
+                    + content
+                )
+
             # Context from Pulse UI — ensures namespace/resource are explicit
             context = data.get("context")
             if context and isinstance(context, dict):

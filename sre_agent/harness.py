@@ -92,6 +92,14 @@ TOOL_CATEGORIES = {
             "detect_gitops_drift", "propose_git_change",
         ],
     },
+    "fleet": {
+        "keywords": ["fleet", "all clusters", "cross-cluster", "everywhere", "managed cluster",
+                      "multi-cluster", "compare across", "drift across", "acm"],
+        "tools": [
+            "fleet_list_clusters", "fleet_list_pods", "fleet_list_deployments",
+            "fleet_get_alerts", "fleet_compare_resource",
+        ],
+    },
 }
 
 # Tools always included regardless of category

@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 import anthropic
 
 from .k8s_tools import ALL_TOOLS as _K8S_TOOLS, WRITE_TOOLS
+from .fleet_tools import FLEET_TOOLS
 from .gitops_tools import GITOPS_TOOLS
 from .timeline_tools import TIMELINE_TOOLS
 from .git_tools import GIT_TOOLS
@@ -23,7 +24,7 @@ from .harness import (
     COMPONENT_HINT,
 )
 
-ALL_TOOLS = _K8S_TOOLS + GITOPS_TOOLS + TIMELINE_TOOLS + GIT_TOOLS + PREDICT_TOOLS
+ALL_TOOLS = _K8S_TOOLS + FLEET_TOOLS + GITOPS_TOOLS + TIMELINE_TOOLS + GIT_TOOLS + PREDICT_TOOLS
 
 # Add git PR tool to write tools (requires confirmation)
 WRITE_TOOLS = WRITE_TOOLS | {"propose_git_change"}
