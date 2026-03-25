@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 from datetime import datetime, timezone
 from typing import Any, Optional
 
@@ -13,16 +14,45 @@ logger = logging.getLogger("pulse_agent")
 
 _initialized = False
 
+# CRI-O socket paths (OpenShift uses CRI-O, not Docker)
+CRIO_SOCKET_PATHS = [
+    "/var/run/crio/crio.sock",
+    "/run/crio/crio.sock",
+]
+CONTAINER_RUNTIME_SOCKET = None
+
+
+def _detect_container_runtime() -> str | None:
+    """Detect the container runtime socket (CRI-O preferred for OpenShift)."""
+    # Check explicit override first
+    explicit = os.environ.get("CONTAINER_RUNTIME_ENDPOINT", "")
+    if explicit:
+        return explicit
+    # Check CRI-O sockets
+    for path in CRIO_SOCKET_PATHS:
+        if os.path.exists(path):
+            return f"unix://{path}"
+    # Check containerd
+    if os.path.exists("/run/containerd/containerd.sock"):
+        return "unix:///run/containerd/containerd.sock"
+    # Check Docker (legacy)
+    if os.path.exists("/var/run/docker.sock"):
+        return "unix:///var/run/docker.sock"
+    return None
+
 
 def _load_k8s() -> None:
     """Load kubeconfig or in-cluster config (idempotent)."""
-    global _initialized
+    global _initialized, CONTAINER_RUNTIME_SOCKET
     if _initialized:
         return
     try:
         config.load_incluster_config()
     except config.ConfigException:
         config.load_kube_config()
+    CONTAINER_RUNTIME_SOCKET = _detect_container_runtime()
+    if CONTAINER_RUNTIME_SOCKET:
+        logger.info("Detected container runtime: %s", CONTAINER_RUNTIME_SOCKET)
     _initialized = True
 
 

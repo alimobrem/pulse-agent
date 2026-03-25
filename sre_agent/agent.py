@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import time
 from datetime import datetime, timezone
 
 import anthropic
@@ -15,6 +16,70 @@ from .runbooks import RUNBOOKS, ALERT_TRIAGE_CONTEXT
 logger = logging.getLogger("pulse_agent")
 
 MAX_ITERATIONS = 25
+
+
+# ---------------------------------------------------------------------------
+# Circuit Breaker — enters "Silent Mode" when the API is unreachable
+# ---------------------------------------------------------------------------
+
+class CircuitBreaker:
+    """Prevents aggressive retries when the Claude API is down.
+
+    States:
+        CLOSED  — normal operation, requests go through
+        OPEN    — API is down, requests are rejected immediately
+        HALF    — testing if API has recovered (one request allowed)
+    """
+
+    CLOSED = "closed"
+    OPEN = "open"
+    HALF_OPEN = "half_open"
+
+    def __init__(self, failure_threshold: int = 3, recovery_timeout: float = 60):
+        self.failure_threshold = failure_threshold
+        self.recovery_timeout = recovery_timeout
+        self.state = self.CLOSED
+        self.failure_count = 0
+        self.last_failure_time: float = 0
+
+    def allow_request(self) -> bool:
+        if self.state == self.CLOSED:
+            return True
+        if self.state == self.OPEN:
+            if time.time() - self.last_failure_time >= self.recovery_timeout:
+                self.state = self.HALF_OPEN
+                logger.info("Circuit breaker: HALF_OPEN — testing recovery")
+                return True
+            return False
+        # HALF_OPEN — allow one request to test
+        return True
+
+    def record_success(self):
+        if self.state == self.HALF_OPEN:
+            logger.info("Circuit breaker: CLOSED — API recovered")
+        self.state = self.CLOSED
+        self.failure_count = 0
+
+    def record_failure(self):
+        self.failure_count += 1
+        self.last_failure_time = time.time()
+        if self.failure_count >= self.failure_threshold:
+            self.state = self.OPEN
+            logger.warning(
+                "Circuit breaker: OPEN — Silent Mode activated after %d failures. "
+                "Will retry in %ds.", self.failure_count, self.recovery_timeout
+            )
+
+    @property
+    def is_open(self) -> bool:
+        return self.state == self.OPEN
+
+
+# Global circuit breaker instance
+_circuit_breaker = CircuitBreaker(
+    failure_threshold=int(os.environ.get("PULSE_AGENT_CB_THRESHOLD", "3")),
+    recovery_timeout=float(os.environ.get("PULSE_AGENT_CB_TIMEOUT", "60")),
+)
 
 SYSTEM_PROMPT = """\
 You are an expert OpenShift/Kubernetes Site Reliability Engineer (SRE) agent.
@@ -171,17 +236,37 @@ def run_agent_streaming(
     model = os.environ.get("PULSE_AGENT_MODEL", "claude-opus-4-6")
     max_tokens = int(os.environ.get("PULSE_AGENT_MAX_TOKENS", "16000"))
 
+    # Circuit breaker check — reject immediately if API is in Silent Mode
+    if not _circuit_breaker.allow_request():
+        return (
+            "The agent is in **Silent Mode** — the Claude API is currently unreachable. "
+            f"Will retry automatically in {int(_circuit_breaker.recovery_timeout)}s. "
+            "Your cluster tools still work; the AI reasoning layer is temporarily paused."
+        )
+
     while iterations < MAX_ITERATIONS:
         iterations += 1
 
-        with client.messages.stream(
-            model=model,
-            max_tokens=max_tokens,
-            system=system_prompt,
-            thinking={"type": "adaptive"},
-            tools=tool_defs,
-            messages=messages,
-        ) as stream:
+        try:
+            stream_ctx = client.messages.stream(
+                model=model,
+                max_tokens=max_tokens,
+                system=system_prompt,
+                thinking={"type": "adaptive"},
+                tools=tool_defs,
+                messages=messages,
+            )
+        except (anthropic.APIConnectionError, anthropic.APIStatusError) as e:
+            _circuit_breaker.record_failure()
+            if _circuit_breaker.is_open:
+                return (
+                    "The agent has entered **Silent Mode** — the Claude API is unreachable "
+                    f"after {_circuit_breaker.failure_count} consecutive failures. "
+                    f"Will retry in {int(_circuit_breaker.recovery_timeout)}s."
+                )
+            raise
+
+        with stream_ctx as stream:
             for event in stream:
                 if event.type == "content_block_start":
                     if hasattr(event.content_block, "name"):
@@ -197,6 +282,9 @@ def run_agent_streaming(
                             on_thinking(event.delta.thinking)
 
             response = stream.get_final_message()
+
+        # API call succeeded — reset circuit breaker
+        _circuit_breaker.record_success()
 
         if response.stop_reason == "end_turn":
             break
