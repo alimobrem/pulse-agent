@@ -9,6 +9,11 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 
+def _text(result):
+    """Extract text from tool result (handles both str and (str, component) tuple)."""
+    return result[0] if isinstance(result, tuple) else result
+
+
 def _ts(minutes_ago: int = 5) -> datetime:
     """Create a timezone-aware timestamp N minutes ago."""
     return datetime.now(timezone.utc).replace(microsecond=0) - __import__("datetime").timedelta(minutes=minutes_ago)

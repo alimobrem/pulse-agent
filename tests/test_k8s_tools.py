@@ -16,6 +16,7 @@ from tests.conftest import (
     _make_namespace,
     _make_node,
     _make_pod,
+    _text,
     _ts,
 )
 
@@ -67,11 +68,6 @@ class TestListNamespaces:
         mock_k8s["core"].list_namespace.side_effect = ApiException(status=403, reason="Forbidden")
         result = list_namespaces.call({})
         assert "Error (403)" in result
-
-
-def _text(result):
-    """Extract text from tool result (handles both str and (str, component) tuple)."""
-    return result[0] if isinstance(result, tuple) else result
 
 
 class TestListPods:

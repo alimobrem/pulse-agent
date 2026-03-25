@@ -121,9 +121,16 @@ async def _run_agent_ws(
     # Capture the running loop BEFORE entering the thread
     loop = asyncio.get_running_loop()
 
+    async def _safe_send(data: dict):
+        """Send JSON to WebSocket, swallowing errors if client disconnected."""
+        try:
+            await websocket.send_json(data)
+        except Exception:
+            pass  # Client gone — nothing to do
+
     def _schedule_send(data: dict):
         """Thread-safe: schedule a WebSocket send on the event loop."""
-        asyncio.run_coroutine_threadsafe(websocket.send_json(data), loop)
+        asyncio.run_coroutine_threadsafe(_safe_send(data), loop)
 
     def on_text(delta: str):
         _schedule_send({"type": "text_delta", "text": delta})
@@ -337,11 +344,14 @@ async def websocket_agent(websocket: WebSocket, mode: str):
                     if ns:
                         context_parts.append(f"Namespace: {ns}")
                     context_str = ", ".join(context_parts)
-                    content = (
-                        f"[UI Context: {context_str}]\n"
-                        f"IMPORTANT: Use namespace='{ns}' for any operations on this resource. "
-                        f"Do NOT default to 'default' namespace.\n\n{content}"
-                    )
+                    if ns:
+                        content = (
+                            f"[UI Context: {context_str}]\n"
+                            f"IMPORTANT: Use namespace='{ns}' for any operations on this resource. "
+                            f"Do NOT default to 'default' namespace.\n\n{content}"
+                        )
+                    else:
+                        content = f"[UI Context: {context_str}]\n\n{content}"
 
             messages.append({"role": "user", "content": content})
 
@@ -357,7 +367,8 @@ async def websocket_agent(websocket: WebSocket, mode: str):
                 })
             except Exception as e:
                 logger.exception("Agent error")
-                messages.pop()
+                if messages:
+                    messages.pop()
                 await websocket.send_json({
                     "type": "error",
                     "message": "Agent encountered an error. Please try again.",
@@ -367,4 +378,7 @@ async def websocket_agent(websocket: WebSocket, mode: str):
         logger.exception("WebSocket error")
     finally:
         receive_task.cancel()
-        _pending_confirms.pop(ws_id, None)
+        # Cancel any pending confirmation future so agent thread unblocks immediately
+        future = _pending_confirms.pop(ws_id, None)
+        if future and not future.done():
+            future.cancel()
