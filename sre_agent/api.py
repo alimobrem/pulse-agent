@@ -136,34 +136,36 @@ async def _run_agent_ws(
 
     def on_confirm(tool_name: str, tool_input: dict) -> bool:
         """Request confirmation from the web UI and block until response."""
-        confirm_future = asyncio.run_coroutine_threadsafe(
-            _create_and_register_future(ws_id, tool_name, tool_input, websocket),
-            loop,
-        ).result(timeout=5)
+        try:
+            # Create the future and send the confirm request to the UI
+            confirm_future = asyncio.run_coroutine_threadsafe(
+                _create_and_register_future(ws_id, tool_name, tool_input, websocket),
+                loop,
+            ).result(timeout=5)
 
-        # Block the agent thread until the UI responds
-        event = threading.Event()
-        result_holder = [False]
-        timed_out = [False]
+            # Block the agent thread — wait for the UI to set the future result
+            # asyncio.Future → wrap with concurrent.futures style wait
+            import concurrent.futures
+            waiter = concurrent.futures.Future()
 
-        def resolve(f):
-            try:
-                result_holder[0] = f.result()
-            except Exception:
-                result_holder[0] = False
-            event.set()
+            def _on_done(f):
+                try:
+                    waiter.set_result(f.result())
+                except Exception as e:
+                    waiter.set_result(False)
 
-        confirm_future.add_done_callback(resolve)
-        event.wait(timeout=120)  # 2 minute timeout
+            loop.call_soon_threadsafe(confirm_future.add_done_callback, _on_done)
 
-        _pending_confirms.pop(ws_id, None)
+            approved = waiter.result(timeout=120)
+            logger.info("Confirmation resolved: tool=%s approved=%s", tool_name, approved)
+            return approved
 
-        if not event.is_set():
-            timed_out[0] = True
-            _schedule_send({"type": "error", "message": "Confirmation timed out (2 minutes). Operation cancelled."})
+        except Exception as e:
+            logger.error("Confirmation failed: %s", e)
+            _schedule_send({"type": "error", "message": "Confirmation timed out or failed. Operation cancelled."})
             return False
-
-        return result_holder[0]
+        finally:
+            _pending_confirms.pop(ws_id, None)
 
     # Run the blocking agent in a thread
     full_response = await asyncio.to_thread(
@@ -272,9 +274,11 @@ async def websocket_agent(websocket: WebSocket, mode: str):
                 if msg_type == "confirm_response":
                     future = _pending_confirms.get(ws_id)
                     if future and not future.done():
-                        future.get_loop().call_soon_threadsafe(
-                            future.set_result, data.get("approved", False)
-                        )
+                        # We're already on the event loop — set directly
+                        future.set_result(data.get("approved", False))
+                        logger.info("Confirmation received: approved=%s", data.get("approved"))
+                    else:
+                        logger.warning("Confirm response received but no pending future (ws_id=%s)", ws_id)
                     continue
 
                 if msg_type == "clear":
