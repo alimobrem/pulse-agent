@@ -49,39 +49,41 @@ def _get_managed_clusters() -> list[dict]:
         return []
 
 
-def _proxy_core_client(cluster_name: str):
-    """Get a CoreV1Api client proxied through ACM for a managed cluster."""
-    from kubernetes import client, config
-    try:
-        config.load_incluster_config()
-    except Exception:
-        config.load_kube_config()
+def _get_proxy_api_client(cluster_name: str):
+    """Get an ApiClient proxied through ACM for a managed cluster.
 
-    # ACM proxy endpoint
-    configuration = client.Configuration()
-    configuration.host = (
-        f"{client.Configuration().host}"
+    Copies auth configuration (token, certs) from the default client
+    so that requests are properly authenticated.
+    """
+    from kubernetes import client
+    # Get the default config (already loaded by _load_k8s)
+    default_config = client.Configuration.get_default_copy()
+    # Create a new config with the ACM proxy host, inheriting auth
+    proxy_config = client.Configuration()
+    proxy_config.host = (
+        f"{default_config.host}"
         f"/apis/cluster.open-cluster-management.io/v1"
         f"/managedclusters/{cluster_name}/proxy"
     )
-    return client.CoreV1Api(client.ApiClient(configuration))
+    proxy_config.api_key = default_config.api_key
+    proxy_config.api_key_prefix = default_config.api_key_prefix
+    proxy_config.ssl_ca_cert = default_config.ssl_ca_cert
+    proxy_config.cert_file = default_config.cert_file
+    proxy_config.key_file = default_config.key_file
+    proxy_config.verify_ssl = default_config.verify_ssl
+    return client.ApiClient(proxy_config)
+
+
+def _proxy_core_client(cluster_name: str):
+    """Get a CoreV1Api client proxied through ACM for a managed cluster."""
+    from kubernetes import client
+    return client.CoreV1Api(_get_proxy_api_client(cluster_name))
 
 
 def _proxy_apps_client(cluster_name: str):
     """Get an AppsV1Api client proxied through ACM for a managed cluster."""
-    from kubernetes import client, config
-    try:
-        config.load_incluster_config()
-    except Exception:
-        config.load_kube_config()
-
-    configuration = client.Configuration()
-    configuration.host = (
-        f"{client.Configuration().host}"
-        f"/apis/cluster.open-cluster-management.io/v1"
-        f"/managedclusters/{cluster_name}/proxy"
-    )
-    return client.AppsV1Api(client.ApiClient(configuration))
+    from kubernetes import client
+    return client.AppsV1Api(_get_proxy_api_client(cluster_name))
 
 
 # ---------------------------------------------------------------------------
