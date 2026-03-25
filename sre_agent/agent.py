@@ -16,6 +16,12 @@ from .timeline_tools import TIMELINE_TOOLS
 from .git_tools import GIT_TOOLS
 from .predict_tools import PREDICT_TOOLS
 from .runbooks import RUNBOOKS, ALERT_TRIAGE_CONTEXT
+from .harness import (
+    select_tools,
+    build_cached_system_prompt,
+    get_cluster_context,
+    COMPONENT_HINT,
+)
 
 ALL_TOOLS = _K8S_TOOLS + GITOPS_TOOLS + TIMELINE_TOOLS + GIT_TOOLS + PREDICT_TOOLS
 
@@ -275,6 +281,7 @@ def run_agent_streaming(
 
     model = os.environ.get("PULSE_AGENT_MODEL", "claude-opus-4-6")
     max_tokens = int(os.environ.get("PULSE_AGENT_MAX_TOKENS", "16000"))
+    use_harness = os.environ.get("PULSE_AGENT_HARNESS", "1") == "1"
 
     # Circuit breaker check — reject immediately if API is in Silent Mode
     if not _circuit_breaker.allow_request():
@@ -284,6 +291,25 @@ def run_agent_streaming(
             "Your cluster tools still work; the AI reasoning layer is temporarily paused."
         )
 
+    # --- Harness: Dynamic tool selection ---
+    if use_harness and messages:
+        last_user = next((m["content"] for m in reversed(messages) if m["role"] == "user"), "")
+        if isinstance(last_user, str) and last_user:
+            filtered_defs, filtered_map = select_tools(last_user, list(tool_map.values()), tool_map)
+            if len(filtered_defs) < len(tool_defs):
+                tool_defs = filtered_defs
+                tool_map = {**filtered_map}  # Don't mutate the original
+
+    # --- Harness: Cached system prompt with cluster context ---
+    if use_harness:
+        cluster_ctx = get_cluster_context()
+        effective_system = build_cached_system_prompt(
+            system_prompt + COMPONENT_HINT,
+            cluster_ctx,
+        )
+    else:
+        effective_system = system_prompt
+
     while iterations < MAX_ITERATIONS:
         iterations += 1
 
@@ -291,7 +317,7 @@ def run_agent_streaming(
             stream_ctx = client.messages.stream(
                 model=model,
                 max_tokens=max_tokens,
-                system=system_prompt,
+                system=effective_system,
                 thinking={"type": "adaptive"},
                 tools=tool_defs,
                 messages=messages,
