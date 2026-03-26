@@ -1,0 +1,73 @@
+#!/bin/bash
+# Quick deploy — local build + push (~30-45s total)
+# Uses Podman with local layer cache to avoid OpenShift's cold Docker builds.
+# Falls back to oc start-build if Podman or registry route is unavailable.
+# Usage: ./deploy/quick-deploy.sh [namespace]
+set -e
+
+NS="${1:-openshiftpulse}"
+DEPLOY="pulse-agent-openshift-sre-agent"
+SCRIPT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+
+# Try to get external registry route
+REGISTRY=$(oc get route default-route -n openshift-image-registry -o jsonpath='{.spec.host}' 2>/dev/null || echo "")
+
+if command -v podman &>/dev/null && podman info &>/dev/null && [[ -n "$REGISTRY" ]]; then
+    # === FAST PATH: Local Podman build + direct push ===
+    IMAGE="$REGISTRY/$NS/pulse-agent:latest"
+
+    echo "==> Building locally with Podman (cached layers)..."
+    cd "$SCRIPT_DIR"
+    podman build --platform linux/amd64 -t "$IMAGE" -f Dockerfile.full . 2>&1 | tail -5
+
+    echo "==> Logging into registry..."
+    SA_TOKEN=$(oc create token builder -n "$NS" 2>/dev/null || oc whoami -t)
+    podman login "$REGISTRY" -u unused -p "$SA_TOKEN" --tls-verify=false 2>&1 | tail -1
+
+    echo "==> Pushing image..."
+    podman push "$IMAGE" --tls-verify=false 2>&1 | tail -5
+
+    echo "==> Pinning image digest..."
+    DIGEST=$(oc get istag pulse-agent:latest -n "$NS" -o jsonpath='{.image.dockerImageReference}')
+    oc set image "deployment/$DEPLOY" "sre-agent=$DIGEST" -n "$NS"
+else
+    # === FALLBACK: OpenShift binary build ===
+    echo "==> No Podman or registry route — using oc start-build..."
+    cd "$SCRIPT_DIR"
+    if ! oc start-build pulse-agent --from-dir=. --follow -n "$NS"; then
+        echo "ERROR: Code build failed."
+        if ! oc get istag pulse-agent-deps:latest -n "$NS" &>/dev/null; then
+            echo "Deps image missing. Falling back to full build..."
+            oc patch bc pulse-agent -n "$NS" --type=json \
+              -p='[{"op":"replace","path":"/spec/strategy/dockerStrategy","value":{"dockerfilePath":"Dockerfile.full"}}]'
+            oc start-build pulse-agent --from-dir=. --follow -n "$NS"
+            oc patch bc pulse-agent -n "$NS" --type=json \
+              -p='[{"op":"replace","path":"/spec/strategy/dockerStrategy","value":{"from":{"kind":"ImageStreamTag","name":"pulse-agent-deps:latest"}}}]'
+        else
+            exit 1
+        fi
+    fi
+
+    echo "==> Pinning image digest..."
+    DIGEST=$(oc get istag pulse-agent:latest -n "$NS" -o jsonpath='{.image.dockerImageReference}')
+    oc set image "deployment/$DEPLOY" "sre-agent=$DIGEST" -n "$NS"
+fi
+
+echo "==> Restarting deployment..."
+oc rollout restart "deployment/$DEPLOY" -n "$NS"
+oc rollout status "deployment/$DEPLOY" -n "$NS" --timeout=60s
+
+# Health verification
+echo "==> Verifying health..."
+sleep 3
+AGENT_POD=$(oc get pod -l app.kubernetes.io/name=openshift-sre-agent -n "$NS" --field-selector=status.phase=Running -o name 2>/dev/null | head -1)
+if [[ -n "$AGENT_POD" ]]; then
+    HEALTH=$(oc exec "$AGENT_POD" -n "$NS" -- curl -sf localhost:8080/healthz 2>/dev/null || echo "")
+    if [[ "$HEALTH" == *"ok"* ]]; then
+        echo "==> Agent is healthy!"
+    else
+        echo "WARNING: Agent health check returned: $HEALTH"
+    fi
+fi
+
+echo "==> Done!"

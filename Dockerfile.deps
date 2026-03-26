@@ -1,0 +1,10 @@
+FROM registry.access.redhat.com/ubi9/python-312:latest
+WORKDIR /opt/app-root/src
+
+ARG DEPS_HASH=unknown
+LABEL deps-hash=$DEPS_HASH
+
+COPY pyproject.toml .
+RUN pip install --no-cache-dir anthropic[vertex] kubernetes rich fastapi uvicorn[standard] websockets cryptography
+
+USER 1001
