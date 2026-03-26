@@ -17,6 +17,7 @@ from typing import Any
 from anthropic import beta_tool
 from kubernetes.client.rest import ApiException
 
+from .errors import ToolError
 from .k8s_client import get_core_client, get_apps_client, get_custom_client, safe, age
 
 logger = logging.getLogger("pulse_agent.fleet")
@@ -389,8 +390,8 @@ def fleet_compare_resource(kind: str, name: str, namespace: str = "default") -> 
             proxy_apps = _proxy_apps_client(cluster["name"])
             result = _read_resource(kind, name, namespace, core=proxy_core, apps=proxy_apps)
 
-            if isinstance(result, str):
-                resources[cluster["name"]] = {"error": result}
+            if isinstance(result, ToolError):
+                resources[cluster["name"]] = {"error": str(result)}
             elif hasattr(result, "to_dict"):
                 resources[cluster["name"]] = result.to_dict()
             else:

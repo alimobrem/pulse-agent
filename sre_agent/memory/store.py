@@ -2,11 +2,39 @@
 
 from __future__ import annotations
 
+import functools
 import json
+import logging
 import os
 import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
+
+logger = logging.getLogger("pulse_agent")
+
+
+def db_safe(default=None):
+    """Decorator that catches sqlite3 errors and returns a default value."""
+    def decorator(fn):
+        @functools.wraps(fn)
+        def wrapper(self, *args, **kwargs):
+            try:
+                return fn(self, *args, **kwargs)
+            except sqlite3.Error as e:
+                logger.error("SQLite error in %s: %s", fn.__name__, type(e).__name__)
+                try:
+                    from ..error_tracker import get_tracker
+                    from ..errors import ToolError
+                    get_tracker().record(ToolError(
+                        message=f"Memory system error: {type(e).__name__}",
+                        category="server",
+                        operation=f"memory.{fn.__name__}",
+                    ))
+                except Exception:
+                    pass
+                return default
+        return wrapper
+    return decorator
 
 DEFAULT_DB_PATH = os.path.expanduser("~/.pulse_agent/memory.db")
 
@@ -99,6 +127,7 @@ class IncidentStore:
         self.conn.row_factory = sqlite3.Row
         self.conn.executescript(SCHEMA)
 
+    @db_safe(default=-1)
     def record_incident(self, query: str, tool_sequence: list[dict],
                         resolution: str, outcome: str = "unknown",
                         namespace: str = "", resource_type: str = "",
@@ -119,6 +148,7 @@ class IncidentStore:
         self.conn.commit()
         return cur.lastrowid
 
+    @db_safe(default=None)
     def update_incident_outcome(self, incident_id: int, outcome: str, score: float) -> None:
         self.conn.execute(
             "UPDATE incidents SET outcome = ?, score = ? WHERE id = ?",
@@ -126,6 +156,7 @@ class IncidentStore:
         )
         self.conn.commit()
 
+    @db_safe(default=[])
     def search_incidents(self, query: str, limit: int = 5) -> list[dict]:
         keywords = extract_keywords(query).split()
         if not keywords:
@@ -152,6 +183,7 @@ class IncidentStore:
         self.conn.commit()
         return cur.lastrowid
 
+    @db_safe(default=[])
     def find_runbooks(self, query: str, limit: int = 3) -> list[dict]:
         keywords = extract_keywords(query).split()
         if not keywords:
@@ -203,6 +235,7 @@ class IncidentStore:
         ).fetchall()
         return [dict(r) for r in rows]
 
+    @db_safe(default=None)
     def record_metric(self, metric_name: str, value: float,
                       window: str = "session") -> None:
         self.conn.execute(

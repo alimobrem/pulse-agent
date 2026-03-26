@@ -102,6 +102,27 @@ async def version():
     }
 
 
+@app.get("/health")
+async def health():
+    from .error_tracker import get_tracker
+    from .agent import _circuit_breaker
+    tracker = get_tracker()
+    summary = tracker.get_summary()
+    return {
+        "status": "degraded" if _circuit_breaker.is_open else "ok",
+        "circuit_breaker": {
+            "state": _circuit_breaker.state,
+            "failure_count": _circuit_breaker.failure_count,
+            "recovery_timeout": _circuit_breaker.recovery_timeout,
+        },
+        "errors": {
+            "total": summary["total"],
+            "by_category": summary["by_category"],
+            "recent": tracker.get_recent(limit=5),
+        },
+    }
+
+
 @app.get("/tools")
 async def list_tools():
     """List all available tools grouped by mode, with write-op flags."""
@@ -425,6 +446,9 @@ async def websocket_agent(websocket: WebSocket, mode: str):
                 await websocket.send_json({
                     "type": "error",
                     "message": "Agent encountered an error. Please try again.",
+                    "category": "server",
+                    "suggestions": [],
+                    "operation": "",
                 })
 
     except Exception:

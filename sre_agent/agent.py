@@ -244,12 +244,17 @@ def _execute_tool(name: str, input_data: dict, tool_map: dict) -> tuple[str, dic
         }))
         return text, component
     except Exception as e:
+        from .errors import classify_exception
+        from .error_tracker import get_tracker
+        err = classify_exception(e, name)
+        get_tracker().record(err)
         logger.exception(json.dumps({
             "event": "tool_error",
             "tool": name,
             "input": _redact_input(name, input_data),
-            "error": str(type(e).__name__),
+            "error": type(e).__name__,
             "error_detail": str(e)[:500],
+            "category": err.category,
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }))
         # Only return type name to LLM — don't leak internal details

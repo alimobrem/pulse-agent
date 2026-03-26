@@ -13,6 +13,7 @@ from datetime import datetime, timezone
 from anthropic import beta_tool
 from kubernetes.client.rest import ApiException
 
+from .errors import ToolError
 from .k8s_client import (
     get_core_client,
     get_apps_client,
@@ -39,8 +40,8 @@ def scan_pod_security(namespace: str = "ALL") -> str:
         result = safe(lambda: get_core_client().list_pod_for_all_namespaces())
     else:
         result = safe(lambda: get_core_client().list_namespaced_pod(namespace))
-    if isinstance(result, str):
-        return result
+    if isinstance(result, ToolError):
+        return str(result)
 
     findings = []
     for pod in result.items:
@@ -106,8 +107,8 @@ def scan_images(namespace: str = "ALL") -> str:
         result = safe(lambda: get_core_client().list_pod_for_all_namespaces())
     else:
         result = safe(lambda: get_core_client().list_namespaced_pod(namespace))
-    if isinstance(result, str):
-        return result
+    if isinstance(result, ToolError):
+        return str(result)
 
     default_trusted = "registry.redhat.io/,registry.access.redhat.com/,quay.io/,image-registry.openshift-image-registry.svc:"
     trusted_prefixes = [
@@ -160,8 +161,8 @@ def scan_rbac_risks() -> str:
 
     # Check ClusterRoleBindings for cluster-admin
     crbs = safe(lambda: get_rbac_client().list_cluster_role_binding())
-    if isinstance(crbs, str):
-        return crbs
+    if isinstance(crbs, ToolError):
+        return str(crbs)
 
     for crb in crbs.items:
         if crb.role_ref.name == "cluster-admin":
@@ -177,8 +178,8 @@ def scan_rbac_risks() -> str:
 
     # Check ClusterRoles for wildcard and dangerous permissions
     crs = safe(lambda: get_rbac_client().list_cluster_role())
-    if isinstance(crs, str):
-        return crs
+    if isinstance(crs, ToolError):
+        return str(crs)
 
     dangerous_verbs = {"escalate", "bind", "impersonate"}
     sensitive_resources = {"secrets", "configmaps", "pods/exec", "serviceaccounts/token"}
@@ -223,8 +224,8 @@ def list_service_account_secrets(namespace: str = "default") -> str:
         result = safe(lambda: get_core_client().list_service_account_for_all_namespaces())
     else:
         result = safe(lambda: get_core_client().list_namespaced_service_account(namespace))
-    if isinstance(result, str):
-        return result
+    if isinstance(result, ToolError):
+        return str(result)
 
     lines = []
     for sa in result.items:
@@ -252,8 +253,8 @@ def scan_network_policies(namespace: str = "ALL") -> str:
     """
     # Get all namespaces
     ns_list = safe(lambda: get_core_client().list_namespace())
-    if isinstance(ns_list, str):
-        return ns_list
+    if isinstance(ns_list, ToolError):
+        return str(ns_list)
 
     skip_prefixes = ("openshift-", "kube-", "default")
 
@@ -261,8 +262,8 @@ def scan_network_policies(namespace: str = "ALL") -> str:
         netpols = safe(lambda: get_networking_client().list_network_policy_for_all_namespaces())
     else:
         netpols = safe(lambda: get_networking_client().list_namespaced_network_policy(namespace))
-    if isinstance(netpols, str):
-        return netpols
+    if isinstance(netpols, ToolError):
+        return str(netpols)
 
     # Map namespace -> list of policies
     ns_policies: dict[str, list] = {}
@@ -362,8 +363,8 @@ def scan_scc_usage(namespace: str = "ALL") -> str:
         result = safe(lambda: get_core_client().list_pod_for_all_namespaces())
     else:
         result = safe(lambda: get_core_client().list_namespaced_pod(namespace))
-    if isinstance(result, str):
-        return result
+    if isinstance(result, ToolError):
+        return str(result)
 
     risky_sccs = {"privileged", "anyuid", "hostaccess", "hostmount-anyuid", "hostnetwork"}
     findings = []
@@ -409,10 +410,10 @@ def scan_secrets(namespace: str = "ALL") -> str:
     else:
         secrets = safe(lambda: get_core_client().list_namespaced_secret(namespace))
         pods = safe(lambda: get_core_client().list_namespaced_pod(namespace))
-    if isinstance(secrets, str):
-        return secrets
-    if isinstance(pods, str):
-        return pods
+    if isinstance(secrets, ToolError):
+        return str(secrets)
+    if isinstance(pods, ToolError):
+        return str(pods)
 
     # Track which secrets are referenced by pods
     referenced_secrets: set[str] = set()
@@ -486,7 +487,7 @@ def get_security_summary() -> str:
 
     # Count pods with no security context
     pods = safe(lambda: get_core_client().list_pod_for_all_namespaces())
-    if not isinstance(pods, str):
+    if not isinstance(pods, ToolError):
         no_sc = 0
         privileged = 0
         for pod in pods.items:
@@ -502,7 +503,7 @@ def get_security_summary() -> str:
     # Count namespaces without network policies
     ns_list = safe(lambda: get_core_client().list_namespace())
     netpols = safe(lambda: get_networking_client().list_network_policy_for_all_namespaces())
-    if not isinstance(ns_list, str) and not isinstance(netpols, str):
+    if not isinstance(ns_list, ToolError) and not isinstance(netpols, ToolError):
         ns_with_policies = {np.metadata.namespace for np in netpols.items}
         user_ns = [
             ns.metadata.name for ns in ns_list.items
@@ -513,7 +514,7 @@ def get_security_summary() -> str:
 
     # Count cluster-admin bindings (non-system)
     crbs = safe(lambda: get_rbac_client().list_cluster_role_binding())
-    if not isinstance(crbs, str):
+    if not isinstance(crbs, ToolError):
         admin_bindings = 0
         for crb in crbs.items:
             if crb.role_ref.name == "cluster-admin":

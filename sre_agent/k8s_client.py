@@ -101,7 +101,8 @@ def safe(fn) -> Any:
     try:
         return fn()
     except ApiException as e:
-        return f"Error ({e.status}): {e.reason}"
+        from .errors import classify_api_error
+        return classify_api_error(e)
 
 
 def age(ts: Optional[datetime]) -> str:

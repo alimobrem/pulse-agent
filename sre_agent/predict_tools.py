@@ -16,6 +16,7 @@ from datetime import datetime, timezone
 from anthropic import beta_tool
 from kubernetes.client.rest import ApiException
 
+from .errors import ToolError
 from .k8s_client import get_autoscaling_client, get_core_client, get_custom_client, safe
 from .units import parse_cpu_millicores, parse_memory_bytes, format_cpu, format_memory
 
@@ -76,14 +77,14 @@ def forecast_quota_exhaustion(namespace: str) -> str:
     core = get_core_client()
 
     quotas = safe(lambda: core.list_namespaced_resource_quota(namespace))
-    if isinstance(quotas, str):
-        return quotas
+    if isinstance(quotas, ToolError):
+        return str(quotas)
     if not quotas.items:
         return f"No ResourceQuotas in namespace '{namespace}'."
 
     # Get current pod resource requests as a proxy for growth
     pods = safe(lambda: core.list_namespaced_pod(namespace))
-    pod_count = len(pods.items) if not isinstance(pods, str) else 0
+    pod_count = len(pods.items) if not isinstance(pods, ToolError) else 0
 
     forecasts = []
     for rq in quotas.items:
@@ -180,8 +181,8 @@ def analyze_hpa_thrashing(namespace: str = "ALL") -> str:
         result = safe(lambda: auto.list_horizontal_pod_autoscaler_for_all_namespaces())
     else:
         result = safe(lambda: auto.list_namespaced_horizontal_pod_autoscaler(namespace))
-    if isinstance(result, str):
-        return result
+    if isinstance(result, ToolError):
+        return str(result)
 
     findings = []
     for hpa in result.items:
