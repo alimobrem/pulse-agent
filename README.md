@@ -1,7 +1,7 @@
 # Pulse Agent
 
 <p>
-  <a href="https://github.com/alimobrem/pulse-agent/releases/tag/v1.2.0"><img src="https://img.shields.io/badge/release-v1.2.0-2563eb?style=for-the-badge" alt="Version"></a>
+  <a href="https://github.com/alimobrem/pulse-agent/releases/tag/v1.3.0"><img src="https://img.shields.io/badge/release-v1.3.0-2563eb?style=for-the-badge" alt="Version"></a>
   <img src="https://img.shields.io/badge/tools-62-10b981?style=for-the-badge" alt="Tools">
   <img src="https://img.shields.io/badge/tests-239-10b981?style=for-the-badge" alt="Tests">
   <img src="https://img.shields.io/badge/license-MIT-6366f1?style=for-the-badge" alt="License">
@@ -301,6 +301,7 @@ Supported: `data_table`, `info_card_grid`, `badge_list`, `status_list`, `key_val
 
 | Pulse Agent | OpenShift Pulse UI | Protocol |
 |------------|-------------------|----------|
+| v1.3.0 | v5.6.0+ | 1 |
 | v1.2.0 | v5.6.0+ | 1 |
 | v1.1.0 | v5.5.0+ | 1 |
 | v1.0.0 | v5.3.0+ | 1 |
@@ -309,11 +310,27 @@ The `/version` endpoint returns the protocol version. The UI checks this on conn
 
 ## Deploy to Cluster
 
+### Quick Deploy (24s with Podman)
+
+```bash
+cd pulse-agent
+./deploy/quick-deploy.sh openshiftpulse
+```
+
+Builds locally with Podman (cached layers), pushes directly to the internal registry, pins image digest, restarts deployment, and verifies health. Falls back to `oc start-build` if Podman is unavailable.
+
+### Rebuild Dependencies
+
+Only needed when `pyproject.toml` changes or for security patches:
+```bash
+./deploy/rebuild-deps.sh openshiftpulse
+```
+
 ### Build Image
 
 ```bash
-docker build -t your-registry/pulse-agent:0.2.0 .
-docker push your-registry/pulse-agent:0.2.0
+docker build -t your-registry/pulse-agent:1.3.0 .
+docker push your-registry/pulse-agent:1.3.0
 ```
 
 ### Helm Install
