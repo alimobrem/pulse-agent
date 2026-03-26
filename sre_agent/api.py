@@ -1,5 +1,7 @@
 """FastAPI WebSocket server for the Pulse Agent.
 
+Protocol Version: 1 (see API_CONTRACT.md for full specification)
+
 Exposes the SRE and Security agents over WebSocket for integration
 with the OpenShift Pulse web UI.
 """

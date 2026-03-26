@@ -1,0 +1,255 @@
+# Pulse API Contract
+
+**Protocol Version: 1**
+
+Defines the WebSocket protocol between the Pulse UI and Pulse Agent. Both repos must implement the same protocol version for compatibility.
+
+> Source of truth for message schemas. When adding or changing a message type, update this file first, then implement in both repos.
+
+---
+
+## Endpoints
+
+### REST
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/healthz` | Agent health check. Returns `{"status": "ok"}` |
+| `GET` | `/version` | Protocol version + capabilities. UI checks this on connect. |
+
+#### `/version` Response
+
+```json
+{
+  "protocol": "1",
+  "agent": "1.3.0",
+  "tools": 68,
+  "features": ["component_specs", "ws_token_auth", "rate_limiting"]
+}
+```
+
+### WebSocket
+
+| Path | Description |
+|------|-------------|
+| `ws://.../ws/sre` | SRE agent mode |
+| `ws://.../ws/security` | Security agent mode |
+
+---
+
+## Client-to-Server Messages
+
+Messages sent by the UI to the agent over WebSocket.
+
+### `message` — Send a chat message
+
+```json
+{
+  "type": "message",
+  "content": "Why are pods crash-looping in production?",
+  "context": {
+    "kind": "Deployment",
+    "name": "api-server",
+    "namespace": "production",
+    "gvr": "apps~v1~deployments"
+  },
+  "fleet": false
+}
+```
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `type` | `"message"` | yes | |
+| `content` | `string` | yes | User's message text |
+| `context` | `ResourceContext` | no | Resource the user is viewing |
+| `fleet` | `boolean` | no | Enable fleet/multi-cluster mode |
+
+#### `ResourceContext`
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `kind` | `string` | yes | K8s resource kind (e.g., `"Deployment"`) |
+| `name` | `string` | yes | Resource name |
+| `namespace` | `string` | no | Resource namespace (omit for cluster-scoped) |
+| `gvr` | `string` | no | GVR key (`group~version~plural`) |
+
+### `confirm_response` — Respond to a confirmation request
+
+```json
+{
+  "type": "confirm_response",
+  "approved": true
+}
+```
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `type` | `"confirm_response"` | yes | |
+| `approved` | `boolean` | yes | Whether the user approved the action |
+
+### `clear` — Clear conversation history
+
+```json
+{
+  "type": "clear"
+}
+```
+
+---
+
+## Server-to-Client Events
+
+Events streamed from the agent to the UI over WebSocket.
+
+### `text_delta` — Streaming text chunk
+
+```json
+{
+  "type": "text_delta",
+  "text": "The pods are crash-looping because"
+}
+```
+
+### `thinking_delta` — Streaming thinking/reasoning chunk
+
+```json
+{
+  "type": "thinking_delta",
+  "thinking": "Let me check the pod logs first..."
+}
+```
+
+### `tool_use` — Tool execution started
+
+```json
+{
+  "type": "tool_use",
+  "tool": "get_pod_logs"
+}
+```
+
+### `component` — Structured UI component from tool result
+
+```json
+{
+  "type": "component",
+  "tool": "list_pods",
+  "spec": {
+    "kind": "data_table",
+    "title": "Pods in production",
+    "columns": [
+      {"id": "name", "header": "Name"},
+      {"id": "status", "header": "Status"}
+    ],
+    "rows": [
+      {"name": "api-server-abc", "status": "Running"}
+    ]
+  }
+}
+```
+
+See [Component Specs](#component-specs) for all `spec.kind` values.
+
+### `confirm_request` — Request user confirmation for a dangerous action
+
+```json
+{
+  "type": "confirm_request",
+  "tool": "delete_resource",
+  "input": {"kind": "Pod", "name": "my-pod", "namespace": "default"},
+  "nonce": "abc123..."
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `tool` | `string` | Tool name requiring confirmation |
+| `input` | `object` | Tool input parameters (shown to user) |
+| `nonce` | `string` | JIT nonce for replay prevention |
+
+### `done` — Agent turn complete
+
+```json
+{
+  "type": "done",
+  "full_response": "The pods are crash-looping because..."
+}
+```
+
+### `error` — Error message
+
+```json
+{
+  "type": "error",
+  "message": "Rate limited. Max 10 messages per minute."
+}
+```
+
+### `cleared` — Conversation history cleared
+
+```json
+{
+  "type": "cleared"
+}
+```
+
+---
+
+## Component Specs
+
+Structured UI components returned by agent tools via the `component` event. The UI renders these inline in the chat.
+
+| `kind` | Description | Key Fields |
+|--------|-------------|------------|
+| `data_table` | Sortable table | `columns[]`, `rows[]` |
+| `info_card_grid` | Metric cards | `cards[]{label, value, sub?}` |
+| `badge_list` | Colored badges | `badges[]{text, variant}` |
+| `status_list` | Health status items | `items[]{name, status, detail?}` |
+| `key_value` | Key-value pairs | `pairs[]{key, value}` |
+| `chart` | Time-series chart | `series[]{label, data[][], color?}` |
+| `tabs` | Tabbed content | `tabs[]{label, content: ComponentSpec}` |
+| `grid` | Grid layout | `columns`, `items: ComponentSpec[]` |
+| `section` | Titled section | `title`, `content: ComponentSpec` |
+
+### Badge Variants
+
+`success` | `warning` | `error` | `info` | `default`
+
+### Status Values
+
+`healthy` | `warning` | `error` | `pending` | `unknown`
+
+---
+
+## Constraints
+
+| Constraint | Value | Enforced By |
+|------------|-------|-------------|
+| Max message size | 1 MB | Agent |
+| Rate limit | 10 messages/minute per connection | Agent |
+| Confirmation timeout | 120 seconds | Agent |
+| Context field validation | `^[a-zA-Z0-9\-._/: ]{0,253}$` | Agent |
+| Reconnect attempts | 5 max, exponential backoff + jitter | UI |
+
+---
+
+## Version Compatibility
+
+The UI sends a `GET /version` request before connecting. If the agent's `protocol` field doesn't match the UI's `EXPECTED_PROTOCOL`, the UI shows a warning but still connects (graceful degradation).
+
+### Protocol Version History
+
+| Version | Changes | UI Version | Agent Version |
+|---------|---------|------------|---------------|
+| `1` | Initial protocol: text/thinking streaming, tool use, components, confirmations | v5.0.0+ | v1.0.0+ |
+
+### Release Compatibility Matrix
+
+| UI Version | Agent Version | Protocol | Status |
+|------------|--------------|----------|--------|
+| v5.11.0 | v1.3.0 | 1 | Current |
+| v5.10.0 | v1.3.0 | 1 | Compatible |
+| v5.8.0 | v1.2.0 | 1 | Compatible |
+| v5.0.0–v5.7.0 | v1.0.0–v1.1.0 | 1 | Compatible |
+
+> Both repos should tag releases together when protocol changes occur. Minor UI/Agent releases within the same protocol version are always compatible.
