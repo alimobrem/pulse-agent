@@ -1,9 +1,9 @@
 # Pulse Agent
 
 <p>
-  <a href="https://github.com/alimobrem/pulse-agent/releases/tag/v1.1.0"><img src="https://img.shields.io/badge/release-v1.1.0-2563eb?style=for-the-badge" alt="Version"></a>
+  <a href="https://github.com/alimobrem/pulse-agent/releases/tag/v1.2.0"><img src="https://img.shields.io/badge/release-v1.2.0-2563eb?style=for-the-badge" alt="Version"></a>
   <img src="https://img.shields.io/badge/tools-62-10b981?style=for-the-badge" alt="Tools">
-  <img src="https://img.shields.io/badge/tests-231-10b981?style=for-the-badge" alt="Tests">
+  <img src="https://img.shields.io/badge/tests-239-10b981?style=for-the-badge" alt="Tests">
   <img src="https://img.shields.io/badge/license-MIT-6366f1?style=for-the-badge" alt="License">
 </p>
 
@@ -90,6 +90,7 @@ export ANTHROPIC_API_KEY=sk-ant-...
 | `PULSE_AGENT_WS_TOKEN` | WebSocket authentication token (required for API mode) | |
 | `PULSE_AGENT_CB_THRESHOLD` | Circuit breaker failure threshold | `3` |
 | `PULSE_AGENT_CB_TIMEOUT` | Circuit breaker recovery timeout (seconds) | `60` |
+| `PULSE_AGENT_TOOL_TIMEOUT` | Per-tool execution timeout (seconds) | `30` |
 
 ### Run
 
@@ -300,6 +301,7 @@ Supported: `data_table`, `info_card_grid`, `badge_list`, `status_list`, `key_val
 
 | Pulse Agent | OpenShift Pulse UI | Protocol |
 |------------|-------------------|----------|
+| v1.2.0 | v5.6.0+ | 1 |
 | v1.1.0 | v5.5.0+ | 1 |
 | v1.0.0 | v5.3.0+ | 1 |
 
@@ -353,6 +355,7 @@ sre_agent/
 ├── agent.py             # Shared agent loop, Claude API client, audit logging
 ├── errors.py            # ToolError classification, classify_api_error, classify_exception
 ├── error_tracker.py     # Thread-safe ring buffer for error aggregation
+├── config.py            # Startup config validation
 ├── security_agent.py    # Security scanner (read-only, delegates to shared loop)
 ├── k8s_client.py        # Shared Kubernetes client with lazy initialization
 ├── k8s_tools.py         # 35+ Kubernetes/OpenShift tools (@beta_tool)
@@ -388,12 +391,12 @@ pip install -e '.[test]'
 python -m pytest tests/ -v
 ```
 
-231 tests covering all tools, agent loop safety mechanisms, error classification, error tracking, unit parsing, and the memory system. All tests run without a cluster or API key (fully mocked).
+239 tests covering all tools, agent loop safety mechanisms, error classification, error tracking, config validation, unit parsing, and the memory system. All tests run without a cluster or API key (fully mocked).
 
 ---
 
 <p align="center">
-  <strong>62 tools</strong> &bull; <strong>10 runbooks</strong> &bull; <strong>8 tool categories</strong> &bull; <strong>231 tests</strong> &bull; <strong>Protocol v1</strong>
+  <strong>62 tools</strong> &bull; <strong>10 runbooks</strong> &bull; <strong>8 tool categories</strong> &bull; <strong>239 tests</strong> &bull; <strong>Protocol v1</strong>
 </p>
 
 <p align="center">
