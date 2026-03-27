@@ -1,4 +1,4 @@
-replicaCount: 1
+replicaCount: 2
 
 image:
   repository: ""  # Set by deploy.sh or --set. Uses internal registry when empty.
