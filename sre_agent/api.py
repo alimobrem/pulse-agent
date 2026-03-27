@@ -556,7 +556,11 @@ async def websocket_monitor(websocket: WebSocket):
 
             msg_type = data.get("type")
 
-            if msg_type == "action_response":
+            if msg_type == "trigger_scan":
+                logger.info("Manual scan triggered by client")
+                asyncio.create_task(session.run_scan())
+
+            elif msg_type == "action_response":
                 action_id = data.get("actionId", "")
                 approved = data.get("approved", False)
                 logger.info("Action response: id=%s approved=%s", action_id, approved)
