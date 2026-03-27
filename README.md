@@ -1,8 +1,8 @@
 # Pulse Agent
 
 <p>
-  <a href="https://github.com/alimobrem/pulse-agent/releases/tag/v1.3.0"><img src="https://img.shields.io/badge/release-v1.3.0-2563eb?style=for-the-badge" alt="Version"></a>
-  <img src="https://img.shields.io/badge/tools-62-10b981?style=for-the-badge" alt="Tools">
+  <a href="https://github.com/alimobrem/pulse-agent/releases/tag/v1.5.0"><img src="https://img.shields.io/badge/release-v1.5.0-2563eb?style=for-the-badge" alt="Version"></a>
+  <img src="https://img.shields.io/badge/tools-109-10b981?style=for-the-badge" alt="Tools">
   <img src="https://img.shields.io/badge/tests-239-10b981?style=for-the-badge" alt="Tests">
   <img src="https://img.shields.io/badge/license-MIT-6366f1?style=for-the-badge" alt="License">
 </p>
@@ -34,6 +34,22 @@ Pulse Agent connects directly to your cluster's Kubernetes API and uses Claude O
 - **Error Tracking** — Thread-safe ring buffer (500 entries) with per-category aggregation and top-tool breakdown
 - **Health Endpoint** — `/health` returns circuit breaker state, error summary, and recent errors
 - **SQLite Resilience** — `@db_safe` decorator on all memory operations prevents crashes on database errors
+
+### Autonomous Monitor
+- **Continuous Scanning** — 60-second scan interval via `/ws/monitor` endpoint, pushing findings to the Pulse UI in real time
+- **6 Scanners** — Pod health (crashloops, restarts), workload status (degraded deployments), node conditions, certificate expiry, resource pressure, network policy gaps
+- **Auto-Fix at Trust Level 3** — Automatically applies fixes for safe categories (crashloop pod deletion, deployment restarts) without user approval
+- **Auto-Fix at Trust Level 4** — Applies all fixable findings automatically, with rollback snapshots for every action
+- **Finding Lifecycle** — Stale finding cleanup after each scan cycle, severity escalation on repeat occurrences
+
+### Auto-Fix
+- **Trust Level 3 (Safe Categories)** — Fixes only pre-approved safe categories automatically; all others require user approval via the UI
+- **Trust Level 4 (Full Autonomous)** — Fixes all auto-fixable findings without prompting
+- **Fix Categories:**
+  - `crashloop` — Deletes crash-looping pods to trigger fresh scheduling
+  - `workloads` — Restarts degraded deployments via rollout restart
+- **Rollback** — Every applied fix records a `beforeState` snapshot. Rollback via `POST /api/agent/actions/:id/rollback` or the UI's Actions tab
+- **Confirmation Gate** — Write operations still require the programmatic confirmation round-trip at all trust levels; auto-fix pre-approves on behalf of the user
 
 ### Self-Improving Agent
 - **Incident Memory** — Stores every interaction with query, tool sequence, resolution, and outcome in SQLite
@@ -187,6 +203,22 @@ When connected to the Pulse UI's Monitor endpoint, the agent operates at a confi
 
 **Important:** Write operations always require programmatic user approval via the confirmation gate, regardless of trust level. Even at trust level 4, the agent cannot execute write Kubernetes API calls without a `confirm_response` round-trip. Trust level controls what the agent *proposes*, not what it can bypass.
 
+### Monitor Auto-Fix Integration with UI Trust Levels
+
+The `/ws/monitor` endpoint implements autonomous cluster scanning with a graduated auto-fix model tied to the UI's trust level slider:
+
+1. **UI sets trust level** — The Pulse UI sends a `subscribe_monitor` message with `trustLevel` (0-4) and an optional `autoFixCategories` list (e.g., `["crashloop", "resource_limits", "cert_expiry"]`).
+2. **Agent scans continuously** — The monitor loop runs every 60 seconds, pushing `finding` events for detected issues and `prediction` events for forecasted problems.
+3. **Auto-fix decision** — When a finding is auto-fixable and matches an enabled category, the agent checks the trust level:
+   - **Level 0-1**: Finding is reported only. The UI displays it in the Monitor view.
+   - **Level 2**: Agent sends an `action_report` with `status: "proposed"`. The UI shows an approval card; the user clicks Approve/Reject, which sends `action_response`.
+   - **Level 3**: Safe categories (those in `autoFixCategories`) are applied automatically. Others require approval.
+   - **Level 4**: All fixable findings are applied automatically. Actions are logged and reversible via the rollback endpoint.
+4. **Rollback** — Every applied fix records a `beforeState` snapshot. The UI's Monitor > History tab shows all actions with a Rollback button that calls `POST /api/agent/actions/:id/rollback`.
+5. **Stale finding cleanup** — After each scan cycle, the agent sends a `findings_snapshot` event with all active finding IDs. The UI removes any findings not in the snapshot, preventing stale entries from accumulating.
+
+The trust level is persisted in the UI's `localStorage` (via `trustStore`) and displayed on the Monitor view's Config tab. The confirmation gate remains active at all levels for Kubernetes write operations.
+
 ## Tools
 
 ### SRE Tools (35)
@@ -255,7 +287,7 @@ Built-in optimizations for getting the most out of Claude (`PULSE_AGENT_HARNESS=
 
 | Feature | What It Does | Impact |
 |---------|-------------|--------|
-| **Dynamic Tool Selection** | Categorizes 54 tools into 8 groups, loads only relevant ones per query | 54→15-25 tools, faster + cheaper |
+| **Dynamic Tool Selection** | Categorizes 109 tools into 8 groups, loads only relevant ones per query | 109→15-25 tools, faster + cheaper |
 | **Prompt Caching** | Marks system prompt + runbooks with `cache_control: ephemeral` | ~90% cost reduction on context |
 | **Cluster Context Injection** | Pre-fetches node count, namespaces, OCP version, failing pods, firing alerts | Saves 2-3 tool calls per query |
 | **Component Rendering Hints** | Guides Claude to focus on analysis, not data formatting | Cleaner responses |
@@ -291,6 +323,7 @@ pulse-agent-api  # Starts on port 8080
 | `GET /tools` | List all available tools |
 | `WS /ws/sre?token=...` | SRE agent WebSocket |
 | `WS /ws/security?token=...` | Security scanner WebSocket |
+| `WS /ws/monitor?token=...` | Autonomous monitor WebSocket (60s scan interval, 6 scanners, auto-fix) |
 
 ### WebSocket Protocol
 
@@ -323,6 +356,8 @@ Supported: `data_table`, `info_card_grid`, `badge_list`, `status_list`, `key_val
 
 | Pulse Agent | OpenShift Pulse UI | Protocol |
 |------------|-------------------|----------|
+| v1.5.0 | v5.13.0+ | 2 |
+| v1.4.0 | v5.12.0+ | 2 |
 | v1.3.0 | v5.6.0+ | 1 |
 | v1.2.0 | v5.6.0+ | 1 |
 | v1.1.0 | v5.5.0+ | 1 |
@@ -351,8 +386,8 @@ Only needed when `pyproject.toml` changes or for security patches:
 ### Build Image
 
 ```bash
-docker build -t your-registry/pulse-agent:1.3.0 .
-docker push your-registry/pulse-agent:1.3.0
+docker build -t your-registry/pulse-agent:1.5.0 .
+docker push your-registry/pulse-agent:1.5.0
 ```
 
 ### Helm Install
@@ -478,7 +513,7 @@ python -m pytest tests/ -v
 ---
 
 <p align="center">
-  <strong>62 tools</strong> &bull; <strong>10 runbooks</strong> &bull; <strong>8 tool categories</strong> &bull; <strong>239 tests</strong> &bull; <strong>Protocol v1</strong>
+  <strong>109 tools</strong> &bull; <strong>10 runbooks</strong> &bull; <strong>8 tool categories</strong> &bull; <strong>239 tests</strong> &bull; <strong>Protocol v2</strong>
 </p>
 
 <p align="center">
