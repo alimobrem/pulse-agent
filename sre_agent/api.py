@@ -104,7 +104,7 @@ async def version():
     """API protocol version. UI checks this on connect to detect mismatches."""
     return {
         "protocol": PROTOCOL_VERSION,
-        "agent": "1.4.0",
+        "agent": "1.5.0",
         "tools": len(SRE_ALL_TOOLS) + len(SEC_ALL_TOOLS),
         "features": ["component_specs", "ws_token_auth", "rate_limiting", "monitor", "fix_history", "predictions"],
     }

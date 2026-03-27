@@ -577,6 +577,7 @@ class MonitorSession:
         self.running = True
         self.scan_interval = int(os.environ.get("PULSE_AGENT_SCAN_INTERVAL", "300"))  # 5 min default
         self._last_findings: dict[str, dict] = {}  # deduplicate by title+category
+        self._recent_fixes: dict[str, float] = {}  # resource_key -> timestamp for cooldown
 
     async def send(self, data: dict) -> bool:
         """Send JSON, return False if connection lost."""
@@ -588,8 +589,23 @@ class MonitorSession:
             return False
 
     async def auto_fix(self, findings: list[dict]) -> None:
-        """Attempt to auto-fix findings when trust level permits."""
+        """Attempt to auto-fix findings when trust level permits.
+
+        Safety guardrails (confirmation gate is NOT used here — by design for
+        autonomous operation, see SECURITY.md):
+        - Rate limit: max 3 auto-fixes per scan cycle
+        - Cooldown: skip resources fixed in the last 5 minutes
+        - Bare pod protection: never delete pods without ownerReferences
+        """
+        fixes_this_cycle = 0
+        MAX_FIXES_PER_CYCLE = 3
+
         for finding in findings:
+            if fixes_this_cycle >= MAX_FIXES_PER_CYCLE:
+                logger.info("Auto-fix rate limit reached (%d/%d), skipping remaining findings",
+                            fixes_this_cycle, MAX_FIXES_PER_CYCLE)
+                break
+
             if not finding.get("autoFixable"):
                 continue
 
@@ -604,11 +620,45 @@ class MonitorSession:
             if not handler:
                 continue
 
+            # Cooldown: skip resources fixed in the last 5 minutes
+            resources = finding.get("resources", [])
+            resource_key = ""
+            if resources:
+                r = resources[0]
+                resource_key = f"{r.get('kind', '')}:{r.get('namespace', '')}:{r.get('name', '')}"
+            if resource_key and resource_key in self._recent_fixes:
+                cooldown_remaining = 300 - (time.time() - self._recent_fixes[resource_key])
+                if cooldown_remaining > 0:
+                    logger.info("Auto-fix cooldown: %s was fixed %.0fs ago, skipping (%.0fs remaining)",
+                                resource_key, time.time() - self._recent_fixes[resource_key], cooldown_remaining)
+                    continue
+
+            # Bare pod protection: don't delete pods that have no ownerReferences
+            if category == "crashloop" and resources:
+                r = resources[0]
+                if r.get("kind") == "Pod":
+                    try:
+                        core = get_core_client()
+                        pod = core.read_namespaced_pod(r["name"], r.get("namespace", "default"))
+                        if not pod.metadata.owner_references:
+                            logger.warning("Auto-fix skipped: Pod %s/%s has no ownerReferences (bare pod, won't be recreated)",
+                                           r.get("namespace", "default"), r["name"])
+                            continue
+                    except Exception as e:
+                        logger.warning("Auto-fix skipped: could not verify ownerReferences for %s: %s", r.get("name"), e)
+                        continue
+
+            logger.warning(
+                "Auto-fix executing WITHOUT confirmation gate (trust_level=%d, category=%s, resource=%s). "
+                "This is by design for autonomous operation.",
+                self.trust_level, category, resource_key,
+            )
+
             # Send executing report
             action_report = _make_action_report(
                 finding_id=finding["id"],
                 tool="",
-                inp={"category": category, "resources": finding.get("resources", [])},
+                inp={"category": category, "resources": resources},
                 status="executing",
                 reasoning=f"Auto-fix for {category}: {finding.get('title', '')}",
             )
@@ -625,10 +675,15 @@ class MonitorSession:
                 action_report["beforeState"] = before_state
                 action_report["afterState"] = after_state
                 action_report["durationMs"] = duration_ms
+                fixes_this_cycle += 1
+
+                # Record cooldown timestamp
+                if resource_key:
+                    self._recent_fixes[resource_key] = time.time()
 
                 logger.info(
-                    "Auto-fix completed: category=%s finding=%s tool=%s duration=%dms",
-                    category, finding["id"], tool, duration_ms,
+                    "Auto-fix completed: category=%s finding=%s tool=%s duration=%dms (%d/%d this cycle)",
+                    category, finding["id"], tool, duration_ms, fixes_this_cycle, MAX_FIXES_PER_CYCLE,
                 )
             except Exception as e:
                 duration_ms = _ts() - start_ms
@@ -648,7 +703,7 @@ class MonitorSession:
             save_action(
                 action_report,
                 category=category,
-                resources=finding.get("resources"),
+                resources=resources,
             )
 
     async def run_scan(self) -> None:

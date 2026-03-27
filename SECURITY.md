@@ -18,8 +18,8 @@ Report security issues to [GitHub Issues](https://github.com/alimobrem/pulse-age
 - No wildcard RBAC rules
 
 ### RBAC Levels
-- **Default:** `get`, `list`, `watch` on pods, nodes, events, services, namespaces, configmaps, deployments, statefulsets, daemonsets, jobs, cronjobs, HPAs, metrics, RBAC objects, network policies, ingresses, routes, SCCs, and OLM/OpenShift resources
-- **`allowWriteOperations=true`:** Adds `delete` pods, `patch` nodes, `patch`/`update` deployments/scale, `create` network policies, `create`/`update`/`patch` configmaps, `patch`/`create` on workload resources (deployments, statefulsets, daemonsets, jobs, cronjobs, HPAs)
+- **Default:** `get`, `list`, `watch` on pods, nodes, events, services, namespaces, configmaps, deployments, statefulsets, daemonsets, jobs, cronjobs, HPAs, metrics, RBAC objects, network policies, ingresses, routes, SCCs, OLM resources (read-only), and ArgoCD resources (read-only)
+- **`allowWriteOperations=true`:** Adds `delete` pods, `create` pods/eviction, `patch` nodes, `patch`/`update` deployments/scale, `create` namespaces, `create` network policies, `create`/`update`/`patch` configmaps, `patch`/`create` on workload resources (deployments, statefulsets, daemonsets, jobs, cronjobs, HPAs), `create` on OLM resources (subscriptions, operatorgroups, catalogsources), `create`/`patch`/`update` on ArgoCD resources (applications, appprojects, applicationsets)
 - **`allowSecretAccess=true`:** Adds `get`, `list` on secrets
 
 ### Trust Levels
@@ -31,7 +31,10 @@ The agent supports trust levels 0-4 when connected via the Monitor endpoint:
 - **Level 4 (Full autonomous):** Apply all fixes automatically
 
 ### Confirmation Gate
-All write operations require programmatic user approval regardless of trust level. The confirmation gate is enforced in code — the agent cannot bypass it. Every write Kubernetes API call requires a `confirm_request`/`confirm_response` round-trip before execution. This applies even at trust level 4.
+There are two execution paths with different confirmation behavior:
+
+- **Interactive agent (`/ws/sre`):** All write operations require programmatic user approval regardless of trust level. The confirmation gate is enforced in code — the agent cannot bypass it. Every write Kubernetes API call requires a `confirm_request`/`confirm_response` round-trip before execution.
+- **Monitor auto-fix (`/ws/monitor` at trust level 3+):** Fixes execute WITHOUT the confirmation gate. This is by design for autonomous remediation. Safety guardrails are enforced instead: rate limiting (max 3 auto-fixes per scan cycle), cooldown (5-minute per-resource cooldown to prevent fix loops), and bare pod protection (pods without ownerReferences are never deleted, as they would not be recreated by a controller).
 
 ### Input Sanitization
 - Context fields (kind, namespace, name) validated against `^[a-zA-Z0-9\-._/: ]{0,253}$`
