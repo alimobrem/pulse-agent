@@ -316,6 +316,23 @@ See [Component Specs](#component-specs) for all `spec.kind` values.
 }
 ```
 
+#### `findings_snapshot` — Active findings reconciliation
+
+Sent after each scan cycle. Contains the IDs of all currently active findings. The UI removes any locally-held findings whose IDs are not in `activeIds`, preventing stale entries from accumulating after issues are resolved.
+
+```json
+{
+  "type": "findings_snapshot",
+  "activeIds": ["f-abc123", "f-def456"],
+  "timestamp": 1711540800
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `activeIds` | `string[]` | IDs of all findings that are still active |
+| `timestamp` | `number` | Unix timestamp of the snapshot |
+
 #### `fix_history` — Response to `get_fix_history`
 
 ```json
