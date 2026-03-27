@@ -145,11 +145,11 @@ sec> Show me all pods running under privileged SCCs
 
 ### Safety Controls
 
-- **Confirmation gate** — All write operations require explicit `y/N` user confirmation. Enforced programmatically, not just via prompt.
+- **Confirmation gate** — All write operations require explicit `y/N` user confirmation. This is enforced programmatically in code, not just via prompt instructions. The agent cannot bypass the confirmation gate regardless of trust level — every write operation requires a `confirm_request`/`confirm_response` round-trip before execution.
 - **Input validation** — Bounds-checked: replicas (0-100), log tail lines (1-1000), grace period (1-300s). Lists truncated at 200 items.
 - **Max iteration guard** — Tool loop capped at 25 iterations.
 - **Audit logging** — Every tool invocation logged to `/tmp/pulse_agent_audit.log` in structured JSON. Cluster audit trail via `record_audit_entry` tool writes to a ConfigMap.
-- **Read-only by default** — Security scanner has no write tools. SRE write tools require RBAC opt-in.
+- **Read-only by default** — The Helm chart's ClusterRole grants only `get`, `list`, `watch` verbs on cluster resources by default. The SRE agent's write tools (scale, restart, cordon, delete, apply) are registered in the tool list but will fail with `403 Forbidden` unless the chart is deployed with `rbac.allowWriteOperations=true`. The security scanner has no write tools at all.
 
 ### Container Security
 
@@ -160,10 +160,32 @@ sec> Show me all pods running under privileged SCCs
 
 ### RBAC
 
+The agent's Kubernetes permissions are controlled by the Helm chart's ClusterRole. There are three levels:
+
+**Default (read-only):** `get`, `list`, `watch` on pods, nodes, events, services, namespaces, configmaps, PVCs, resource quotas, deployments, replicasets, statefulsets, daemonsets, jobs, cronjobs, HPAs, metrics, RBAC roles/bindings, network policies, ingresses, routes, SCCs, OLM resources, and cluster version/operators.
+
+**With `rbac.allowWriteOperations=true`:** Adds `delete` on pods, `patch` on nodes (cordon/uncordon), `patch`/`update` on deployments and deployments/scale, `create` on network policies, `create`/`update`/`patch` on configmaps (audit trail), and `patch`/`create` on deployments, statefulsets, daemonsets, jobs, cronjobs, HPAs (for apply_yaml).
+
+**With `rbac.allowSecretAccess=true`:** Adds `get`, `list` on secrets (required for the security scanner's secret hygiene audit).
+
 | Flag | Default | Grants |
 |------|---------|--------|
 | `rbac.allowWriteOperations` | `false` | Scale, restart, cordon, delete, apply YAML, create NetworkPolicy |
 | `rbac.allowSecretAccess` | `false` | List/read secrets (for security scanning) |
+
+### Trust Levels
+
+When connected to the Pulse UI's Monitor endpoint, the agent operates at a configurable trust level:
+
+| Level | Name | Autonomy |
+|-------|------|----------|
+| 0 | Monitor only | Observe and report findings — no action taken |
+| 1 | Suggest fixes | Propose remediations but take no action |
+| 2 | Ask before applying | Propose fixes and prompt the user for approval before applying |
+| 3 | Auto-fix safe categories | Automatically apply fixes for safe categories (e.g., restart crashed pods); prompt for others |
+| 4 | Full autonomous | Apply all fixes automatically |
+
+**Important:** Write operations always require programmatic user approval via the confirmation gate, regardless of trust level. Even at trust level 4, the agent cannot execute write Kubernetes API calls without a `confirm_response` round-trip. Trust level controls what the agent *proposes*, not what it can bypass.
 
 ## Tools
 
