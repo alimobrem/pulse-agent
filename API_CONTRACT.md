@@ -1,6 +1,6 @@
 # Pulse API Contract
 
-**Protocol Version: 1**
+**Protocol Version: 2**
 
 Defines the WebSocket protocol between the Pulse UI and Pulse Agent. Both repos must implement the same protocol version for compatibility.
 
@@ -21,10 +21,10 @@ Defines the WebSocket protocol between the Pulse UI and Pulse Agent. Both repos 
 
 ```json
 {
-  "protocol": "1",
-  "agent": "1.3.0",
+  "protocol": "2",
+  "agent": "1.4.0",
   "tools": 68,
-  "features": ["component_specs", "ws_token_auth", "rate_limiting"]
+  "features": ["component_specs", "ws_token_auth", "rate_limiting", "monitor", "fix_history", "predictions"]
 }
 ```
 
@@ -34,6 +34,7 @@ Defines the WebSocket protocol between the Pulse UI and Pulse Agent. Both repos 
 |------|-------------|
 | `ws://.../ws/sre` | SRE agent mode |
 | `ws://.../ws/security` | Security agent mode |
+| `ws://.../ws/monitor` | Autonomous cluster monitoring (Protocol v2) |
 
 ---
 
@@ -94,6 +95,68 @@ Messages sent by the UI to the agent over WebSocket.
   "type": "clear"
 }
 ```
+
+### `/ws/monitor` Client-to-Server Messages
+
+#### `subscribe_monitor` — Subscribe to cluster monitoring
+
+Sent as the first message after connecting to `/ws/monitor`. Configures the monitoring session.
+
+```json
+{
+  "type": "subscribe_monitor",
+  "trustLevel": 1,
+  "autoFixCategories": ["crash_loop", "resource_pressure"]
+}
+```
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `type` | `"subscribe_monitor"` | yes | |
+| `trustLevel` | `integer` | no | Autonomous action trust level (0–3). Clamped to server-configured max. Default: `1` |
+| `autoFixCategories` | `string[]` | no | Categories the agent may auto-fix without prompting |
+
+#### `trigger_scan` — Trigger an immediate cluster scan
+
+```json
+{
+  "type": "trigger_scan"
+}
+```
+
+Triggers an immediate cluster scan. Results are pushed as `finding` and `monitor_status` events.
+
+#### `action_response` — Respond to an autonomous action proposal
+
+```json
+{
+  "type": "action_response",
+  "actionId": "abc123",
+  "approved": true
+}
+```
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `type` | `"action_response"` | yes | |
+| `actionId` | `string` | yes | ID of the proposed action |
+| `approved` | `boolean` | yes | Whether the user approved the action |
+
+#### `get_fix_history` — Request fix history
+
+```json
+{
+  "type": "get_fix_history",
+  "page": 1,
+  "filters": {"status": "applied", "category": "crash_loop"}
+}
+```
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `type` | `"get_fix_history"` | yes | |
+| `page` | `integer` | no | Page number (default: `1`) |
+| `filters` | `object` | no | Optional filters (`status`, `category`, `since`, `search`) |
 
 ---
 
@@ -193,6 +256,78 @@ See [Component Specs](#component-specs) for all `spec.kind` values.
 }
 ```
 
+### `/ws/monitor` Server-to-Client Events
+
+#### `finding` — Cluster issue detected
+
+```json
+{
+  "type": "finding",
+  "id": "f-abc123",
+  "severity": "warning",
+  "category": "crash_loop",
+  "resource": {"kind": "Pod", "name": "api-server-xyz", "namespace": "production"},
+  "summary": "Pod crash-looping: CrashLoopBackOff (5 restarts in 10m)",
+  "details": "...",
+  "timestamp": 1711540800
+}
+```
+
+#### `prediction` — Predicted future issue
+
+```json
+{
+  "type": "prediction",
+  "id": "p-abc123",
+  "category": "resource_pressure",
+  "resource": {"kind": "Node", "name": "worker-03"},
+  "summary": "Node memory predicted to exceed 90% within 2 hours",
+  "confidence": 0.87,
+  "horizon": "2h",
+  "timestamp": 1711540800
+}
+```
+
+#### `action_report` — Result of an autonomous or approved action
+
+```json
+{
+  "type": "action_report",
+  "actionId": "a-abc123",
+  "findingId": "f-abc123",
+  "action": "restart_pod",
+  "status": "applied",
+  "summary": "Restarted pod api-server-xyz",
+  "before": {},
+  "after": {},
+  "timestamp": 1711540800
+}
+```
+
+#### `monitor_status` — Scan cycle status update
+
+```json
+{
+  "type": "monitor_status",
+  "scanning": false,
+  "lastScan": 1711540800,
+  "findingsCount": 3,
+  "predictionsCount": 1
+}
+```
+
+#### `fix_history` — Response to `get_fix_history`
+
+```json
+{
+  "type": "fix_history",
+  "items": [],
+  "total": 0,
+  "page": 1,
+  "pageSize": 20
+}
+```
+
 ---
 
 ## Component Specs
@@ -241,13 +376,15 @@ The UI sends a `GET /version` request before connecting. If the agent's `protoco
 
 | Version | Changes | UI Version | Agent Version |
 |---------|---------|------------|---------------|
+| `2` | `/ws/monitor` endpoint for autonomous cluster scanning, `trigger_scan` / `subscribe_monitor` / `action_response` / `get_fix_history` client messages, `finding` / `prediction` / `action_report` / `monitor_status` server events, fix history REST endpoints, predictions REST endpoint | v5.12.0+ | v1.4.0+ |
 | `1` | Initial protocol: text/thinking streaming, tool use, components, confirmations | v5.0.0+ | v1.0.0+ |
 
 ### Release Compatibility Matrix
 
 | UI Version | Agent Version | Protocol | Status |
 |------------|--------------|----------|--------|
-| v5.11.0 | v1.3.0 | 1 | Current |
+| v5.12.0 | v1.4.0 | 2 | Current |
+| v5.11.0 | v1.3.0 | 1 | Compatible |
 | v5.10.0 | v1.3.0 | 1 | Compatible |
 | v5.8.0 | v1.2.0 | 1 | Compatible |
 | v5.0.0–v5.7.0 | v1.0.0–v1.1.0 | 1 | Compatible |
