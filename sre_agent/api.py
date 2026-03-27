@@ -297,6 +297,11 @@ async def websocket_agent(websocket: WebSocket, mode: str):
         {"type": "done", "full_response": "..."}
         {"type": "error", "message": "..."}
     """
+    if mode == "monitor":
+        # Redirect to the dedicated monitor handler — /ws/{mode} catches it
+        # before /ws/monitor due to registration order
+        await websocket_monitor(websocket)
+        return
     if mode not in ("sre", "security"):
         await websocket.close(code=4000, reason="Invalid mode. Use 'sre' or 'security'. For monitoring, use /ws/monitor.")
         return
