@@ -503,6 +503,8 @@ async def websocket_monitor(websocket: WebSocket):
     logger.info("Monitor client connected")
 
     # Wait for subscribe_monitor message to get config
+    # Server-side trust level cap: client cannot escalate beyond this
+    max_trust_level = int(os.environ.get("PULSE_AGENT_MAX_TRUST_LEVEL", "3"))
     trust_level = 1
     auto_fix_categories: list[str] = []
 
@@ -510,9 +512,15 @@ async def websocket_monitor(websocket: WebSocket):
         raw = await asyncio.wait_for(websocket.receive_text(), timeout=10)
         data = json.loads(raw)
         if data.get("type") == "subscribe_monitor":
-            trust_level = data.get("trustLevel", 1)
-            auto_fix_categories = data.get("autoFixCategories", [])
-            logger.info("Monitor subscribed: trust=%d categories=%s", trust_level, auto_fix_categories)
+            requested_trust = data.get("trustLevel", 1)
+            # Clamp to server-configured maximum — client cannot escalate
+            trust_level = max(0, min(int(requested_trust), max_trust_level))
+            auto_fix_categories = [
+                str(c) for c in (data.get("autoFixCategories") or [])
+                if isinstance(c, str) and len(c) < 64
+            ]
+            logger.info("Monitor subscribed: trust=%d (requested=%s, max=%d) categories=%s",
+                        trust_level, requested_trust, max_trust_level, auto_fix_categories)
     except (asyncio.TimeoutError, Exception):
         pass  # Use defaults
 
@@ -521,10 +529,21 @@ async def websocket_monitor(websocket: WebSocket):
     # Start scan loop as background task
     scan_task = asyncio.create_task(session.run_loop())
 
-    # Listen for client messages
+    # Listen for client messages (with rate limiting)
+    message_timestamps: list[float] = []
+
     try:
         while True:
             raw = await websocket.receive_text()
+
+            # Rate limiting (same as /ws/sre)
+            now = time.time()
+            message_timestamps[:] = [t for t in message_timestamps if now - t < 60]
+            if len(message_timestamps) >= MAX_MESSAGES_PER_MINUTE:
+                await websocket.send_json({"type": "error", "message": "Rate limited. Max 10 messages per minute."})
+                continue
+            message_timestamps.append(now)
+
             try:
                 data = json.loads(raw)
             except json.JSONDecodeError:
@@ -559,7 +578,22 @@ async def websocket_monitor(websocket: WebSocket):
 
 # ── Protocol v2: REST endpoints ───────────────────────────────────────────
 
-from fastapi import Query
+from fastapi import Query, Header, HTTPException
+
+
+def _verify_rest_token(authorization: str | None = Header(None), token: str | None = Query(None)):
+    """Verify token for REST endpoints — accepts Bearer header or query param."""
+    import hmac as _hmac
+    expected = os.environ.get("PULSE_AGENT_WS_TOKEN", "")
+    if not expected:
+        raise HTTPException(status_code=503, detail="Server not configured")
+    client_token = ""
+    if authorization and authorization.startswith("Bearer "):
+        client_token = authorization[7:]
+    elif token:
+        client_token = token
+    if not client_token or not _hmac.compare_digest(client_token, expected):
+        raise HTTPException(status_code=401, detail="Unauthorized")
 
 
 @app.get("/fix-history")
@@ -570,8 +604,11 @@ async def rest_fix_history(
     category: str | None = Query(None),
     since: int | None = Query(None),
     search: str | None = Query(None),
+    authorization: str | None = Header(None),
+    _token: str | None = Query(None, alias="token"),
 ):
-    """Paginated fix history (Protocol v2)."""
+    """Paginated fix history (Protocol v2). Requires token auth."""
+    _verify_rest_token(authorization, _token)
     filters = {}
     if status:
         filters["status"] = status
@@ -585,8 +622,13 @@ async def rest_fix_history(
 
 
 @app.get("/fix-history/{action_id}")
-async def rest_action_detail(action_id: str):
-    """Single action detail with before/after state (Protocol v2)."""
+async def rest_action_detail(
+    action_id: str,
+    authorization: str | None = Header(None),
+    token: str | None = Query(None),
+):
+    """Single action detail with before/after state (Protocol v2). Requires token auth."""
+    _verify_rest_token(authorization, token)
     result = get_action_detail(action_id)
     if result is None:
         from fastapi.responses import JSONResponse
@@ -595,8 +637,10 @@ async def rest_action_detail(action_id: str):
 
 
 @app.get("/predictions")
-async def rest_predictions():
-    """Active predictions from the most recent scan (Protocol v2)."""
-    # Predictions are pushed via WebSocket; this endpoint returns cached results
-    # For now, return empty — predictions will be populated when scanner runs
+async def rest_predictions(
+    authorization: str | None = Header(None),
+    token: str | None = Query(None),
+):
+    """Active predictions from the most recent scan (Protocol v2). Requires token auth."""
+    _verify_rest_token(authorization, token)
     return {"predictions": [], "total": 0}
