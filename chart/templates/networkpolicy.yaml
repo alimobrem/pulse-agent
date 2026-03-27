@@ -27,12 +27,16 @@ spec:
       - protocol: TCP
         port: 53
     # HTTPS (cloud APIs, OAuth, Anthropic)
-    - to: []
+    - to:
+      - ipBlock:
+          cidr: 0.0.0.0/0
       ports:
       - protocol: TCP
         port: 443
     # Kubernetes API
-    - to: []
+    - to:
+      - ipBlock:
+          cidr: 0.0.0.0/0
       ports:
       - protocol: TCP
         port: 6443
