@@ -42,6 +42,14 @@ def validate_config() -> None:
     except ValueError:
         errors.append("PULSE_AGENT_TOOL_TIMEOUT must be an integer")
 
+    # Memory
+    memory_enabled = os.getenv("PULSE_AGENT_MEMORY", "1").lower()
+    if memory_enabled not in ("0", "1", "true", "false", "yes", "no", ""):
+        errors.append(f"PULSE_AGENT_MEMORY '{memory_enabled}' is not a valid boolean (use 1/0/true/false)")
+    memory_path = os.getenv("PULSE_AGENT_MEMORY_PATH", "/tmp/pulse_agent/memory.db")
+    if memory_enabled in ("1", "true", "yes") and not memory_path:
+        errors.append("PULSE_AGENT_MEMORY_PATH must be set when memory is enabled")
+
     if errors:
         for e in errors:
             logger.critical("Config error: %s", e)

@@ -43,11 +43,11 @@ networkPolicy:
 
 # Self-improving memory system
 memory:
-  enabled: false
+  enabled: true
   dbPath: "/tmp/pulse_agent/memory.db"
   # For persistent memory across pod restarts, enable a PVC
   persistence:
-    enabled: false
+    enabled: true
     storageClass: ""
     size: 1Gi
 

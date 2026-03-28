@@ -18,7 +18,8 @@ logger = logging.getLogger("pulse_agent")
 
 
 def is_memory_enabled() -> bool:
-    return os.environ.get("PULSE_AGENT_MEMORY", "").lower() in ("1", "true", "yes")
+    val = os.environ.get("PULSE_AGENT_MEMORY", "1").lower()
+    return val in ("1", "true", "yes")
 
 
 class MemoryManager:

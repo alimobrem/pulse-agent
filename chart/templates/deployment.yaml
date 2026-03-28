@@ -86,6 +86,8 @@ spec:
               value: "1"
             - name: PULSE_AGENT_MEMORY_PATH
               value: {{ .Values.memory.dbPath | quote }}
+            - name: PULSE_AGENT_FIX_DB
+              value: {{ .Values.memory.dbPath | replace "memory.db" "fix_history.db" | quote }}
             {{- end }}
             - name: PULSE_AGENT_WS_TOKEN
               valueFrom:
