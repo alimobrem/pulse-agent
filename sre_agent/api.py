@@ -38,6 +38,10 @@ from .security_agent import (
 
 logger = logging.getLogger("pulse_agent.api")
 
+_EVAL_STATUS_CACHE: dict | None = None
+_EVAL_STATUS_CACHE_TS_MS = 0
+_EVAL_STATUS_CACHE_TTL_MS = 60_000
+
 # WebSocket connection liveness tracking
 _ws_alive: dict[str, bool] = {}
 
@@ -566,8 +570,8 @@ async def websocket_monitor(websocket: WebSocket):
             elif msg_type == "action_response":
                 action_id = data.get("actionId", "")
                 approved = data.get("approved", False)
-                logger.info("Action response: id=%s approved=%s", action_id, approved)
-                # TODO: wire up to autonomous action execution
+                handled = session.resolve_action_response(action_id, approved)
+                logger.info("Action response: id=%s approved=%s handled=%s", action_id, approved, handled)
 
             elif msg_type == "get_fix_history":
                 filters = data.get("filters")
@@ -658,19 +662,36 @@ async def rest_predictions(
     return {"predictions": [], "total": 0}
 
 
+@app.get("/monitor/capabilities")
+async def monitor_capabilities():
+    """Expose monitor trust/capability limits so UI can align controls."""
+    from .monitor import AUTO_FIX_HANDLERS
+
+    max_trust_level = int(os.environ.get("PULSE_AGENT_MAX_TRUST_LEVEL", "3"))
+    return {
+        "max_trust_level": max(0, min(max_trust_level, 4)),
+        "supported_auto_fix_categories": sorted(AUTO_FIX_HANDLERS.keys()),
+    }
+
+
 @app.get("/eval/status")
 async def eval_status():
     """Current eval gate status snapshot for UI surfaces."""
+    global _EVAL_STATUS_CACHE, _EVAL_STATUS_CACHE_TS_MS
     from .evals.outcomes import analyze_windows
     from .evals.runner import evaluate_suite
     from .evals.scenarios import load_suite
+
+    now_ms = int(time.time() * 1000)
+    if _EVAL_STATUS_CACHE and (now_ms - _EVAL_STATUS_CACHE_TS_MS) < _EVAL_STATUS_CACHE_TTL_MS:
+        return _EVAL_STATUS_CACHE
 
     release = evaluate_suite("release", load_suite("release"))
     safety = evaluate_suite("safety", load_suite("safety"))
     integration = evaluate_suite("integration", load_suite("integration"))
     outcomes = analyze_windows(current_days=7, baseline_days=7)
 
-    return {
+    payload = {
         "quality_gate_passed": bool(release.gate_passed) and bool(outcomes["gate_passed"]),
         "generated_at_ms": outcomes.get("generated_at_ms"),
         "release": {
@@ -697,3 +718,6 @@ async def eval_status():
             "policy": outcomes.get("policy", {}),
         },
     }
+    _EVAL_STATUS_CACHE = payload
+    _EVAL_STATUS_CACHE_TS_MS = now_ms
+    return payload

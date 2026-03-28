@@ -81,6 +81,7 @@ def _make_action_report(
     tool: str,
     inp: dict,
     status: str,
+    action_id: str | None = None,
     before_state: str = "",
     after_state: str = "",
     error: str | None = None,
@@ -89,7 +90,7 @@ def _make_action_report(
 ) -> dict:
     return {
         "type": "action_report",
-        "id": f"a-{uuid.uuid4().hex[:12]}",
+        "id": action_id or f"a-{uuid.uuid4().hex[:12]}",
         "findingId": finding_id,
         "tool": tool,
         "input": inp,
@@ -594,6 +595,15 @@ class MonitorSession:
         self.scan_interval = int(os.environ.get("PULSE_AGENT_SCAN_INTERVAL", "300"))  # 5 min default
         self._last_findings: dict[str, dict] = {}  # deduplicate by title+category
         self._recent_fixes: dict[str, float] = {}  # resource_key -> timestamp for cooldown
+        self._pending_action_approvals: dict[str, asyncio.Future] = {}
+
+    def resolve_action_response(self, action_id: str, approved: bool) -> bool:
+        """Resolve an outstanding action approval request."""
+        future = self._pending_action_approvals.get(action_id)
+        if not future or future.done():
+            return False
+        future.set_result(bool(approved))
+        return True
 
     async def send(self, data: dict) -> bool:
         """Send JSON, return False if connection lost."""
@@ -664,21 +674,48 @@ class MonitorSession:
                         logger.warning("Auto-fix skipped: could not verify ownerReferences for %s: %s", r.get("name"), e)
                         continue
 
-            logger.warning(
-                "Auto-fix executing WITHOUT confirmation gate (trust_level=%d, category=%s, resource=%s). "
-                "This is by design for autonomous operation.",
-                self.trust_level, category, resource_key,
-            )
-
-            # Send executing report
             confidence = _estimate_auto_fix_confidence(finding)
             action_report = _make_action_report(
                 finding_id=finding["id"],
                 tool="",
                 inp={"category": category, "resources": resources, "confidence": confidence},
-                status="executing",
+                status="proposed" if self.trust_level == 2 else "executing",
                 reasoning=f"Auto-fix for {category}: {finding.get('title', '')} (confidence={confidence:.2f})",
             )
+
+            # Ask-first mode: emit proposal and wait for explicit decision.
+            if self.trust_level == 2:
+                await self.send(action_report)
+                loop = asyncio.get_running_loop()
+                approval_future = loop.create_future()
+                self._pending_action_approvals[action_report["id"]] = approval_future
+                try:
+                    approved = bool(await asyncio.wait_for(approval_future, timeout=120))
+                except asyncio.TimeoutError:
+                    approved = False
+                finally:
+                    self._pending_action_approvals.pop(action_report["id"], None)
+
+                if not approved:
+                    action_report["status"] = "failed"
+                    action_report["error"] = "Rejected by user or approval timed out"
+                    await self.send(action_report)
+                    save_action(
+                        action_report,
+                        category=category,
+                        resources=resources,
+                    )
+                    continue
+
+                action_report["status"] = "executing"
+            else:
+                logger.warning(
+                    "Auto-fix executing WITHOUT confirmation gate (trust_level=%d, category=%s, resource=%s). "
+                    "This is by design for autonomous operation.",
+                    self.trust_level, category, resource_key,
+                )
+
+            # Send executing report
             await self.send(action_report)
 
             start_ms = _ts()
@@ -778,8 +815,8 @@ class MonitorSession:
             len(self._last_findings), len(new_findings), scan_duration,
         )
 
-        # Auto-fix at trust level 3+
-        if self.trust_level >= 3:
+        # Ask-first and auto-fix modes
+        if self.trust_level >= 2:
             await self.auto_fix(all_findings)
 
     async def run_loop(self) -> None:

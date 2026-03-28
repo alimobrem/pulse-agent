@@ -197,17 +197,18 @@ When connected to the Pulse UI's Monitor endpoint, the agent operates at a confi
 |-------|------|----------|
 | 0 | Monitor only | Observe and report findings — no action taken |
 | 1 | Suggest fixes | Propose remediations but take no action |
-| 2 | Ask before applying | Propose fixes and prompt the user for approval before applying |
-| 3 | Auto-fix safe categories | Automatically apply fixes for safe categories (e.g., restart crashed pods); prompt for others |
-| 4 | Full autonomous | Apply all fixes automatically |
+| 2 | Ask before applying | Propose auto-fix actions and wait for explicit user approval |
+| 3 | Auto-fix safe categories | Automatically apply fixes for enabled safe categories |
+| 4 | Full autonomous | Available only if enabled server-side via `PULSE_AGENT_MAX_TRUST_LEVEL` |
 
-**Important:** Write operations always require programmatic user approval via the confirmation gate, regardless of trust level. Even at trust level 4, the agent cannot execute write Kubernetes API calls without a `confirm_response` round-trip. Trust level controls what the agent *proposes*, not what it can bypass.
+**Important:** Interactive SRE/Security chat tool writes still use confirmation gates. Monitor auto-fix uses a separate trust policy: level 2 requires explicit approval (`action_response`), level 3+ can execute configured safe categories automatically.
 
 ### Monitor Auto-Fix Integration with UI Trust Levels
 
 The `/ws/monitor` endpoint implements autonomous cluster scanning with a graduated auto-fix model tied to the UI's trust level slider:
 
-1. **UI sets trust level** — The Pulse UI sends a `subscribe_monitor` message with `trustLevel` (0-4) and an optional `autoFixCategories` list (e.g., `["crashloop", "resource_limits", "cert_expiry"]`).
+1. **UI sets trust level** — The Pulse UI sends a `subscribe_monitor` message with `trustLevel` and `autoFixCategories`.
+   The server clamps trust to `PULSE_AGENT_MAX_TRUST_LEVEL` and publishes supported categories at `GET /monitor/capabilities`.
 2. **Agent scans continuously** — The monitor loop runs every 60 seconds, pushing `finding` events for detected issues and `prediction` events for forecasted problems.
 3. **Auto-fix decision** — When a finding is auto-fixable and matches an enabled category, the agent checks the trust level:
    - **Level 0-1**: Finding is reported only. The UI displays it in the Monitor view.
@@ -324,6 +325,8 @@ pulse-agent-api  # Starts on port 8080
 | `WS /ws/sre?token=...` | SRE agent WebSocket |
 | `WS /ws/security?token=...` | Security scanner WebSocket |
 | `WS /ws/monitor?token=...` | Autonomous monitor WebSocket (60s scan interval, 6 scanners, auto-fix) |
+| `GET /monitor/capabilities` | Monitor trust/capability limits for UI alignment |
+| `GET /eval/status` | Cached eval quality gate snapshot for UI |
 
 ### WebSocket Protocol
 
