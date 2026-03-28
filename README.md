@@ -215,8 +215,10 @@ The `/ws/monitor` endpoint implements autonomous cluster scanning with a graduat
    - **Level 2**: Agent sends an `action_report` with `status: "proposed"`. The UI shows an approval card; the user clicks Approve/Reject, which sends `action_response`.
    - **Level 3**: Safe categories (those in `autoFixCategories`) are applied automatically. Others require approval.
    - **Level 4**: All fixable findings are applied automatically. Actions are logged and reversible via the rollback endpoint.
-4. **Rollback** — Every applied fix records a `beforeState` snapshot. The UI's Monitor > History tab shows all actions with a Rollback button that calls `POST /api/agent/actions/:id/rollback`.
-5. **Stale finding cleanup** — After each scan cycle, the agent sends a `findings_snapshot` event with all active finding IDs. The UI removes any findings not in the snapshot, preventing stale entries from accumulating.
+4. **Critical investigation loop** — Critical findings can trigger proactive read-only investigation. The monitor emits `investigation_report` events with suspected cause and recommended fix.
+5. **Post-fix verification** — Successful actions are verified on the next scan. The monitor emits `verification_report` and annotates action history with `verificationStatus`.
+6. **Rollback** — Every applied fix records a `beforeState` snapshot. The UI's Monitor > History tab shows all actions with a Rollback button that calls `POST /api/agent/actions/:id/rollback`.
+7. **Stale finding cleanup** — After each scan cycle, the agent sends a `findings_snapshot` event with all active finding IDs. The UI removes any findings not in the snapshot, preventing stale entries from accumulating.
 
 The trust level is persisted in the UI's `localStorage` (via `trustStore`) and displayed on the Monitor view's Config tab. The confirmation gate remains active at all levels for Kubernetes write operations.
 

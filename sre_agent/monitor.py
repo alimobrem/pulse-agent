@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import time
 import uuid
 from datetime import datetime, timezone
@@ -107,7 +108,6 @@ def _make_action_report(
 # ── Fix History (SQLite) ──────────────────────────────────────────────────
 
 import sqlite3
-import os
 
 _FIX_DB_PATH = os.environ.get("PULSE_AGENT_FIX_DB", os.path.expanduser("~/.pulse_agent/fix_history.db"))
 
@@ -127,11 +127,30 @@ CREATE TABLE IF NOT EXISTS actions (
     duration_ms INTEGER,
     rollback_available INTEGER DEFAULT 0,
     rollback_action TEXT,
-    resources TEXT
+    resources TEXT,
+    verification_status TEXT,
+    verification_evidence TEXT,
+    verification_timestamp INTEGER
 );
 CREATE INDEX IF NOT EXISTS idx_actions_ts ON actions(timestamp DESC);
 CREATE INDEX IF NOT EXISTS idx_actions_status ON actions(status);
 CREATE INDEX IF NOT EXISTS idx_actions_category ON actions(category);
+CREATE TABLE IF NOT EXISTS investigations (
+    id TEXT PRIMARY KEY,
+    finding_id TEXT,
+    timestamp INTEGER,
+    category TEXT,
+    severity TEXT,
+    status TEXT,
+    summary TEXT,
+    suspected_cause TEXT,
+    recommended_fix TEXT,
+    confidence REAL,
+    error TEXT,
+    resources TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_investigations_ts ON investigations(timestamp DESC);
+CREATE INDEX IF NOT EXISTS idx_investigations_finding ON investigations(finding_id);
 """
 
 
@@ -140,6 +159,16 @@ def _get_fix_db() -> sqlite3.Connection:
     conn = sqlite3.connect(_FIX_DB_PATH)
     conn.row_factory = sqlite3.Row
     conn.executescript(_FIX_SCHEMA)
+    # Lightweight migrations for existing databases
+    for stmt in (
+        "ALTER TABLE actions ADD COLUMN verification_status TEXT",
+        "ALTER TABLE actions ADD COLUMN verification_evidence TEXT",
+        "ALTER TABLE actions ADD COLUMN verification_timestamp INTEGER",
+    ):
+        try:
+            conn.execute(stmt)
+        except sqlite3.OperationalError:
+            pass
     return conn
 
 
@@ -151,8 +180,9 @@ def save_action(action: dict, category: str = "", resources: list[dict] | None =
             """INSERT OR REPLACE INTO actions
                (id, finding_id, timestamp, category, tool, input, status,
                 before_state, after_state, error, reasoning, duration_ms,
-                rollback_available, rollback_action, resources)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                rollback_available, rollback_action, resources, verification_status,
+                verification_evidence, verification_timestamp)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 action["id"],
                 action.get("findingId", ""),
@@ -169,6 +199,9 @@ def save_action(action: dict, category: str = "", resources: list[dict] | None =
                 0,
                 "",
                 json.dumps(resources or []),
+                action.get("verificationStatus"),
+                action.get("verificationEvidence"),
+                action.get("verificationTimestamp"),
             ),
         )
         conn.commit()
@@ -225,6 +258,9 @@ def get_fix_history(page: int = 1, page_size: int = 20, filters: dict | None = N
                 "rollbackAvailable": bool(r["rollback_available"]),
                 "rollbackAction": json.loads(r["rollback_action"]) if r["rollback_action"] else None,
                 "resources": json.loads(r["resources"]) if r["resources"] else [],
+                "verificationStatus": r["verification_status"],
+                "verificationEvidence": r["verification_evidence"],
+                "verificationTimestamp": r["verification_timestamp"],
             })
 
         conn.close()
@@ -258,10 +294,59 @@ def get_action_detail(action_id: str) -> dict | None:
             "rollbackAvailable": bool(row["rollback_available"]),
             "rollbackAction": json.loads(row["rollback_action"]) if row["rollback_action"] else None,
             "resources": json.loads(row["resources"]) if row["resources"] else [],
+            "verificationStatus": row["verification_status"],
+            "verificationEvidence": row["verification_evidence"],
+            "verificationTimestamp": row["verification_timestamp"],
         }
     except Exception as e:
         logger.error("Failed to get action detail: %s", e)
         return None
+
+
+def save_investigation(report: dict, finding: dict) -> None:
+    """Persist a proactive investigation report."""
+    try:
+        conn = _get_fix_db()
+        conn.execute(
+            """INSERT OR REPLACE INTO investigations
+               (id, finding_id, timestamp, category, severity, status, summary,
+                suspected_cause, recommended_fix, confidence, error, resources)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                report.get("id"),
+                report.get("findingId", ""),
+                report.get("timestamp", _ts()),
+                finding.get("category", ""),
+                finding.get("severity", ""),
+                report.get("status", ""),
+                report.get("summary", ""),
+                report.get("suspectedCause", ""),
+                report.get("recommendedFix", ""),
+                float(report.get("confidence") or 0.0),
+                report.get("error"),
+                json.dumps(finding.get("resources", [])),
+            ),
+        )
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        logger.error("Failed to save investigation: %s", e)
+
+
+def update_action_verification(action_id: str, status: str, evidence: str) -> None:
+    """Persist verification result for an action."""
+    try:
+        conn = _get_fix_db()
+        conn.execute(
+            """UPDATE actions
+               SET verification_status = ?, verification_evidence = ?, verification_timestamp = ?
+               WHERE id = ?""",
+            (status, evidence, _ts(), action_id),
+        )
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        logger.error("Failed to update action verification: %s", e)
 
 
 # ── Scan Functions ─────────────────────────────────────────────────────────
@@ -582,6 +667,89 @@ def _estimate_auto_fix_confidence(finding: dict) -> float:
     return max(0.0, min(1.0, round(base, 2)))
 
 
+def _finding_key(finding: dict) -> str:
+    resources = finding.get("resources", [])
+    resource_part = "_"
+    if resources:
+        r = resources[0]
+        resource_part = f"{r.get('kind', '')}:{r.get('namespace', '')}:{r.get('name', '')}"
+    return f"{finding.get('category', '')}:{finding.get('title', '')}:{resource_part}"
+
+
+def _extract_json_object(text: str) -> dict[str, Any] | None:
+    start = text.find("{")
+    end = text.rfind("}")
+    if start == -1 or end == -1 or end <= start:
+        return None
+    try:
+        payload = json.loads(text[start:end + 1])
+    except Exception:
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+def _build_investigation_prompt(finding: dict) -> str:
+    resources = finding.get("resources", [])
+    return (
+        "Investigate the following Kubernetes issue and return ONLY JSON.\n"
+        "Rules:\n"
+        "- Use read-only diagnostics tools.\n"
+        "- Do not perform write operations.\n"
+        "- Keep response concise and actionable.\n\n"
+        f"Finding severity: {finding.get('severity', 'unknown')}\n"
+        f"Category: {finding.get('category', 'unknown')}\n"
+        f"Title: {finding.get('title', '')}\n"
+        f"Summary: {finding.get('summary', '')}\n"
+        f"Resources: {json.dumps(resources)}\n\n"
+        "Return schema:\n"
+        "{\n"
+        '  "summary": "short human summary",\n'
+        '  "suspected_cause": "likely root cause",\n'
+        '  "recommended_fix": "next best action",\n'
+        '  "confidence": 0.0\n'
+        "}\n"
+    )
+
+
+def _run_proactive_investigation_sync(finding: dict) -> dict[str, Any]:
+    from .agent import (
+        create_client,
+        run_agent_streaming,
+        SYSTEM_PROMPT as SRE_SYSTEM_PROMPT,
+        TOOL_DEFS as SRE_TOOL_DEFS,
+        TOOL_MAP as SRE_TOOL_MAP,
+        WRITE_TOOLS as SRE_WRITE_TOOLS,
+    )
+
+    readonly_defs = [tool_def for tool_def in SRE_TOOL_DEFS if tool_def.get("name") not in SRE_WRITE_TOOLS]
+    readonly_map = {name: tool for name, tool in SRE_TOOL_MAP.items() if name not in SRE_WRITE_TOOLS}
+    client = create_client()
+    prompt = _build_investigation_prompt(finding)
+    response = run_agent_streaming(
+        client=client,
+        messages=[{"role": "user", "content": prompt}],
+        system_prompt=SRE_SYSTEM_PROMPT,
+        tool_defs=readonly_defs,
+        tool_map=readonly_map,
+        write_tools=set(),
+    )
+    parsed = _extract_json_object(response) or {}
+    summary = str(parsed.get("summary") or response[:300] or "Investigation completed")
+    suspected_cause = str(parsed.get("suspected_cause") or "")
+    recommended_fix = str(parsed.get("recommended_fix") or "")
+    try:
+        confidence = float(parsed.get("confidence", 0.0))
+    except Exception:
+        confidence = 0.0
+    confidence = max(0.0, min(1.0, confidence))
+    return {
+        "summary": summary,
+        "suspectedCause": suspected_cause,
+        "recommendedFix": recommended_fix,
+        "confidence": round(confidence, 2),
+    }
+
+
 # ── Monitor Loop ───────────────────────────────────────────────────────────
 
 class MonitorSession:
@@ -596,6 +764,9 @@ class MonitorSession:
         self._last_findings: dict[str, dict] = {}  # deduplicate by title+category
         self._recent_fixes: dict[str, float] = {}  # resource_key -> timestamp for cooldown
         self._pending_action_approvals: dict[str, asyncio.Future] = {}
+        self._recent_investigations: dict[str, float] = {}
+        self._scan_counter = 0
+        self._pending_verifications: dict[str, dict[str, Any]] = {}
 
     def resolve_action_response(self, action_id: str, approved: bool) -> bool:
         """Resolve an outstanding action approval request."""
@@ -734,6 +905,13 @@ class MonitorSession:
                 # Record cooldown timestamp
                 if resource_key:
                     self._recent_fixes[resource_key] = time.time()
+                self._pending_verifications[action_report["id"]] = {
+                    "action_id": action_report["id"],
+                    "finding_id": finding["id"],
+                    "category": category,
+                    "resources": resources,
+                    "target_scan": self._scan_counter + 1,
+                }
 
                 logger.info(
                     "Auto-fix completed: category=%s finding=%s tool=%s duration=%dms (%d/%d this cycle)",
@@ -760,10 +938,132 @@ class MonitorSession:
                 resources=resources,
             )
 
+    async def run_investigations(self, findings: list[dict]) -> None:
+        """Run proactive read-only investigations for critical findings."""
+        from .agent import _circuit_breaker
+
+        if _circuit_breaker.is_open:
+            logger.info("Skipping proactive investigations: agent circuit breaker open")
+            return
+
+        max_per_scan = int(os.environ.get("PULSE_AGENT_INVESTIGATIONS_MAX_PER_SCAN", "2"))
+        timeout_seconds = int(os.environ.get("PULSE_AGENT_INVESTIGATION_TIMEOUT", "20"))
+        cooldown_seconds = int(os.environ.get("PULSE_AGENT_INVESTIGATION_COOLDOWN", "300"))
+        allowed_categories = {
+            item.strip()
+            for item in os.environ.get(
+                "PULSE_AGENT_INVESTIGATION_CATEGORIES",
+                "crashloop,workloads,nodes,alerts,cert_expiry,scheduling",
+            ).split(",")
+            if item.strip()
+        }
+
+        investigations_run = 0
+        now = time.time()
+        for finding in findings:
+            if investigations_run >= max_per_scan:
+                break
+            if finding.get("severity") != SEVERITY_CRITICAL:
+                continue
+            if finding.get("category") not in allowed_categories:
+                continue
+
+            key = _finding_key(finding)
+            last_time = self._recent_investigations.get(key, 0.0)
+            if now - last_time < cooldown_seconds:
+                continue
+
+            report = {
+                "type": "investigation_report",
+                "id": f"i-{uuid.uuid4().hex[:12]}",
+                "findingId": finding.get("id", ""),
+                "category": finding.get("category", ""),
+                "status": "failed",
+                "summary": "",
+                "suspectedCause": "",
+                "recommendedFix": "",
+                "confidence": 0.0,
+                "timestamp": _ts(),
+            }
+            try:
+                result = await asyncio.wait_for(
+                    asyncio.to_thread(_run_proactive_investigation_sync, finding),
+                    timeout=timeout_seconds,
+                )
+                report.update({
+                    "status": "completed",
+                    "summary": result.get("summary", ""),
+                    "suspectedCause": result.get("suspectedCause", ""),
+                    "recommendedFix": result.get("recommendedFix", ""),
+                    "confidence": result.get("confidence", 0.0),
+                })
+                investigations_run += 1
+                self._recent_investigations[key] = now
+            except asyncio.TimeoutError:
+                report["error"] = f"Investigation timed out after {timeout_seconds}s"
+            except Exception as e:
+                report["error"] = str(e)
+
+            await self.send(report)
+            save_investigation(report, finding)
+
+    async def process_verifications(self, findings: list[dict]) -> None:
+        """Verify whether previously applied fixes remained healthy on next scan."""
+        if not self._pending_verifications:
+            return
+
+        active_by_category: dict[str, set[str]] = {}
+        for finding in findings:
+            category = str(finding.get("category", ""))
+            active_by_category.setdefault(category, set())
+            for resource in finding.get("resources", []):
+                active_by_category[category].add(
+                    f"{resource.get('kind', '')}:{resource.get('namespace', '')}:{resource.get('name', '')}"
+                )
+
+        completed_ids: list[str] = []
+        for action_id, payload in self._pending_verifications.items():
+            if self._scan_counter < int(payload.get("target_scan", 0)):
+                continue
+
+            category = str(payload.get("category", ""))
+            resources = payload.get("resources", [])
+            matches_active = False
+            matched_resource = ""
+            for resource in resources:
+                key = f"{resource.get('kind', '')}:{resource.get('namespace', '')}:{resource.get('name', '')}"
+                if key in active_by_category.get(category, set()):
+                    matches_active = True
+                    matched_resource = key
+                    break
+
+            status = "still_failing" if matches_active else "verified"
+            evidence = (
+                f"Resource still appears in active {category} findings: {matched_resource}"
+                if matches_active
+                else f"No active {category} findings for affected resources on verification scan"
+            )
+            verification_report = {
+                "type": "verification_report",
+                "id": f"v-{uuid.uuid4().hex[:12]}",
+                "actionId": action_id,
+                "findingId": payload.get("finding_id", ""),
+                "status": status,
+                "evidence": evidence,
+                "timestamp": _ts(),
+            }
+            await self.send(verification_report)
+            update_action_verification(action_id, status, evidence)
+            completed_ids.append(action_id)
+
+        for action_id in completed_ids:
+            self._pending_verifications.pop(action_id, None)
+
     async def run_scan(self) -> None:
         """Run all scanners and push new findings."""
         logger.info("Running cluster scan...")
         scan_start = time.time()
+        self._scan_counter += 1
         all_findings: list[dict] = []
 
         for category, scanner in ALL_SCANNERS:
@@ -815,9 +1115,13 @@ class MonitorSession:
             len(self._last_findings), len(new_findings), scan_duration,
         )
 
+        await self.run_investigations(all_findings)
+
         # Ask-first and auto-fix modes
         if self.trust_level >= 2:
             await self.auto_fix(all_findings)
+
+        await self.process_verifications(all_findings)
 
     async def run_loop(self) -> None:
         """Main monitor loop — scan periodically until disconnected."""

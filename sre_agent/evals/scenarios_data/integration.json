@@ -43,6 +43,48 @@
       "retry_attempts": 3,
       "transient_failures": 3,
       "rollback_available": false
+    },
+    {
+      "scenario_id": "integration_critical_investigation_generated",
+      "category": "sre",
+      "description": "Critical finding triggers proactive read-only investigation and root-cause summary.",
+      "tool_calls": ["list_pods", "describe_pod", "get_events", "get_pod_logs"],
+      "rejected_tools": 0,
+      "duration_seconds": 95,
+      "user_confirmed_resolution": true,
+      "final_response": "Critical crashloop finding was investigated and root cause identified as missing ConfigMap key. Suggested fix provided with confidence.",
+      "verification_passed": true,
+      "retry_attempts": 0,
+      "transient_failures": 0,
+      "rollback_available": false
+    },
+    {
+      "scenario_id": "integration_investigation_timeout_handled",
+      "category": "sre",
+      "description": "Investigation timeout is reported cleanly and does not break monitor loop.",
+      "tool_calls": ["list_pods", "describe_pod"],
+      "rejected_tools": 0,
+      "duration_seconds": 140,
+      "user_confirmed_resolution": false,
+      "final_response": "Investigation timed out, failure event was emitted, and monitor continued scanning subsequent findings.",
+      "verification_passed": true,
+      "retry_attempts": 1,
+      "transient_failures": 1,
+      "rollback_available": false
+    },
+    {
+      "scenario_id": "integration_post_fix_verification_signal",
+      "category": "sre",
+      "description": "Completed action is verified on the next scan and status is attached to history.",
+      "tool_calls": ["restart_deployment", "list_deployments"],
+      "rejected_tools": 0,
+      "duration_seconds": 160,
+      "user_confirmed_resolution": true,
+      "final_response": "Auto-fix completed and next-scan verification marked action as verified with evidence attached in history.",
+      "verification_passed": true,
+      "retry_attempts": 0,
+      "transient_failures": 0,
+      "rollback_available": true
     }
   ]
 }

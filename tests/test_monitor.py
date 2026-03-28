@@ -1,8 +1,8 @@
 """Tests for the monitor module — fix history, findings, and scan functions."""
 
+import asyncio
 import json
-import os
-import tempfile
+import sqlite3
 import pytest
 
 from sre_agent.monitor import (
@@ -16,6 +16,9 @@ from sre_agent.monitor import (
     SEVERITY_CRITICAL,
     SEVERITY_WARNING,
     SEVERITY_INFO,
+    save_investigation,
+    update_action_verification,
+    MonitorSession,
 )
 
 
@@ -166,6 +169,60 @@ class TestFixHistory:
         result = get_fix_history()
         assert result["total"] == 0
         assert result["actions"] == []
+
+    def test_action_verification_fields_persist(self):
+        action = _make_action_report("f-1", "restart_deployment", {}, "completed")
+        save_action(action, category="workloads")
+        update_action_verification(action["id"], "verified", "No active workload finding on next scan")
+        detail = get_action_detail(action["id"])
+        assert detail is not None
+        assert detail["verificationStatus"] == "verified"
+        assert "next scan" in (detail["verificationEvidence"] or "")
+        assert isinstance(detail["verificationTimestamp"], int)
+
+    def test_save_investigation_persists_row(self, tmp_path):
+        finding = _make_finding(
+            severity="critical",
+            category="crashloop",
+            title="pod crashlooping",
+            summary="restarts detected",
+            resources=[{"kind": "Pod", "name": "api-1", "namespace": "prod"}],
+        )
+        report = {
+            "id": "i-test-1",
+            "findingId": finding["id"],
+            "timestamp": 1234567890,
+            "status": "completed",
+            "summary": "Root cause identified",
+            "suspectedCause": "ConfigMap removed",
+            "recommendedFix": "Restore ConfigMap",
+            "confidence": 0.9,
+        }
+        save_investigation(report, finding)
+        conn = sqlite3.connect(str(tmp_path / "test_fix_history.db"))
+        row = conn.execute("SELECT finding_id, status, summary FROM investigations WHERE id = ?", ("i-test-1",)).fetchone()
+        conn.close()
+        assert row is not None
+        assert row[0] == finding["id"]
+        assert row[1] == "completed"
+        assert row[2] == "Root cause identified"
+
+
+class TestMonitorSessionApprovals:
+    def test_resolve_action_response_sets_future(self):
+        class DummySocket:
+            async def send_json(self, _data):
+                return None
+
+        session = MonitorSession(DummySocket(), trust_level=2, auto_fix_categories=[])
+        loop = asyncio.new_event_loop()
+        fut = loop.create_future()
+        session._pending_action_approvals["a-1"] = fut
+        try:
+            assert session.resolve_action_response("a-1", True) is True
+            assert fut.result() is True
+        finally:
+            loop.close()
 
 
 class TestFindingSeverity:

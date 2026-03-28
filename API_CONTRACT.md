@@ -16,6 +16,8 @@ Defines the WebSocket protocol between the Pulse UI and Pulse Agent. Both repos 
 |--------|------|-------------|
 | `GET` | `/healthz` | Agent health check. Returns `{"status": "ok"}` |
 | `GET` | `/version` | Protocol version + capabilities. UI checks this on connect. |
+| `GET` | `/monitor/capabilities` | Monitor trust cap and supported auto-fix categories. |
+| `GET` | `/eval/status` | Cached quality gate snapshot for UI surfaces. |
 
 #### `/version` Response
 
@@ -304,6 +306,11 @@ See [Component Specs](#component-specs) for all `spec.kind` values.
 }
 ```
 
+`action_report` may include optional verification fields once post-fix verification completes:
+- `verificationStatus`: `"verified"` | `"still_failing"`
+- `verificationEvidence`: `string`
+- `verificationTimestamp`: `number`
+
 #### `monitor_status` — Scan cycle status update
 
 ```json
@@ -313,6 +320,37 @@ See [Component Specs](#component-specs) for all `spec.kind` values.
   "lastScan": 1711540800,
   "findingsCount": 3,
   "predictionsCount": 1
+}
+```
+
+#### `investigation_report` — Proactive root-cause analysis for critical findings
+
+```json
+{
+  "type": "investigation_report",
+  "id": "i-abc123",
+  "findingId": "f-abc123",
+  "category": "crashloop",
+  "status": "completed",
+  "summary": "Crashloop due to missing ConfigMap key",
+  "suspectedCause": "ConfigMap key removed in recent rollout",
+  "recommendedFix": "Restore key and restart deployment",
+  "confidence": 0.82,
+  "timestamp": 1711540800
+}
+```
+
+#### `verification_report` — Next-scan validation after a fix action
+
+```json
+{
+  "type": "verification_report",
+  "id": "v-abc123",
+  "actionId": "a-abc123",
+  "findingId": "f-abc123",
+  "status": "verified",
+  "evidence": "No active crashloop findings for affected resources",
+  "timestamp": 1711540800
 }
 ```
 
