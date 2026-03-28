@@ -22,6 +22,9 @@ pulse-agent-eval = "sre_agent.evals.cli:main"
 pulse-agent-eval-outcomes = "sre_agent.evals.outcomes_cli:main"
 pulse-agent-eval-weekly-digest = "sre_agent.evals.weekly_digest_cli:main"
 
+[tool.setuptools.packages.find]
+include = ["sre_agent*"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
