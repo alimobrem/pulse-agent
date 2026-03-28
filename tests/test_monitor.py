@@ -3,6 +3,7 @@
 import asyncio
 import json
 import sqlite3
+from unittest.mock import patch, MagicMock
 import pytest
 
 from sre_agent.monitor import (
@@ -19,6 +20,7 @@ from sre_agent.monitor import (
     save_investigation,
     update_action_verification,
     MonitorSession,
+    _run_security_followup_sync,
 )
 
 
@@ -235,3 +237,167 @@ class TestFindingSeverity:
         f1 = _make_finding("info", "test", "t1", "s1", [])
         f2 = _make_finding("info", "test", "t2", "s2", [])
         assert f1["id"] != f2["id"]
+
+
+class TestSecurityFollowup:
+    def test_run_security_followup_sync_returns_parsed(self):
+        """_run_security_followup_sync calls the security agent and parses JSON."""
+        finding = _make_finding(
+            severity="critical",
+            category="crashloop",
+            title="Pod crashing",
+            summary="restarts",
+            resources=[{"kind": "Pod", "name": "web-1", "namespace": "prod"}],
+        )
+        with patch("sre_agent.agent.create_client", return_value=MagicMock()), \
+             patch("sre_agent.agent.run_agent_streaming",
+                   return_value='{"security_issues": [{"issue": "no netpol"}], "risk_level": "high"}') as mock_run:
+            result = _run_security_followup_sync(finding)
+
+        assert result["risk_level"] == "high"
+        assert len(result["security_issues"]) == 1
+        assert result["security_issues"][0]["issue"] == "no netpol"
+        assert "raw_response" in result
+        mock_run.assert_called_once()
+        call_kwargs = mock_run.call_args
+        # Verify read-only mode
+        assert call_kwargs.kwargs.get("write_tools") == set() or call_kwargs[1].get("write_tools") == set()
+
+    def test_run_security_followup_sync_handles_bad_json(self):
+        """_run_security_followup_sync returns empty defaults on unparseable response."""
+        finding = _make_finding(
+            severity="critical", category="crashloop",
+            title="Pod crashing", summary="s",
+            resources=[{"kind": "Pod", "name": "x", "namespace": "ns"}],
+        )
+        with patch("sre_agent.agent.create_client", return_value=MagicMock()), \
+             patch("sre_agent.agent.run_agent_streaming", return_value="not json at all"):
+            result = _run_security_followup_sync(finding)
+        assert result["security_issues"] == []
+        assert result["risk_level"] == "unknown"
+
+    def test_security_followup_called_in_investigations(self, monkeypatch):
+        """When PULSE_AGENT_SECURITY_FOLLOWUP=1, security followup runs after investigation."""
+        monkeypatch.setenv("PULSE_AGENT_SECURITY_FOLLOWUP", "1")
+        monkeypatch.setenv("PULSE_AGENT_INVESTIGATIONS_MAX_PER_SCAN", "1")
+        monkeypatch.setenv("PULSE_AGENT_INVESTIGATION_TIMEOUT", "10")
+
+        sent_messages = []
+
+        class FakeSocket:
+            async def send_json(self, data):
+                sent_messages.append(data)
+
+        session = MonitorSession(FakeSocket(), trust_level=1)
+
+        finding = _make_finding(
+            severity="critical", category="crashloop",
+            title="Pod crashing", summary="restarts",
+            resources=[{"kind": "Pod", "name": "web-1", "namespace": "prod"}],
+        )
+
+        mock_inv_result = {
+            "summary": "OOM cause", "suspectedCause": "mem limit",
+            "recommendedFix": "increase mem", "confidence": 0.8,
+        }
+        mock_sec_result = {
+            "security_issues": [{"issue": "no netpol"}],
+            "risk_level": "medium",
+            "raw_response": "test",
+        }
+
+        with patch("sre_agent.monitor._run_proactive_investigation_sync", return_value=mock_inv_result), \
+             patch("sre_agent.monitor._run_security_followup_sync", return_value=mock_sec_result) as mock_sec, \
+             patch("sre_agent.agent._circuit_breaker") as mock_cb:
+            mock_cb.is_open = False
+            asyncio.get_event_loop().run_until_complete(
+                session.run_investigations([finding])
+            )
+
+        mock_sec.assert_called_once_with(finding)
+        # The investigation_report should have securityFollowup field
+        reports = [m for m in sent_messages if m.get("type") == "investigation_report"]
+        assert len(reports) == 1
+        assert "securityFollowup" in reports[0]
+        assert reports[0]["securityFollowup"]["riskLevel"] == "medium"
+        assert reports[0]["securityFollowup"]["issues"] == [{"issue": "no netpol"}]
+
+    def test_security_followup_not_called_when_disabled(self, monkeypatch):
+        """When PULSE_AGENT_SECURITY_FOLLOWUP is not set, no security followup runs."""
+        monkeypatch.delenv("PULSE_AGENT_SECURITY_FOLLOWUP", raising=False)
+        monkeypatch.setenv("PULSE_AGENT_INVESTIGATIONS_MAX_PER_SCAN", "1")
+        monkeypatch.setenv("PULSE_AGENT_INVESTIGATION_TIMEOUT", "10")
+
+        sent_messages = []
+
+        class FakeSocket:
+            async def send_json(self, data):
+                sent_messages.append(data)
+
+        session = MonitorSession(FakeSocket(), trust_level=1)
+
+        finding = _make_finding(
+            severity="critical", category="crashloop",
+            title="Pod crashing", summary="restarts",
+            resources=[{"kind": "Pod", "name": "web-1", "namespace": "prod"}],
+        )
+
+        mock_inv_result = {
+            "summary": "cause", "suspectedCause": "x",
+            "recommendedFix": "y", "confidence": 0.5,
+        }
+
+        with patch("sre_agent.monitor._run_proactive_investigation_sync", return_value=mock_inv_result), \
+             patch("sre_agent.monitor._run_security_followup_sync") as mock_sec, \
+             patch("sre_agent.agent._circuit_breaker") as mock_cb:
+            mock_cb.is_open = False
+            asyncio.get_event_loop().run_until_complete(
+                session.run_investigations([finding])
+            )
+
+        mock_sec.assert_not_called()
+        reports = [m for m in sent_messages if m.get("type") == "investigation_report"]
+        assert len(reports) == 1
+        assert "securityFollowup" not in reports[0]
+
+    def test_security_followup_max_one_per_scan(self, monkeypatch):
+        """Only one security followup per scan cycle."""
+        monkeypatch.setenv("PULSE_AGENT_SECURITY_FOLLOWUP", "1")
+        monkeypatch.setenv("PULSE_AGENT_INVESTIGATIONS_MAX_PER_SCAN", "5")
+        monkeypatch.setenv("PULSE_AGENT_INVESTIGATION_TIMEOUT", "10")
+
+        sent_messages = []
+
+        class FakeSocket:
+            async def send_json(self, data):
+                sent_messages.append(data)
+
+        session = MonitorSession(FakeSocket(), trust_level=1)
+
+        findings = [
+            _make_finding(
+                severity="critical", category="crashloop",
+                title=f"Pod {i} crashing", summary="restarts",
+                resources=[{"kind": "Pod", "name": f"web-{i}", "namespace": "prod"}],
+            )
+            for i in range(3)
+        ]
+
+        mock_inv_result = {
+            "summary": "cause", "suspectedCause": "x",
+            "recommendedFix": "y", "confidence": 0.5,
+        }
+        mock_sec_result = {
+            "security_issues": [], "risk_level": "low", "raw_response": "",
+        }
+
+        with patch("sre_agent.monitor._run_proactive_investigation_sync", return_value=mock_inv_result), \
+             patch("sre_agent.monitor._run_security_followup_sync", return_value=mock_sec_result) as mock_sec, \
+             patch("sre_agent.agent._circuit_breaker") as mock_cb:
+            mock_cb.is_open = False
+            asyncio.get_event_loop().run_until_complete(
+                session.run_investigations(findings)
+            )
+
+        # Should only be called once despite multiple investigations
+        assert mock_sec.call_count == 1

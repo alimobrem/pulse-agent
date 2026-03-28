@@ -1041,6 +1041,45 @@ def _run_proactive_investigation_sync(finding: dict) -> dict[str, Any]:
     }
 
 
+def _run_security_followup_sync(finding: dict) -> dict:
+    """Run a lightweight security check on the namespace of a critical finding."""
+    from .agent import create_client, run_agent_streaming
+    from .security_agent import (
+        SECURITY_SYSTEM_PROMPT,
+        TOOL_DEFS as SEC_TOOL_DEFS,
+        TOOL_MAP as SEC_TOOL_MAP,
+    )
+
+    client = create_client()
+    resources = finding.get("resources", [])
+    namespace = resources[0].get("namespace", "") if resources else ""
+
+    prompt = (
+        "Run a quick security check on this namespace and return ONLY JSON.\n"
+        f"Namespace: {_sanitize_for_prompt(namespace)}\n"
+        f"Context: A {_sanitize_for_prompt(finding.get('category', ''))} issue was found: "
+        f"{_sanitize_for_prompt(finding.get('title', ''))}\n\n"
+        "Check: network policies, pod security context, RBAC risks, secret exposure.\n"
+        'Return: {"security_issues": [...], "risk_level": "low|medium|high"}\n'
+    )
+
+    response = run_agent_streaming(
+        client=client,
+        messages=[{"role": "user", "content": prompt}],
+        system_prompt=SECURITY_SYSTEM_PROMPT,
+        tool_defs=SEC_TOOL_DEFS,
+        tool_map=SEC_TOOL_MAP,
+        write_tools=set(),  # read-only
+    )
+
+    parsed = _extract_json_object(response) or {}
+    return {
+        "security_issues": parsed.get("security_issues", []),
+        "risk_level": parsed.get("risk_level", "unknown"),
+        "raw_response": response[:500],
+    }
+
+
 # ── Monitor Loop ───────────────────────────────────────────────────────────
 
 class MonitorSession:
@@ -1061,6 +1100,7 @@ class MonitorSession:
         self._daily_investigation_count = 0
         self._daily_investigation_reset = time.time()
         self._scan_lock = asyncio.Lock()  # H1: prevent concurrent scans
+        self._last_security_followup: float = 0.0  # cooldown tracker
 
     def resolve_action_response(self, action_id: str, approved: bool) -> bool:
         """Resolve an outstanding action approval request."""
@@ -1262,6 +1302,10 @@ class MonitorSession:
             if item.strip()
         }
 
+        security_followup_enabled = os.environ.get("PULSE_AGENT_SECURITY_FOLLOWUP", "") == "1"
+        security_followup_cooldown = 600  # 10 minutes
+        security_followup_done_this_scan = False
+
         investigations_run = 0
         now = time.time()
         for finding in findings:
@@ -1304,6 +1348,30 @@ class MonitorSession:
                 investigations_run += 1
                 self._daily_investigation_count += 1
                 self._recent_investigations[key] = now
+
+                # Security followup: max 1 per scan, 10min cooldown
+                if (
+                    security_followup_enabled
+                    and not security_followup_done_this_scan
+                    and now - self._last_security_followup >= security_followup_cooldown
+                ):
+                    try:
+                        sec_result = await asyncio.wait_for(
+                            asyncio.to_thread(_run_security_followup_sync, finding),
+                            timeout=timeout_seconds,
+                        )
+                        report["securityFollowup"] = {
+                            "issues": sec_result.get("security_issues", []),
+                            "riskLevel": sec_result.get("risk_level", "unknown"),
+                        }
+                        security_followup_done_this_scan = True
+                        self._last_security_followup = now
+                        logger.info("Security followup completed for finding %s", finding.get("id", ""))
+                    except asyncio.TimeoutError:
+                        logger.warning("Security followup timed out for finding %s", finding.get("id", ""))
+                    except Exception as e:
+                        logger.warning("Security followup failed for finding %s: %s", finding.get("id", ""), e)
+
             except asyncio.TimeoutError:
                 report["error"] = f"Investigation timed out after {timeout_seconds}s"
             except Exception as e:
