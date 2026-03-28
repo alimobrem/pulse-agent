@@ -51,21 +51,72 @@ def _make_parser() -> argparse.ArgumentParser:
         default="claude-sonnet-4-20250514",
         help="Model for the agent (default: claude-sonnet-4-20250514).",
     )
+    p.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Use a mock Claude client (no API key needed). Tests tool wiring and scoring only.",
+    )
     return p
 
 
-def _run_fixture(name: str, use_judge: bool = False, model: str = "claude-sonnet-4-20250514") -> dict:
+def _make_mock_client(tool_names: list[str], final_text: str = "Based on my investigation, the issue is likely caused by a dependency failure. I recommend checking the logs and restarting the affected deployment because the root cause appears to be a transient error."):
+    """Build a mock client that calls the given tools then responds with text."""
+    from types import SimpleNamespace
+    from unittest.mock import MagicMock
+
+    tool_blocks = [
+        SimpleNamespace(type="tool_use", id=f"t{i}", name=name, input={})
+        for i, name in enumerate(tool_names)
+    ]
+    text_block = SimpleNamespace(type="text", text=final_text)
+
+    # First response: call tools
+    tool_events = []
+    for block in tool_blocks:
+        tool_events.append(SimpleNamespace(type="content_block_start", content_block=block))
+    tool_msg = SimpleNamespace(
+        content=tool_blocks, stop_reason="tool_use",
+    )
+    tool_stream = MagicMock()
+    tool_stream.__enter__ = MagicMock(return_value=tool_stream)
+    tool_stream.__exit__ = MagicMock(return_value=False)
+    tool_stream.__iter__ = MagicMock(return_value=iter(tool_events))
+    tool_stream.get_final_message.return_value = tool_msg
+
+    # Second response: final text
+    text_events = [
+        SimpleNamespace(type="content_block_delta", delta=SimpleNamespace(type="text_delta", text=final_text)),
+    ]
+    text_msg = SimpleNamespace(
+        content=[text_block], stop_reason="end_turn",
+    )
+    text_stream = MagicMock()
+    text_stream.__enter__ = MagicMock(return_value=text_stream)
+    text_stream.__exit__ = MagicMock(return_value=False)
+    text_stream.__iter__ = MagicMock(return_value=iter(text_events))
+    text_stream.get_final_message.return_value = text_msg
+
+    client = MagicMock()
+    client.messages.stream.side_effect = [tool_stream, text_stream]
+    return client
+
+
+def _run_fixture(name: str, use_judge: bool = False, model: str = "claude-sonnet-4-20250514", dry_run: bool = False) -> dict:
     """Run a single fixture and return the scored result."""
     fixture = load_fixture(name)
     harness = ReplayHarness(fixture["recorded_responses"])
 
-    # Create a real client for the agent
-    from ..agent import create_client
     import os
-    os.environ.setdefault("PULSE_AGENT_MODEL", model)
     os.environ["PULSE_AGENT_HARNESS"] = "0"  # Disable harness for replay
 
-    client = create_client()
+    if dry_run:
+        # Use mock client — no API key needed
+        expected_tools = fixture.get("expected", {}).get("should_use_tools", list(fixture["recorded_responses"].keys()))
+        client = _make_mock_client(expected_tools)
+    else:
+        from ..agent import create_client
+        os.environ.setdefault("PULSE_AGENT_MODEL", model)
+        client = create_client()
     result = harness.run(client=client, prompt=fixture["prompt"])
     score = score_replay(result, fixture["expected"])
 
@@ -128,7 +179,7 @@ def main() -> None:
     results = []
     for name in fixtures:
         try:
-            result = _run_fixture(name, use_judge=args.judge, model=args.model)
+            result = _run_fixture(name, use_judge=args.judge, model=args.model, dry_run=args.dry_run)
             results.append(result)
         except Exception as e:
             results.append({

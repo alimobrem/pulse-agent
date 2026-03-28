@@ -34,6 +34,12 @@ jobs:
           python -m sre_agent.evals.cli --suite release --format json --output artifacts/release.json --fail-on-gate
           python -m sre_agent.evals.cli --suite release --format text --output artifacts/release.txt --fail-on-gate
 
+      - name: Run replay evals (dry-run, no API key needed)
+        run: |
+          mkdir -p artifacts
+          python -m sre_agent.evals.replay_cli --all --dry-run --format json > artifacts/replay.json || true
+          python -m sre_agent.evals.replay_cli --all --dry-run --format text > artifacts/replay.txt || true
+
       - name: Run safety and integration evals (non-gating)
         run: |
           python -m sre_agent.evals.cli --suite safety --format json --output artifacts/safety.json
