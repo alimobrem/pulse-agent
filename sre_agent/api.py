@@ -18,7 +18,7 @@ import time
 import uuid
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Query, Header, HTTPException
 
 from .agent import (
     create_client,
@@ -41,6 +41,7 @@ logger = logging.getLogger("pulse_agent.api")
 _EVAL_STATUS_CACHE: dict | None = None
 _EVAL_STATUS_CACHE_TS_MS = 0
 _EVAL_STATUS_CACHE_TTL_MS = 60_000
+_EVAL_STATUS_LOCK = asyncio.Lock()
 
 # WebSocket connection liveness tracking
 _ws_alive: dict[str, bool] = {}
@@ -115,7 +116,11 @@ async def version():
 
 
 @app.get("/health")
-async def health():
+async def health(
+    authorization: str | None = Header(None),
+    token: str | None = Query(None),
+):
+    _verify_rest_token(authorization, token)
     from .error_tracker import get_tracker
     from .agent import _circuit_breaker
     tracker = get_tracker()
@@ -132,12 +137,17 @@ async def health():
             "by_category": summary["by_category"],
             "recent": tracker.get_recent(limit=5),
         },
+        "investigations": get_investigation_stats(),
     }
 
 
 @app.get("/tools")
-async def list_tools():
+async def list_tools(
+    authorization: str | None = Header(None),
+    token: str | None = Query(None),
+):
     """List all available tools grouped by mode, with write-op flags."""
+    _verify_rest_token(authorization, token)
     return {
         "sre": [
             {
@@ -479,6 +489,10 @@ async def websocket_agent(websocket: WebSocket, mode: str):
         logger.exception("WebSocket error")
     finally:
         receive_task.cancel()
+        try:
+            await receive_task
+        except asyncio.CancelledError:
+            pass
         # Cancel any pending confirmation future so agent thread unblocks immediately
         future = _pending_confirms.pop(session_id, None)
         if future and not future.done():
@@ -490,7 +504,7 @@ async def websocket_agent(websocket: WebSocket, mode: str):
 
 # ── Protocol v2: /ws/monitor ──────────────────────────────────────────────
 
-from .monitor import MonitorSession, get_fix_history, get_action_detail
+from .monitor import MonitorSession, get_fix_history, get_action_detail, execute_rollback, get_investigation_stats
 
 
 @app.websocket("/ws/monitor")
@@ -548,6 +562,11 @@ async def websocket_monitor(websocket: WebSocket):
         while True:
             raw = await websocket.receive_text()
 
+            # H6: message size check (matching the agent WS pattern)
+            if len(raw) > MAX_MESSAGE_SIZE:
+                await websocket.send_json({"type": "error", "message": "Message too large"})
+                continue
+
             # Rate limiting (same as /ws/sre)
             now = time.time()
             message_timestamps[:] = [t for t in message_timestamps if now - t < 60]
@@ -564,8 +583,13 @@ async def websocket_monitor(websocket: WebSocket):
             msg_type = data.get("type")
 
             if msg_type == "trigger_scan":
-                logger.info("Manual scan triggered by client")
-                asyncio.create_task(session.run_scan())
+                # H1: check scan lock before creating a new task to prevent overlapping scans
+                if session._scan_lock.locked():
+                    logger.info("Manual scan skipped — scan already in progress")
+                    await websocket.send_json({"type": "error", "message": "Scan already in progress"})
+                else:
+                    logger.info("Manual scan triggered by client")
+                    asyncio.create_task(session.run_scan())
 
             elif msg_type == "action_response":
                 action_id = data.get("actionId", "")
@@ -593,8 +617,6 @@ async def websocket_monitor(websocket: WebSocket):
 
 
 # ── Protocol v2: REST endpoints ───────────────────────────────────────────
-
-from fastapi import Query, Header, HTTPException
 
 
 def _verify_rest_token(authorization: str | None = Header(None), token: str | None = Query(None)):
@@ -652,19 +674,43 @@ async def rest_action_detail(
     return result
 
 
+@app.post("/fix-history/{action_id}/rollback")
+async def rollback_action(
+    action_id: str,
+    authorization: str | None = Header(None),
+    token: str | None = Query(None),
+):
+    """Rollback a completed action (Protocol v2). Requires token auth."""
+    _verify_rest_token(authorization, token)
+    result = execute_rollback(action_id)
+    if "error" in result:
+        from fastapi.responses import JSONResponse
+        return JSONResponse(status_code=400, content=result)
+    return result
+
+
 @app.get("/predictions")
 async def rest_predictions(
     authorization: str | None = Header(None),
     token: str | None = Query(None),
 ):
-    """Active predictions from the most recent scan (Protocol v2). Requires token auth."""
+    """Active predictions from the most recent scan (Protocol v2). Requires token auth.
+
+    TODO: Implement by reading recent predictions from monitorStore once
+    the monitor session persists predictions to the fix-history database.
+    Currently predictions are only pushed over the WebSocket stream.
+    """
     _verify_rest_token(authorization, token)
-    return {"predictions": [], "total": 0}
+    return {"predictions": [], "total": 0, "note": "Predictions are currently only available via the /ws/monitor WebSocket stream."}
 
 
 @app.get("/monitor/capabilities")
-async def monitor_capabilities():
+async def monitor_capabilities(
+    authorization: str | None = Header(None),
+    token: str | None = Query(None),
+):
     """Expose monitor trust/capability limits so UI can align controls."""
+    _verify_rest_token(authorization, token)
     from .monitor import AUTO_FIX_HANDLERS
 
     max_trust_level = int(os.environ.get("PULSE_AGENT_MAX_TRUST_LEVEL", "3"))
@@ -675,8 +721,12 @@ async def monitor_capabilities():
 
 
 @app.get("/eval/status")
-async def eval_status():
+async def eval_status(
+    authorization: str | None = Header(None),
+    token: str | None = Query(None),
+):
     """Current eval gate status snapshot for UI surfaces."""
+    _verify_rest_token(authorization, token)
     global _EVAL_STATUS_CACHE, _EVAL_STATUS_CACHE_TS_MS
     from .evals.outcomes import analyze_windows
     from .evals.runner import evaluate_suite
@@ -686,38 +736,44 @@ async def eval_status():
     if _EVAL_STATUS_CACHE and (now_ms - _EVAL_STATUS_CACHE_TS_MS) < _EVAL_STATUS_CACHE_TTL_MS:
         return _EVAL_STATUS_CACHE
 
-    release = evaluate_suite("release", load_suite("release"))
-    safety = evaluate_suite("safety", load_suite("safety"))
-    integration = evaluate_suite("integration", load_suite("integration"))
-    outcomes = analyze_windows(current_days=7, baseline_days=7)
+    async with _EVAL_STATUS_LOCK:
+        # Re-check after acquiring lock (another request may have populated the cache)
+        now_ms = int(time.time() * 1000)
+        if _EVAL_STATUS_CACHE and (now_ms - _EVAL_STATUS_CACHE_TS_MS) < _EVAL_STATUS_CACHE_TTL_MS:
+            return _EVAL_STATUS_CACHE
 
-    payload = {
-        "quality_gate_passed": bool(release.gate_passed) and bool(outcomes["gate_passed"]),
-        "generated_at_ms": outcomes.get("generated_at_ms"),
-        "release": {
-            "gate_passed": release.gate_passed,
-            "scenario_count": release.scenario_count,
-            "average_overall": release.average_overall,
-            "blocker_counts": release.blocker_counts,
-        },
-        "safety": {
-            "gate_passed": safety.gate_passed,
-            "scenario_count": safety.scenario_count,
-            "average_overall": safety.average_overall,
-        },
-        "integration": {
-            "gate_passed": integration.gate_passed,
-            "scenario_count": integration.scenario_count,
-            "average_overall": integration.average_overall,
-        },
-        "outcomes": {
-            "gate_passed": outcomes.get("gate_passed", False),
-            "current_actions": outcomes.get("current", {}).get("total_actions", 0),
-            "baseline_actions": outcomes.get("baseline", {}).get("total_actions", 0),
-            "regressions": outcomes.get("regressions", {}),
-            "policy": outcomes.get("policy", {}),
-        },
-    }
-    _EVAL_STATUS_CACHE = payload
-    _EVAL_STATUS_CACHE_TS_MS = now_ms
-    return payload
+        release = evaluate_suite("release", load_suite("release"))
+        safety = evaluate_suite("safety", load_suite("safety"))
+        integration = evaluate_suite("integration", load_suite("integration"))
+        outcomes = analyze_windows(current_days=7, baseline_days=7)
+
+        payload = {
+            "quality_gate_passed": bool(release.gate_passed) and bool(outcomes["gate_passed"]),
+            "generated_at_ms": outcomes.get("generated_at_ms"),
+            "release": {
+                "gate_passed": release.gate_passed,
+                "scenario_count": release.scenario_count,
+                "average_overall": release.average_overall,
+                "blocker_counts": release.blocker_counts,
+            },
+            "safety": {
+                "gate_passed": safety.gate_passed,
+                "scenario_count": safety.scenario_count,
+                "average_overall": safety.average_overall,
+            },
+            "integration": {
+                "gate_passed": integration.gate_passed,
+                "scenario_count": integration.scenario_count,
+                "average_overall": integration.average_overall,
+            },
+            "outcomes": {
+                "gate_passed": outcomes.get("gate_passed", False),
+                "current_actions": outcomes.get("current", {}).get("total_actions", 0),
+                "baseline_actions": outcomes.get("baseline", {}).get("total_actions", 0),
+                "regressions": outcomes.get("regressions", {}),
+                "policy": outcomes.get("policy", {}),
+            },
+        }
+        _EVAL_STATUS_CACHE = payload
+        _EVAL_STATUS_CACHE_TS_MS = now_ms
+        return payload

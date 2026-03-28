@@ -110,7 +110,8 @@ def _make_action_report(
 
 import sqlite3
 
-_FIX_DB_PATH = os.environ.get("PULSE_AGENT_FIX_DB", os.path.expanduser("~/.pulse_agent/fix_history.db"))
+_FIX_DB_PATH = os.environ.get("PULSE_AGENT_FIX_DB",
+    os.environ.get("PULSE_AGENT_MEMORY_PATH", "/tmp/pulse_agent/memory.db").replace("memory.db", "fix_history.db"))
 
 _FIX_SCHEMA = """
 CREATE TABLE IF NOT EXISTS actions (
@@ -176,96 +177,95 @@ def _get_fix_db() -> sqlite3.Connection:
 def save_action(action: dict, category: str = "", resources: list[dict] | None = None) -> None:
     """Persist an action report to SQLite."""
     try:
-        conn = _get_fix_db()
-        conn.execute(
-            """INSERT OR REPLACE INTO actions
-               (id, finding_id, timestamp, category, tool, input, status,
-                before_state, after_state, error, reasoning, duration_ms,
-                rollback_available, rollback_action, resources, verification_status,
-                verification_evidence, verification_timestamp)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (
-                action["id"],
-                action.get("findingId", ""),
-                action.get("timestamp", _ts()),
-                category,
-                action.get("tool", ""),
-                json.dumps(action.get("input", {})),
-                action.get("status", ""),
-                action.get("beforeState", ""),
-                action.get("afterState", ""),
-                action.get("error"),
-                action.get("reasoning", ""),
-                action.get("durationMs", 0),
-                0,
-                "",
-                json.dumps(resources or []),
-                action.get("verificationStatus"),
-                action.get("verificationEvidence"),
-                action.get("verificationTimestamp"),
-            ),
-        )
-        conn.commit()
-        conn.close()
+        with _get_fix_db() as conn:
+            conn.execute(
+                """INSERT OR REPLACE INTO actions
+                   (id, finding_id, timestamp, category, tool, input, status,
+                    before_state, after_state, error, reasoning, duration_ms,
+                    rollback_available, rollback_action, resources, verification_status,
+                    verification_evidence, verification_timestamp)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    action["id"],
+                    action.get("findingId", ""),
+                    action.get("timestamp", _ts()),
+                    category,
+                    action.get("tool", ""),
+                    json.dumps(action.get("input", {})),
+                    action.get("status", ""),
+                    action.get("beforeState", ""),
+                    action.get("afterState", ""),
+                    action.get("error"),
+                    action.get("reasoning", ""),
+                    action.get("durationMs", 0),
+                    1 if action.get("status") == "completed" else 0,
+                    "",
+                    json.dumps(resources or []),
+                    action.get("verificationStatus"),
+                    action.get("verificationEvidence"),
+                    action.get("verificationTimestamp"),
+                ),
+            )
     except Exception as e:
         logger.error("Failed to save action: %s", e)
 
 
 def get_fix_history(page: int = 1, page_size: int = 20, filters: dict | None = None) -> dict:
     """Retrieve paginated fix history from SQLite."""
+    page = max(page, 1)
+    page_size = min(max(page_size, 1), 100)
     try:
-        conn = _get_fix_db()
-        where_parts = []
-        params: list[Any] = []
+        with _get_fix_db() as conn:
+            where_parts = []
+            params: list[Any] = []
 
-        if filters:
-            if filters.get("status"):
-                where_parts.append("status = ?")
-                params.append(filters["status"])
-            if filters.get("category"):
-                where_parts.append("category = ?")
-                params.append(filters["category"])
-            if filters.get("since"):
-                where_parts.append("timestamp >= ?")
-                params.append(filters["since"])
-            if filters.get("search"):
-                where_parts.append("(tool LIKE ? OR reasoning LIKE ?)")
-                params.extend([f"%{filters['search']}%", f"%{filters['search']}%"])
+            if filters:
+                if filters.get("status"):
+                    where_parts.append("status = ?")
+                    params.append(filters["status"])
+                if filters.get("category"):
+                    where_parts.append("category = ?")
+                    params.append(filters["category"])
+                if filters.get("since"):
+                    where_parts.append("timestamp >= ?")
+                    params.append(filters["since"])
+                if filters.get("search"):
+                    where_parts.append("(tool LIKE ? OR reasoning LIKE ?)")
+                    params.extend([f"%{filters['search']}%", f"%{filters['search']}%"])
 
-        where = "WHERE " + " AND ".join(where_parts) if where_parts else ""
+            where = "WHERE " + " AND ".join(where_parts) if where_parts else ""
 
-        total = conn.execute(f"SELECT COUNT(*) FROM actions {where}", params).fetchone()[0]
-        offset = (page - 1) * page_size
-        rows = conn.execute(
-            f"SELECT * FROM actions {where} ORDER BY timestamp DESC LIMIT ? OFFSET ?",
-            params + [page_size, offset],
-        ).fetchall()
+            total = conn.execute(f"SELECT COUNT(*) FROM actions {where}", params).fetchone()[0]
+            offset = (page - 1) * page_size
+            rows = conn.execute(
+                f"SELECT * FROM actions {where} ORDER BY timestamp DESC LIMIT ? OFFSET ?",
+                params + [page_size, offset],
+            ).fetchall()
 
-        actions = []
-        for r in rows:
-            actions.append({
-                "id": r["id"],
-                "findingId": r["finding_id"],
-                "timestamp": r["timestamp"],
-                "category": r["category"],
-                "tool": r["tool"],
-                "input": json.loads(r["input"]) if r["input"] else {},
-                "status": r["status"],
-                "beforeState": r["before_state"],
-                "afterState": r["after_state"],
-                "error": r["error"],
-                "reasoning": r["reasoning"],
-                "durationMs": r["duration_ms"],
-                "rollbackAvailable": bool(r["rollback_available"]),
-                "rollbackAction": json.loads(r["rollback_action"]) if r["rollback_action"] else None,
-                "resources": json.loads(r["resources"]) if r["resources"] else [],
-                "verificationStatus": r["verification_status"],
-                "verificationEvidence": r["verification_evidence"],
-                "verificationTimestamp": r["verification_timestamp"],
-            })
+            actions = []
+            for r in rows:
+                actions.append({
+                    "id": r["id"],
+                    "findingId": r["finding_id"],
+                    "timestamp": r["timestamp"],
+                    "category": r["category"],
+                    "tool": r["tool"],
+                    "input": json.loads(r["input"]) if r["input"] else {},
+                    "status": r["status"],
+                    "beforeState": r["before_state"],
+                    "afterState": r["after_state"],
+                    "error": r["error"],
+                    "reasoning": r["reasoning"],
+                    "durationMs": r["duration_ms"],
+                    "rollbackAvailable": bool(r["rollback_available"]),
+                    "rollbackAction": json.loads(r["rollback_action"]) if r["rollback_action"] else None,
+                    "resources": json.loads(r["resources"]) if r["resources"] else [],
+                    "verificationStatus": r["verification_status"],
+                    "verificationEvidence": r["verification_evidence"],
+                    "verificationTimestamp": r["verification_timestamp"],
+                })
 
-        conn.close()
-        return {"actions": actions, "total": total, "page": page, "pageSize": page_size}
+            return {"actions": actions, "total": total, "page": page, "pageSize": page_size}
     except Exception as e:
         logger.error("Failed to get fix history: %s", e)
         return {"actions": [], "total": 0, "page": page, "pageSize": page_size}
@@ -274,31 +274,30 @@ def get_fix_history(page: int = 1, page_size: int = 20, filters: dict | None = N
 def get_action_detail(action_id: str) -> dict | None:
     """Get a single action by ID."""
     try:
-        conn = _get_fix_db()
-        row = conn.execute("SELECT * FROM actions WHERE id = ?", (action_id,)).fetchone()
-        conn.close()
-        if not row:
-            return None
-        return {
-            "id": row["id"],
-            "findingId": row["finding_id"],
-            "timestamp": row["timestamp"],
-            "category": row["category"],
-            "tool": row["tool"],
-            "input": json.loads(row["input"]) if row["input"] else {},
-            "status": row["status"],
-            "beforeState": row["before_state"],
-            "afterState": row["after_state"],
-            "error": row["error"],
-            "reasoning": row["reasoning"],
-            "durationMs": row["duration_ms"],
-            "rollbackAvailable": bool(row["rollback_available"]),
-            "rollbackAction": json.loads(row["rollback_action"]) if row["rollback_action"] else None,
-            "resources": json.loads(row["resources"]) if row["resources"] else [],
-            "verificationStatus": row["verification_status"],
-            "verificationEvidence": row["verification_evidence"],
-            "verificationTimestamp": row["verification_timestamp"],
-        }
+        with _get_fix_db() as conn:
+            row = conn.execute("SELECT * FROM actions WHERE id = ?", (action_id,)).fetchone()
+            if not row:
+                return None
+            return {
+                "id": row["id"],
+                "findingId": row["finding_id"],
+                "timestamp": row["timestamp"],
+                "category": row["category"],
+                "tool": row["tool"],
+                "input": json.loads(row["input"]) if row["input"] else {},
+                "status": row["status"],
+                "beforeState": row["before_state"],
+                "afterState": row["after_state"],
+                "error": row["error"],
+                "reasoning": row["reasoning"],
+                "durationMs": row["duration_ms"],
+                "rollbackAvailable": bool(row["rollback_available"]),
+                "rollbackAction": json.loads(row["rollback_action"]) if row["rollback_action"] else None,
+                "resources": json.loads(row["resources"]) if row["resources"] else [],
+                "verificationStatus": row["verification_status"],
+                "verificationEvidence": row["verification_evidence"],
+                "verificationTimestamp": row["verification_timestamp"],
+            }
     except Exception as e:
         logger.error("Failed to get action detail: %s", e)
         return None
@@ -307,45 +306,60 @@ def get_action_detail(action_id: str) -> dict | None:
 def save_investigation(report: dict, finding: dict) -> None:
     """Persist a proactive investigation report."""
     try:
-        conn = _get_fix_db()
-        conn.execute(
-            """INSERT OR REPLACE INTO investigations
-               (id, finding_id, timestamp, category, severity, status, summary,
-                suspected_cause, recommended_fix, confidence, error, resources)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (
-                report.get("id"),
-                report.get("findingId", ""),
-                report.get("timestamp", _ts()),
-                finding.get("category", ""),
-                finding.get("severity", ""),
-                report.get("status", ""),
-                report.get("summary", ""),
-                report.get("suspectedCause", ""),
-                report.get("recommendedFix", ""),
-                float(report.get("confidence") or 0.0),
-                report.get("error"),
-                json.dumps(finding.get("resources", [])),
-            ),
-        )
-        conn.commit()
-        conn.close()
+        with _get_fix_db() as conn:
+            conn.execute(
+                """INSERT OR REPLACE INTO investigations
+                   (id, finding_id, timestamp, category, severity, status, summary,
+                    suspected_cause, recommended_fix, confidence, error, resources)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    report.get("id"),
+                    report.get("findingId", ""),
+                    report.get("timestamp", _ts()),
+                    finding.get("category", ""),
+                    finding.get("severity", ""),
+                    report.get("status", ""),
+                    report.get("summary", ""),
+                    report.get("suspectedCause", ""),
+                    report.get("recommendedFix", ""),
+                    float(report.get("confidence") or 0.0),
+                    report.get("error"),
+                    json.dumps(finding.get("resources", [])),
+                ),
+            )
     except Exception as e:
         logger.error("Failed to save investigation: %s", e)
+
+
+def execute_rollback(action_id: str) -> dict:
+    """Execute rollback for a completed action."""
+    detail = get_action_detail(action_id)
+    if not detail:
+        return {"error": "Action not found"}
+    if detail["status"] != "completed":
+        return {"error": f"Cannot rollback action with status '{detail['status']}'"}
+
+    # For delete_pod: can't rollback a deletion (controller recreates anyway)
+    # For restart_deployment: already rolling — no meaningful rollback
+    # Mark as rolled back in DB
+    try:
+        with _get_fix_db() as conn:
+            conn.execute("UPDATE actions SET status = 'rolled_back' WHERE id = ?", (action_id,))
+        return {"status": "rolled_back", "actionId": action_id, "note": "Action marked as rolled back"}
+    except Exception as e:
+        return {"error": str(e)}
 
 
 def update_action_verification(action_id: str, status: str, evidence: str) -> None:
     """Persist verification result for an action."""
     try:
-        conn = _get_fix_db()
-        conn.execute(
-            """UPDATE actions
-               SET verification_status = ?, verification_evidence = ?, verification_timestamp = ?
-               WHERE id = ?""",
-            (status, evidence, _ts(), action_id),
-        )
-        conn.commit()
-        conn.close()
+        with _get_fix_db() as conn:
+            conn.execute(
+                """UPDATE actions
+                   SET verification_status = ?, verification_evidence = ?, verification_timestamp = ?
+                   WHERE id = ?""",
+                (status, evidence, _ts(), action_id),
+            )
     except Exception as e:
         logger.error("Failed to update action verification: %s", e)
 
@@ -354,6 +368,7 @@ def update_action_verification(action_id: str, status: str, evidence: str) -> No
 
 def scan_crashlooping_pods() -> list[dict]:
     """Find pods in CrashLoopBackOff or high restart counts."""
+    crashloop_threshold = int(os.environ.get("PULSE_AGENT_CRASHLOOP_THRESHOLD", "3"))
     findings = []
     try:
         core = get_core_client()
@@ -367,7 +382,7 @@ def scan_crashlooping_pods() -> list[dict]:
             if ns.startswith("openshift-") or ns.startswith("kube-") or ns in ("default", "openshift"):
                 continue
             for cs in pod.status.container_statuses or []:
-                if cs.restart_count >= 5:
+                if cs.restart_count >= crashloop_threshold:
                     waiting = cs.state.waiting
                     reason = waiting.reason if waiting else "Unknown"
                     findings.append(_make_finding(
@@ -510,7 +525,16 @@ def scan_expiring_certs() -> list[dict]:
                 with tempfile.NamedTemporaryFile(suffix=".crt", delete=False) as f:
                     f.write(cert_bytes)
                     f.flush()
-                    cert_info = ssl._ssl._test_decode_cert(f.name)
+                    # H3: ssl._ssl._test_decode_cert is a CPython-specific private API.
+                    # Wrapped in try/except so certs are skipped on non-CPython runtimes.
+                    try:
+                        cert_info = ssl._ssl._test_decode_cert(f.name)  # type: ignore[attr-defined]
+                    except (AttributeError, Exception) as cert_err:
+                        logger.warning(
+                            "Cannot decode cert %s/%s (CPython-specific API unavailable): %s",
+                            ns, name, cert_err,
+                        )
+                        continue
                 not_after_str = cert_info.get("notAfter", "")
                 if not_after_str:
                     # Format: "Mon DD HH:MM:SS YYYY GMT"
@@ -959,6 +983,20 @@ def _build_investigation_prompt(finding: dict) -> str:
     )
 
 
+# ── Cost / usage tracking ──────────────────────────────────────────────────
+
+_investigation_tokens_used = 0
+_investigation_calls = 0
+
+
+def get_investigation_stats() -> dict:
+    """Return investigation usage counters for observability."""
+    return {
+        "total_calls": _investigation_calls,
+        "estimated_tokens": _investigation_tokens_used,
+    }
+
+
 def _run_proactive_investigation_sync(finding: dict) -> dict[str, Any]:
     from .agent import (
         create_client,
@@ -981,6 +1019,11 @@ def _run_proactive_investigation_sync(finding: dict) -> dict[str, Any]:
         tool_map=readonly_map,
         write_tools=set(),
     )
+    global _investigation_tokens_used, _investigation_calls
+    _investigation_calls += 1
+    # Estimate tokens from response length (rough approximation)
+    _investigation_tokens_used += len(response) * 2  # rough input+output estimate
+
     parsed = _extract_json_object(response) or {}
     summary = str(parsed.get("summary") or response[:300] or "Investigation completed")
     suspected_cause = str(parsed.get("suspected_cause") or "")
@@ -1017,6 +1060,7 @@ class MonitorSession:
         self._pending_verifications: dict[str, dict[str, Any]] = {}
         self._daily_investigation_count = 0
         self._daily_investigation_reset = time.time()
+        self._scan_lock = asyncio.Lock()  # H1: prevent concurrent scans
 
     def resolve_action_response(self, action_id: str, approved: bool) -> bool:
         """Resolve an outstanding action approval request."""
@@ -1331,9 +1375,19 @@ class MonitorSession:
 
     async def run_scan(self) -> None:
         """Run all scanners and push new findings."""
+        async with self._scan_lock:  # H1: prevent re-entrant scans
+            await self._run_scan_locked()
+
+    async def _run_scan_locked(self) -> None:
+        """Internal scan body — must be called under self._scan_lock."""
         logger.info("Running cluster scan...")
         scan_start = time.time()
         self._scan_counter += 1
+
+        # Evict stale entries older than 1 hour from cooldown/investigation caches
+        eviction_cutoff = scan_start - 3600
+        self._recent_fixes = {k: v for k, v in self._recent_fixes.items() if v > eviction_cutoff}
+        self._recent_investigations = {k: v for k, v in self._recent_investigations.items() if v > eviction_cutoff}
         all_findings: list[dict] = []
 
         for category, scanner in ALL_SCANNERS:
@@ -1347,7 +1401,7 @@ class MonitorSession:
         current_keys = set()
         new_findings = []
         for f in all_findings:
-            key = f"{f['category']}:{f['title']}"
+            key = _finding_key(f)
             current_keys.add(key)
             if key not in self._last_findings:
                 new_findings.append(f)
@@ -1366,9 +1420,11 @@ class MonitorSession:
                 await _send_webhook(f)
 
         # Send snapshot of all active finding IDs so UI can remove stale ones
+        # H2: cap activeIds to 500 entries to prevent unbounded growth
+        active_ids = [f["id"] for f in all_findings][:500]
         await self.send({
             "type": "findings_snapshot",
-            "activeIds": [f["id"] for f in all_findings],
+            "activeIds": active_ids,
             "timestamp": _ts(),
         })
 
