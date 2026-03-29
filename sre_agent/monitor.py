@@ -1521,6 +1521,25 @@ class MonitorSession:
             await self.send(verification_report)
             update_action_verification(action_id, status, evidence)
 
+            # Confidence calibration: update investigation confidence based on verification outcome
+            try:
+                db = get_database()
+                finding_id = payload.get("finding_id", "")
+                if finding_id:
+                    inv = db.fetchone(
+                        "SELECT id, confidence FROM investigations WHERE finding_id = ?",
+                        (finding_id,)
+                    )
+                    if inv:
+                        if status == "verified":
+                            new_conf = min(1.0, (inv["confidence"] or 0.5) + 0.05)
+                        else:  # still_failing
+                            new_conf = max(0.0, (inv["confidence"] or 0.5) - 0.1)
+                        db.execute("UPDATE investigations SET confidence = ? WHERE id = ?", (new_conf, inv["id"]))
+                        db.commit()
+            except Exception as e:
+                logger.debug("Failed to update investigation confidence: %s", e)
+
             # Publish verification to shared context bus
             from .context_bus import get_context_bus, ContextEntry
             bus = get_context_bus()

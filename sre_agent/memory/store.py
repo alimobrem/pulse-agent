@@ -159,6 +159,17 @@ class IncidentStore:
     def save_runbook(self, name: str, description: str, trigger_keywords: str,
                      tool_sequence: list[dict], source_incident_id: int | None = None) -> int:
         now = datetime.now(timezone.utc).isoformat()
+        # Check for existing runbook with same name — update instead of duplicating
+        existing = self.db.fetchone(
+            "SELECT id, success_count FROM runbooks WHERE name = ?", (name,)
+        )
+        if existing:
+            self.db.execute(
+                "UPDATE runbooks SET tool_sequence = ?, updated_at = ?, success_count = success_count + 1 WHERE id = ?",
+                (json.dumps(tool_sequence), now, existing["id"])
+            )
+            self.db.commit()
+            return existing["id"]
         self.db.execute(
             """INSERT INTO runbooks (name, description, trigger_keywords, tool_sequence,
                created_at, updated_at, source_incident_id)

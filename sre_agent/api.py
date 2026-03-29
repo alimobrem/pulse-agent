@@ -17,6 +17,7 @@ import re
 import time
 import uuid
 from contextlib import asynccontextmanager
+from importlib.metadata import version as pkg_version
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Query, Header, HTTPException
 
@@ -94,7 +95,14 @@ async def lifespan(app: FastAPI):
     yield
 
 
-app = FastAPI(title="Pulse Agent API", version="1.5.0", lifespan=lifespan)
+def _get_agent_version() -> str:
+    try:
+        return pkg_version("openshift-sre-agent")
+    except Exception:
+        return "dev"
+
+
+app = FastAPI(title="Pulse Agent API", version=_get_agent_version(), lifespan=lifespan)
 
 
 PROTOCOL_VERSION = "2"
@@ -109,7 +117,7 @@ async def version():
     """API protocol version. UI checks this on connect to detect mismatches."""
     return {
         "protocol": PROTOCOL_VERSION,
-        "agent": "1.5.0",
+        "agent": _get_agent_version(),
         "tools": len(SRE_ALL_TOOLS) + len(SEC_ALL_TOOLS),
         "features": ["component_specs", "ws_token_auth", "rate_limiting", "monitor", "fix_history", "predictions"],
     }
@@ -203,7 +211,10 @@ async def _run_agent_ws(
     def on_thinking(delta: str):
         _schedule_send({"type": "thinking_delta", "thinking": delta})
 
+    session_tools: list[str] = []
+
     def on_tool_use(name: str):
+        session_tools.append(name)
         _schedule_send({"type": "tool_use", "tool": name})
 
     def on_component(name: str, spec: dict):
@@ -259,6 +270,27 @@ async def _run_agent_ws(
         on_confirm=on_confirm,
         on_component=on_component,
     )
+
+    # Auto-store resolved interactive sessions in memory
+    if full_response and len(full_response) > 100 and os.environ.get("PULSE_AGENT_MEMORY") == "1":
+        try:
+            from .memory import get_manager
+            manager = get_manager()
+            if manager:
+                user_msgs = [m for m in messages if m["role"] == "user"]
+                if user_msgs:
+                    query = user_msgs[-1]["content"] if isinstance(user_msgs[-1]["content"], str) else str(user_msgs[-1]["content"])
+                    tool_seq = [{"name": t} for t in session_tools]
+                    manager.store_incident({
+                        "query": query[:500],
+                        "tool_sequence": tool_seq,
+                        "resolution": full_response[:500],
+                        "namespace": "",
+                        "resource_type": "",
+                        "error_type": "",
+                    }, confirmed=False)
+        except Exception as e:
+            logger.debug("Failed to auto-store session: %s", e)
 
     return full_response
 
@@ -836,7 +868,7 @@ async def get_shared_context(
 
 
 @app.get("/eval/status")
-def eval_status(
+async def eval_status(
     authorization: str | None = Header(None),
     token: str | None = Query(None),
 ):

@@ -78,6 +78,23 @@ def build_memory_context(store: IncidentStore, user_query: str) -> str:
             )
         sections.append("## Past Similar Incidents\n" + "\n".join(inc_lines))
 
+    # Score-based tool ordering: suggest the most successful first diagnostic step
+    if incidents:
+        successful = [inc for inc in incidents if inc.get("score", 0) > 0.7]
+        if successful:
+            first_tools = []
+            for inc in successful:
+                try:
+                    seq = json.loads(inc["tool_sequence"])
+                    if seq:
+                        tool_name = seq[0]["name"] if isinstance(seq[0], dict) else str(seq[0])
+                        first_tools.append(tool_name)
+                except (json.JSONDecodeError, KeyError, IndexError):
+                    pass
+            if first_tools:
+                most_common = Counter(first_tools).most_common(1)[0][0]
+                sections.append(f"\nSuggested first diagnostic step: {most_common}")
+
     # Anti-patterns: low-scoring incidents to learn from failures (Improvement #3)
     low_score_incidents = store.search_low_score_incidents(user_query, threshold=0.4, limit=2)
     if low_score_incidents:
