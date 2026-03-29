@@ -76,7 +76,13 @@ make helm-lint                                 # validate chart locally (tests P
 - Auto-fix at trust level 3+: deletes crashlooping pods, restarts failed deployments
 - Confidence scores on all findings, investigations, and action proposals
 - `resolution` events emitted when findings resolve (auto-fix or self-healed)
+- Reasoning chains: investigation prompt requests evidence + alternatives_considered
+- Noise learning: tracks transient findings, assigns `noiseScore` to suppress flaky alerts
 - `findings_snapshot` event for stale finding cleanup
+- Morning briefing: `GET /briefing` endpoint aggregates recent activity with time-aware greeting
+- Simulation preview: `POST /simulate` predicts impact, risk, duration, reversibility
+- WebSocket `feedback` message type for UI-driven memory learning (thumbs up/down)
+- Approved confirmations recorded as implicit positive feedback for memory
 - Fix history persisted to the database (`PULSE_AGENT_DATABASE_URL`)
 - `_sanitize_for_prompt()` on all cluster data in investigation prompts with `--- BEGIN/END CLUSTER DATA ---` delimiters
 
@@ -131,10 +137,10 @@ Rules: validate inputs with `_validate_k8s_name()`/`_validate_k8s_namespace()`, 
 
 ### Helm Chart (`chart/`)
 - `values.yaml` — requires `vertexAI.projectId` or `anthropicApiKey.existingSecret`
-- WS token auto-generated as K8s Secret (`helm.sh/resource-policy: keep`)
-- Recreate strategy (avoids 2x resource usage during rollouts on quota-constrained namespaces)
+- WS token and PG password auto-generated with `lookup()` to preserve existing values on upgrade
+- Recreate strategy, replicaCount=1 (RWO PVC requires single replica)
 - `chart/templates/deployment.yaml` — validates credentials at install time via `_helpers.tpl`
-- `chart/templates/postgresql.yaml` — PostgreSQL deployment (RHEL 9, runAsNonRoot, NetworkPolicy)
+- `chart/templates/postgresql.yaml` — PostgreSQL **StatefulSet** (RHEL 9, runAsNonRoot, NetworkPolicy, headless Service)
 
 ### Key Files
 - `config.py` — Pydantic v2 Settings (`PulseAgentSettings` with `PULSE_AGENT_` prefix)
@@ -173,5 +179,6 @@ Rules: validate inputs with `_validate_k8s_name()`/`_validate_k8s_namespace()`, 
 | `PULSE_AGENT_MAX_TRUST_LEVEL` | Server-side max trust level (0-4) | `3` |
 | `PULSE_AGENT_CB_THRESHOLD` | Circuit breaker failure threshold | `3` |
 | `PULSE_AGENT_CB_TIMEOUT` | Circuit breaker recovery (seconds) | `60` |
+| `PULSE_AGENT_NOISE_THRESHOLD` | Noise score threshold for suppressing findings | `0.7` |
 
 *One of Vertex AI or Anthropic API key is required.
