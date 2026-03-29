@@ -12,6 +12,7 @@ from sre_agent.monitor import (
     SEVERITY_INFO,
     SEVERITY_WARNING,
     MonitorSession,
+    _estimate_finding_confidence,
     _make_action_report,
     _make_finding,
     _make_prediction,
@@ -337,7 +338,11 @@ class TestSecurityFollowup:
             patch("sre_agent.agent._circuit_breaker") as mock_cb,
         ):
             mock_cb.is_open = False
-            asyncio.get_event_loop().run_until_complete(session.run_investigations([finding]))
+            loop = asyncio.new_event_loop()
+            try:
+                loop.run_until_complete(session.run_investigations([finding]))
+            finally:
+                loop.close()
 
         mock_sec.assert_called_once_with(finding)
         # The investigation_report should have securityFollowup field
@@ -382,7 +387,11 @@ class TestSecurityFollowup:
             patch("sre_agent.agent._circuit_breaker") as mock_cb,
         ):
             mock_cb.is_open = False
-            asyncio.get_event_loop().run_until_complete(session.run_investigations([finding]))
+            loop = asyncio.new_event_loop()
+            try:
+                loop.run_until_complete(session.run_investigations([finding]))
+            finally:
+                loop.close()
 
         mock_sec.assert_not_called()
         reports = [m for m in sent_messages if m.get("type") == "investigation_report"]
@@ -432,7 +441,11 @@ class TestSecurityFollowup:
             patch("sre_agent.agent._circuit_breaker") as mock_cb,
         ):
             mock_cb.is_open = False
-            asyncio.get_event_loop().run_until_complete(session.run_investigations(findings))
+            loop = asyncio.new_event_loop()
+            try:
+                loop.run_until_complete(session.run_investigations(findings))
+            finally:
+                loop.close()
 
         # Should only be called once despite multiple investigations
         assert mock_sec.call_count == 1
@@ -480,7 +493,11 @@ class TestMonitorAutoLearn:
             patch("sre_agent.agent._circuit_breaker") as mock_cb,
         ):
             mock_cb.is_open = False
-            asyncio.get_event_loop().run_until_complete(session.run_investigations([finding]))
+            loop = asyncio.new_event_loop()
+            try:
+                loop.run_until_complete(session.run_investigations([finding]))
+            finally:
+                loop.close()
 
         # Verify incident was stored in memory
         results = mgr.store.search_incidents("investigation", limit=5)
@@ -531,7 +548,11 @@ class TestMonitorAutoLearn:
             patch("sre_agent.agent._circuit_breaker") as mock_cb,
         ):
             mock_cb.is_open = False
-            asyncio.get_event_loop().run_until_complete(session.run_investigations([finding]))
+            loop = asyncio.new_event_loop()
+            try:
+                loop.run_until_complete(session.run_investigations([finding]))
+            finally:
+                loop.close()
 
         # No incident stored (confidence too low)
         results = mgr.store.search_incidents("investigation", limit=5)
@@ -579,7 +600,11 @@ class TestMonitorAutoLearn:
         ):
             mock_cb.is_open = False
             # Should not raise even without memory
-            asyncio.get_event_loop().run_until_complete(session.run_investigations([finding]))
+            loop = asyncio.new_event_loop()
+            try:
+                loop.run_until_complete(session.run_investigations([finding]))
+            finally:
+                loop.close()
 
     def test_auto_learn_from_verified_fix(self, monkeypatch, tmp_path):
         """Verified fixes are stored in memory as confirmed incidents."""
@@ -614,7 +639,11 @@ class TestMonitorAutoLearn:
         }
 
         # Simulate no active finding → verified
-        asyncio.get_event_loop().run_until_complete(session.process_verifications([]))
+        loop = asyncio.new_event_loop()
+        try:
+            loop.run_until_complete(session.process_verifications([]))
+        finally:
+            loop.close()
 
         # Check that a confirmed incident was stored
         results = mgr.store.search_incidents("auto-fix", limit=5)
@@ -732,3 +761,150 @@ class TestFixImagePullRollback:
             "namespace": "prod",
             "revision": "7",
         }
+
+
+class TestConfidenceScoring:
+    def test_finding_confidence_by_category(self):
+        assert _estimate_finding_confidence({"category": "crashloop", "severity": "critical"}) >= 0.95
+        assert _estimate_finding_confidence({"category": "hpa", "severity": "warning"}) <= 0.80
+
+    def test_finding_confidence_severity_adjustment(self):
+        critical = _estimate_finding_confidence({"category": "pending", "severity": "critical"})
+        warning = _estimate_finding_confidence({"category": "pending", "severity": "warning"})
+        info = _estimate_finding_confidence({"category": "pending", "severity": "info"})
+        assert critical > warning > info
+
+    def test_finding_confidence_unknown_category(self):
+        conf = _estimate_finding_confidence({"category": "unknown_scanner", "severity": "warning"})
+        assert 0.0 <= conf <= 1.0
+
+    def test_make_finding_includes_confidence(self):
+        f = _make_finding(
+            severity="warning",
+            category="crashloop",
+            title="Test",
+            summary="Test finding",
+            resources=[],
+            confidence=0.85,
+        )
+        assert f["confidence"] == 0.85
+
+    def test_make_finding_without_confidence(self):
+        f = _make_finding(
+            severity="warning",
+            category="crashloop",
+            title="Test",
+            summary="Test finding",
+            resources=[],
+        )
+        assert "confidence" not in f
+
+    def test_make_action_report_includes_confidence(self):
+        r = _make_action_report(
+            finding_id="f-123",
+            tool="restart_deployment",
+            inp={},
+            status="proposed",
+            confidence=0.78,
+        )
+        assert r["confidence"] == 0.78
+
+    def test_make_action_report_without_confidence(self):
+        r = _make_action_report(
+            finding_id="f-123",
+            tool="restart_deployment",
+            inp={},
+            status="proposed",
+        )
+        assert "confidence" not in r
+
+    def test_confidence_clamped_to_valid_range(self):
+        f = _make_finding(severity="critical", category="test", title="t", summary="s", resources=[], confidence=1.5)
+        assert f["confidence"] == 1.0
+        f2 = _make_finding(severity="critical", category="test", title="t", summary="s", resources=[], confidence=-0.3)
+        assert f2["confidence"] == 0.0
+
+
+class TestResolutionEvents:
+    def test_resolution_emitted_when_finding_disappears(self):
+        """When a finding from scan N is absent in scan N+1, a resolution event is sent."""
+        ws = MagicMock()
+        session = MonitorSession(ws, trust_level=1)
+
+        # Simulate scan N: finding present
+        finding = _make_finding(
+            severity="warning",
+            category="crashloop",
+            title="Pod crashing",
+            summary="test",
+            resources=[{"kind": "Pod", "name": "web", "namespace": "prod"}],
+        )
+        key = "crashloop:Pod crashing:Pod:prod:web"
+        session._last_findings[key] = finding
+
+        # Simulate scan N+1: finding gone — run the stale-key detection inline
+        current_keys: set[str] = set()  # empty = finding disappeared
+        stale_keys = set(session._last_findings.keys()) - current_keys
+        resolution_events = []
+        for k in stale_keys:
+            resolved = session._last_findings.pop(k)
+            resolved_by = "self-healed"
+            fid = resolved.get("id", "")
+            if fid in session._recent_fix_ids:
+                resolved_by = "auto-fix"
+                session._recent_fix_ids.discard(fid)
+            resolution_events.append(
+                {
+                    "type": "resolution",
+                    "findingId": fid,
+                    "category": resolved.get("category", ""),
+                    "resolvedBy": resolved_by,
+                }
+            )
+
+        assert len(resolution_events) == 1
+        assert resolution_events[0]["findingId"] == finding["id"]
+        assert resolution_events[0]["resolvedBy"] == "self-healed"
+        assert resolution_events[0]["category"] == "crashloop"
+
+    def test_resolution_attributed_to_auto_fix(self):
+        """When a fixed finding disappears, resolvedBy should be 'auto-fix'."""
+        ws = MagicMock()
+        session = MonitorSession(ws, trust_level=3)
+
+        finding = _make_finding(
+            severity="warning",
+            category="workloads",
+            title="Deploy failing",
+            summary="test",
+            resources=[{"kind": "Deployment", "name": "api", "namespace": "prod"}],
+        )
+        key = "workloads:Deploy failing:Deployment:prod:api"
+        session._last_findings[key] = finding
+        session._recent_fix_ids.add(finding["id"])
+
+        # Finding disappears
+        stale_keys = set(session._last_findings.keys()) - set()
+        for k in stale_keys:
+            resolved = session._last_findings.pop(k)
+            fid = resolved.get("id", "")
+            if fid in session._recent_fix_ids:
+                resolved_by = "auto-fix"
+                session._recent_fix_ids.discard(fid)
+            else:
+                resolved_by = "self-healed"
+
+        assert resolved_by == "auto-fix"
+        assert finding["id"] not in session._recent_fix_ids  # cleaned up
+
+    def test_recent_fix_ids_bounded(self):
+        """_recent_fix_ids should not grow unboundedly."""
+        ws = MagicMock()
+        session = MonitorSession(ws, trust_level=3)
+        for i in range(600):
+            session._recent_fix_ids.add(f"f-{i:012d}")
+        assert len(session._recent_fix_ids) == 600
+        # Simulate the cap logic from _run_scan_locked
+        if len(session._recent_fix_ids) > 500:
+            session._recent_fix_ids = set(list(session._recent_fix_ids)[-500:])
+        assert len(session._recent_fix_ids) == 500

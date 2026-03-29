@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-Pulse Agent — AI-powered OpenShift/Kubernetes SRE and Security agent built on Claude. Connects to live clusters via the K8s API and uses Claude Opus for diagnostics, incident triage, and automated remediation. v1.6.1, Protocol v2, 109 tools, 11 scanners, 320 tests. Auto-routing orchestrator classifies queries and routes to SRE or Security agent.
+Pulse Agent — AI-powered OpenShift/Kubernetes SRE and Security agent built on Claude. Connects to live clusters via the K8s API and uses Claude Opus for diagnostics, incident triage, and automated remediation. v1.6.1, Protocol v2, 109 tools, 11 scanners, 384 tests. Auto-routing orchestrator classifies queries and routes to SRE or Security agent.
 
 **UI Repository:** `/Users/amobrem/ali/OpenshiftPulse` — React/TypeScript frontend (Zustand stores, incident views, admin dashboard).
 
@@ -74,6 +74,8 @@ make helm-lint                                 # validate chart locally
 - `MonitorSession` — periodic cluster scanning (default 60s interval)
 - 11 scanners: crashlooping pods, pending pods, failed deployments, node pressure, expiring certs, firing alerts, OOM-killed pods, image pull errors, degraded operators, DaemonSet gaps, HPA saturation
 - Auto-fix at trust level 3+: deletes crashlooping pods, restarts failed deployments
+- Confidence scores on all findings, investigations, and action proposals
+- `resolution` events emitted when findings resolve (auto-fix or self-healed)
 - `findings_snapshot` event for stale finding cleanup
 - Fix history persisted to the database (`PULSE_AGENT_DATABASE_URL`)
 - `_sanitize_for_prompt()` on all cluster data in investigation prompts with `--- BEGIN/END CLUSTER DATA ---` delimiters

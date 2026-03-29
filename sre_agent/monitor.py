@@ -45,8 +45,9 @@ def _make_finding(
     resources: list[dict],
     auto_fixable: bool = False,
     runbook_id: str | None = None,
+    confidence: float | None = None,
 ) -> dict:
-    return {
+    finding: dict = {
         "type": "finding",
         "id": f"f-{uuid.uuid4().hex[:12]}",
         "severity": severity,
@@ -58,6 +59,9 @@ def _make_finding(
         "runbookId": runbook_id,
         "timestamp": _ts(),
     }
+    if confidence is not None:
+        finding["confidence"] = round(max(0.0, min(1.0, confidence)), 2)
+    return finding
 
 
 def _make_prediction(
@@ -94,8 +98,9 @@ def _make_action_report(
     error: str | None = None,
     reasoning: str = "",
     duration_ms: int = 0,
+    confidence: float | None = None,
 ) -> dict:
-    return {
+    report: dict = {
         "type": "action_report",
         "id": action_id or f"a-{uuid.uuid4().hex[:12]}",
         "findingId": finding_id,
@@ -109,6 +114,9 @@ def _make_action_report(
         "reasoning": reasoning,
         "durationMs": duration_ms,
     }
+    if confidence is not None:
+        report["confidence"] = round(max(0.0, min(1.0, confidence)), 2)
+    return report
 
 
 # ── Fix History (Database abstraction) ────────────────────────────────────
@@ -1002,6 +1010,32 @@ AUTO_FIX_HANDLERS: dict[str, Callable] = {
 }
 
 
+def _estimate_finding_confidence(finding: dict) -> float:
+    """Estimate confidence that a finding is a real issue (not noise)."""
+    severity = str(finding.get("severity", "warning"))
+    category = str(finding.get("category", ""))
+    # High-signal scanners get higher base confidence
+    base_by_category = {
+        "crashloop": 0.95,
+        "oom": 0.93,
+        "alerts": 0.90,
+        "workloads": 0.88,
+        "nodes": 0.92,
+        "operators": 0.90,
+        "image_pull": 0.85,
+        "cert_expiry": 0.88,
+        "pending": 0.80,
+        "daemonsets": 0.82,
+        "hpa": 0.75,
+    }
+    base = base_by_category.get(category, 0.80)
+    if severity == SEVERITY_CRITICAL:
+        base = min(1.0, base + 0.05)
+    elif severity == SEVERITY_INFO:
+        base = max(0.0, base - 0.10)
+    return round(base, 2)
+
+
 def _estimate_auto_fix_confidence(finding: dict) -> float:
     """Estimate confidence for autonomous fixes for outcome calibration."""
     category = str(finding.get("category", ""))
@@ -1286,6 +1320,7 @@ class MonitorSession:
         self._daily_investigation_reset = time.time()
         self._scan_lock = asyncio.Lock()  # H1: prevent concurrent scans
         self._last_security_followup: float = 0.0  # cooldown tracker
+        self._recent_fix_ids: set[str] = set()  # finding IDs that were auto-fixed (for resolution attribution)
 
     def resolve_action_response(self, action_id: str, approved: bool) -> bool:
         """Resolve an outstanding action approval request."""
@@ -1388,9 +1423,10 @@ class MonitorSession:
             action_report = _make_action_report(
                 finding_id=finding["id"],
                 tool="",
-                inp={"category": category, "resources": resources, "confidence": confidence},
+                inp={"category": category, "resources": resources},
                 status="proposed" if self.trust_level == 2 else "executing",
                 reasoning=f"Auto-fix for {category}: {finding.get('title', '')} (confidence={confidence:.2f})",
+                confidence=confidence,
             )
 
             # Ask-first mode: emit proposal and wait for explicit decision.
@@ -1443,6 +1479,7 @@ class MonitorSession:
                 action_report["afterState"] = after_state
                 action_report["durationMs"] = duration_ms
                 fixes_this_cycle += 1
+                self._recent_fix_ids.add(finding["id"])
 
                 # Record cooldown timestamp
                 if resource_key:
@@ -1828,10 +1865,35 @@ class MonitorSession:
                 new_findings.append(f)
                 self._last_findings[key] = f
 
-        # Remove stale findings (resolved since last scan)
+        # Remove stale findings (resolved since last scan) and emit resolution events
         stale_keys = set(self._last_findings.keys()) - current_keys
         for key in stale_keys:
-            del self._last_findings[key]
+            resolved_finding = self._last_findings.pop(key)
+            # Determine how it was resolved
+            resolved_by = "self-healed"
+            finding_id = resolved_finding.get("id", "")
+            if finding_id in self._recent_fix_ids:
+                resolved_by = "auto-fix"
+                self._recent_fix_ids.discard(finding_id)
+            await self.send(
+                {
+                    "type": "resolution",
+                    "findingId": finding_id,
+                    "category": resolved_finding.get("category", ""),
+                    "title": f"{resolved_finding.get('title', 'Issue')} resolved",
+                    "resolvedBy": resolved_by,
+                    "timestamp": _ts(),
+                }
+            )
+
+        # Cap _recent_fix_ids to prevent unbounded growth on long-running sessions
+        if len(self._recent_fix_ids) > 500:
+            self._recent_fix_ids = set(list(self._recent_fix_ids)[-500:])
+
+        # Enrich findings with confidence scores (before context bus so consumers get scores)
+        for f in new_findings:
+            if "confidence" not in f:
+                f["confidence"] = _estimate_finding_confidence(f)
 
         # Publish critical new findings to shared context bus
         from .context_bus import ContextEntry, get_context_bus

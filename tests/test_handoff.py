@@ -115,7 +115,11 @@ class TestProcessHandoffs:
         with patch(
             "sre_agent.monitor._run_security_followup_sync", return_value={"security_issues": [], "risk_level": "low"}
         ) as mock_sec:
-            asyncio.get_event_loop().run_until_complete(session.process_handoffs())
+            loop = asyncio.new_event_loop()
+            try:
+                loop.run_until_complete(session.process_handoffs())
+            finally:
+                loop.close()
             mock_sec.assert_called_once()
             finding_arg = mock_sec.call_args[0][0]
             assert finding_arg["category"] == "handoff"
@@ -142,7 +146,11 @@ class TestProcessHandoffs:
         with patch(
             "sre_agent.monitor._run_proactive_investigation_sync", return_value={"summary": "ok", "confidence": 0.5}
         ) as mock_sre:
-            asyncio.get_event_loop().run_until_complete(session.process_handoffs())
+            loop = asyncio.new_event_loop()
+            try:
+                loop.run_until_complete(session.process_handoffs())
+            finally:
+                loop.close()
             mock_sre.assert_called_once()
             finding_arg = mock_sre.call_args[0][0]
             assert finding_arg["category"] == "handoff"
@@ -163,7 +171,11 @@ class TestProcessHandoffs:
         )
 
         with patch("sre_agent.monitor._run_security_followup_sync", return_value={}):
-            asyncio.get_event_loop().run_until_complete(session.process_handoffs())
+            loop = asyncio.new_event_loop()
+            try:
+                loop.run_until_complete(session.process_handoffs())
+            finally:
+                loop.close()
 
         # Verify cleanup
         db = get_database()
@@ -178,7 +190,11 @@ class TestProcessHandoffs:
 
     def test_no_handoffs_is_noop(self, session):
         # Should not raise
-        asyncio.get_event_loop().run_until_complete(session.process_handoffs())
+        loop = asyncio.new_event_loop()
+        try:
+            loop.run_until_complete(session.process_handoffs())
+        finally:
+            loop.close()
 
     def test_ignores_unknown_target(self, session):
         bus = get_context_bus()
@@ -197,6 +213,10 @@ class TestProcessHandoffs:
             patch("sre_agent.monitor._run_security_followup_sync") as mock_sec,
             patch("sre_agent.monitor._run_proactive_investigation_sync") as mock_sre,
         ):
-            asyncio.get_event_loop().run_until_complete(session.process_handoffs())
+            loop = asyncio.new_event_loop()
+            try:
+                loop.run_until_complete(session.process_handoffs())
+            finally:
+                loop.close()
             mock_sec.assert_not_called()
             mock_sre.assert_not_called()

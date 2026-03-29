@@ -41,6 +41,8 @@ Pulse Agent connects directly to your cluster's Kubernetes API and uses Claude O
 - **11 Scanners** — Crashlooping pods, pending pods, failed deployments, node pressure, certificate expiry, firing alerts, OOM-killed pods, image pull errors, degraded operators, DaemonSet gaps, HPA saturation
 - **Auto-Fix at Trust Level 3** — Automatically applies fixes for safe categories (crashloop pod deletion, deployment restarts) without user approval
 - **Auto-Fix at Trust Level 4** — Applies all fixable findings automatically, with rollback snapshots for every action
+- **Confidence Scores** — Every finding, investigation, and action includes a confidence score (0-100%) so you know exactly how much to trust each suggestion
+- **Resolution Events** — When findings resolve (auto-fix or self-healed), the monitor emits `resolution` events so the UI can celebrate wins
 - **Finding Lifecycle** — Stale finding cleanup after each scan cycle, severity escalation on repeat occurrences
 
 ### Orchestrator
@@ -577,7 +579,7 @@ pip install -e '.[test]'
 python -m pytest tests/ -v
 ```
 
-373 tests covering all tools, agent loop safety mechanisms, error classification, error tracking, config validation, unit parsing, orchestrator, context bus, handoff tools, and the memory system. All tests run without a cluster or API key (fully mocked).
+384 tests covering all tools, agent loop safety mechanisms, error classification, error tracking, config validation, unit parsing, orchestrator, context bus, handoff tools, and the memory system. All tests run without a cluster or API key (fully mocked).
 
 ## Evaluation Framework
 
@@ -631,7 +633,7 @@ Suites:
 ---
 
 <p align="center">
-  <strong>109 tools</strong> &bull; <strong>11 scanners</strong> &bull; <strong>10 runbooks</strong> &bull; <strong>8 tool categories</strong> &bull; <strong>373 tests</strong> &bull; <strong>Protocol v2</strong>
+  <strong>109 tools</strong> &bull; <strong>11 scanners</strong> &bull; <strong>10 runbooks</strong> &bull; <strong>8 tool categories</strong> &bull; <strong>384 tests</strong> &bull; <strong>Protocol v2</strong>
 </p>
 
 <p align="center">

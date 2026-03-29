@@ -326,9 +326,12 @@ Triggers an immediate cluster scan. If a scan is already in progress, returns an
   "resource": {"kind": "Pod", "name": "api-server-xyz", "namespace": "production"},
   "summary": "Pod crash-looping: CrashLoopBackOff (5 restarts in 10m)",
   "details": "...",
+  "confidence": 0.95,
   "timestamp": 1711540800
 }
 ```
+
+The optional `confidence` field (0.0–1.0) indicates how confident the scanner is that this is a real issue.
 
 #### `prediction` — Predicted future issue
 
@@ -361,7 +364,8 @@ Triggers an immediate cluster scan. If a scan is already in progress, returns an
 }
 ```
 
-`action_report` may include optional verification fields once post-fix verification completes:
+`action_report` may include optional fields:
+- `confidence`: `number` (0.0–1.0) — agent's confidence that this action will resolve the issue
 - `verificationStatus`: `"verified"` | `"still_failing"`
 - `verificationEvidence`: `string`
 - `verificationTimestamp`: `number`
@@ -396,6 +400,23 @@ Triggers an immediate cluster scan. If a scan is already in progress, returns an
   "timestamp": 1711540800
 }
 ```
+
+#### `resolution` — Issue resolved (proactive win)
+
+Emitted when a previously active finding disappears from the scan results. Enables the UI to celebrate wins and track resolution attribution.
+
+```json
+{
+  "type": "resolution",
+  "findingId": "f-abc123",
+  "category": "crashloop",
+  "title": "Pod api-server-xyz crash-looping resolved",
+  "resolvedBy": "auto-fix",
+  "timestamp": 1711540800
+}
+```
+
+`resolvedBy` values: `"auto-fix"` (monitor applied a fix), `"self-healed"` (issue disappeared without intervention).
 
 #### `findings_snapshot` — Active findings reconciliation
 
