@@ -36,6 +36,7 @@ from .security_agent import (
     TOOL_DEFS as SEC_TOOL_DEFS,
     TOOL_MAP as SEC_TOOL_MAP,
 )
+from .orchestrator import classify_intent, build_orchestrated_config
 
 logger = logging.getLogger("pulse_agent.api")
 
@@ -352,8 +353,12 @@ async def websocket_agent(websocket: WebSocket, mode: str):
         # before /ws/monitor due to registration order
         await websocket_monitor(websocket)
         return
+    if mode == "agent":
+        # Redirect to the auto-routing agent handler
+        await websocket_auto_agent(websocket)
+        return
     if mode not in ("sre", "security"):
-        await websocket.close(code=4000, reason="Invalid mode. Use 'sre' or 'security'. For monitoring, use /ws/monitor.")
+        await websocket.close(code=4000, reason="Invalid mode. Use 'sre', 'security', or 'agent'. For monitoring, use /ws/monitor.")
         return
 
     # Token authentication — mandatory unless explicitly disabled
@@ -522,6 +527,215 @@ async def websocket_agent(websocket: WebSocket, mode: str):
                         category="user_resolution" if "resolved" in full_response.lower() else "diagnosis",
                         summary=full_response[:200],
                         details={"mode": mode, "full_length": len(full_response)},
+                        namespace=namespace_from_context,
+                    ))
+
+                await websocket.send_json({
+                    "type": "done",
+                    "full_response": full_response,
+                })
+            except Exception as e:
+                logger.exception("Agent error")
+                if messages:
+                    messages.pop()
+                await websocket.send_json({
+                    "type": "error",
+                    "message": "Agent encountered an error. Please try again.",
+                    "category": "server",
+                    "suggestions": [],
+                    "operation": "",
+                })
+
+    except Exception:
+        logger.exception("WebSocket error")
+    finally:
+        receive_task.cancel()
+        try:
+            await receive_task
+        except asyncio.CancelledError:
+            pass
+        # Cancel any pending confirmation future so agent thread unblocks immediately
+        future = _pending_confirms.pop(session_id, None)
+        if future and not future.done():
+            future.cancel()
+        _pending_nonces.pop(session_id, None)
+        _pending_timestamps.pop(session_id, None)
+        _ws_alive.pop(session_id, None)
+
+
+# ── /ws/agent: Auto-routing unified agent ─────────────────────────────────
+
+
+@app.websocket("/ws/agent")
+async def websocket_auto_agent(websocket: WebSocket):
+    """Unified agent endpoint — auto-routes between SRE and Security based on query intent."""
+    # Token authentication — same pattern as /ws/sre
+    import hmac
+    expected_token = os.environ.get("PULSE_AGENT_WS_TOKEN", "")
+    if not expected_token:
+        await websocket.close(code=4001, reason="Server not configured. PULSE_AGENT_WS_TOKEN is required.")
+        return
+    client_token = websocket.query_params.get("token", "")
+    if not hmac.compare_digest(client_token, expected_token):
+        await websocket.close(code=4001, reason="Unauthorized. Invalid or missing token.")
+        return
+
+    await websocket.accept()
+    session_id = str(uuid.uuid4())
+    _ws_alive[session_id] = True
+    messages: list[dict] = []
+    message_timestamps: list[float] = []
+    last_mode: str = "sre"
+
+    # Message queue for incoming messages while agent is running
+    incoming: asyncio.Queue = asyncio.Queue()
+
+    async def _receive_loop():
+        """Receive messages from the WebSocket and route them."""
+        try:
+            while True:
+                raw = await websocket.receive_text()
+                if len(raw) > MAX_MESSAGE_SIZE:
+                    await websocket.send_json({"type": "error", "message": "Message too large"})
+                    continue
+                try:
+                    data = json.loads(raw)
+                except json.JSONDecodeError:
+                    await websocket.send_json({"type": "error", "message": "Invalid JSON"})
+                    continue
+
+                msg_type = data.get("type")
+
+                # Confirm responses are handled immediately (even while agent runs)
+                if msg_type == "confirm_response":
+                    future = _pending_confirms.get(session_id)
+                    expected_nonce = _pending_nonces.get(session_id)
+                    received_nonce = data.get("nonce", "")
+
+                    if not future or future.done():
+                        logger.warning("Confirm response received but no pending future (session=%s)", session_id)
+                    elif expected_nonce and received_nonce != expected_nonce:
+                        logger.warning("Confirm response nonce mismatch — possible replay (session=%s)", session_id)
+                        future.set_result(False)
+                    else:
+                        future.set_result(data.get("approved", False))
+                        logger.info("Confirmation received: approved=%s nonce=%s", data.get("approved"), received_nonce[:8])
+                    _pending_nonces.pop(session_id, None)
+                    continue
+
+                if msg_type == "clear":
+                    messages.clear()
+                    await websocket.send_json({"type": "cleared"})
+                    continue
+
+                # Queue other messages for the main loop
+                await incoming.put(data)
+        except WebSocketDisconnect:
+            _ws_alive[session_id] = False
+            await incoming.put(None)  # Signal disconnect
+        except Exception:
+            _ws_alive[session_id] = False
+            await incoming.put(None)
+
+    # Start the receive loop as a concurrent task
+    receive_task = asyncio.create_task(_receive_loop())
+
+    try:
+        while True:
+            data = await incoming.get()
+            if data is None:
+                break  # Client disconnected
+
+            msg_type = data.get("type")
+            if msg_type != "message":
+                continue
+
+            # Rate limiting
+            now = time.time()
+            message_timestamps[:] = [t for t in message_timestamps if now - t < 60]
+            if len(message_timestamps) >= MAX_MESSAGES_PER_MINUTE:
+                await websocket.send_json({"type": "error", "message": "Rate limited. Max 10 messages per minute."})
+                continue
+            message_timestamps.append(now)
+
+            content = data.get("content", "").strip()
+            if not content:
+                continue
+
+            # Fleet mode — prefix content with fleet context
+            fleet_mode = data.get("fleet", False)
+            if fleet_mode:
+                content = (
+                    "[FLEET MODE: This query spans all managed clusters. "
+                    "Use fleet_* tools (fleet_list_pods, fleet_list_deployments, fleet_compare_resource, etc.) "
+                    "to query across clusters. Do NOT use single-cluster tools unless the user specifies a cluster.]\n\n"
+                    + content
+                )
+
+            # --- Auto-classify intent ---
+            intent = classify_intent(content)
+            config = build_orchestrated_config(intent)
+            last_mode = intent
+            logger.info("Auto-agent classified intent=%s for session=%s", intent, session_id)
+
+            system_prompt = config["system_prompt"]
+            tool_defs = config["tool_defs"]
+            tool_map = config["tool_map"]
+            write_tools = config["write_tools"]
+
+            # Context from Pulse UI — ensures namespace/resource are explicit
+            context = data.get("context")
+            if context and isinstance(context, dict):
+                kind = _sanitize_context_field(context.get("kind", ""))
+                ns = _sanitize_context_field(context.get("namespace", ""))
+                name = _sanitize_context_field(context.get("name", ""))
+                if kind or name or ns:
+                    context_parts = []
+                    if kind and name:
+                        context_parts.append(f"Resource: {kind}/{name}")
+                    elif name:
+                        context_parts.append(f"Resource: {name}")
+                    if ns:
+                        context_parts.append(f"Namespace: {ns}")
+                    context_str = ", ".join(context_parts)
+                    if ns:
+                        content = (
+                            f"[UI Context: {context_str}]\n"
+                            f"IMPORTANT: Use namespace='{ns}' for any operations on this resource. "
+                            f"Do NOT default to 'default' namespace.\n\n{content}"
+                        )
+                    else:
+                        content = f"[UI Context: {context_str}]\n\n{content}"
+
+            messages.append({"role": "user", "content": content})
+
+            # Inject shared context from context bus
+            from .context_bus import get_context_bus, ContextEntry
+            namespace_from_context = ""
+            ns_match = re.search(r"Namespace:\s*'?([a-zA-Z0-9\-._]+)'?", content)
+            if ns_match:
+                namespace_from_context = ns_match.group(1)
+            bus = get_context_bus()
+            shared_context = bus.build_context_prompt(namespace=namespace_from_context)
+            effective_system = system_prompt
+            if shared_context:
+                effective_system = system_prompt + "\n\n" + shared_context
+
+            try:
+                full_response = await _run_agent_ws(
+                    websocket, messages, effective_system,
+                    tool_defs, tool_map, write_tools, session_id,
+                )
+                messages.append({"role": "assistant", "content": full_response})
+
+                # Publish agent response to shared context bus
+                if full_response:
+                    source = "sre_agent" if last_mode == "sre" else "security_agent"
+                    bus.publish(ContextEntry(
+                        source=source,
+                        category="user_resolution" if "resolved" in full_response.lower() else "diagnosis",
+                        summary=full_response[:200],
+                        details={"mode": last_mode, "full_length": len(full_response)},
                         namespace=namespace_from_context,
                     ))
 
