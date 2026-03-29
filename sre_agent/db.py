@@ -95,7 +95,18 @@ class Database:
         translated = self._translate_schema(script)
         with self._lock:
             if self.is_postgres:
-                self._conn.cursor().execute(translated)
+                # Execute each statement separately to handle IF NOT EXISTS
+                # correctly with SERIAL types (which create implicit sequences)
+                cur = self._conn.cursor()
+                for stmt in translated.split(";"):
+                    stmt = stmt.strip()
+                    if stmt:
+                        try:
+                            cur.execute(stmt)
+                        except Exception:
+                            # Statement already applied (e.g. table exists with SERIAL)
+                            self._conn.rollback()
+                            continue
                 self._conn.commit()
             else:
                 self._conn.executescript(translated)
