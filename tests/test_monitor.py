@@ -911,6 +911,60 @@ class TestResolutionEvents:
         assert len(session._recent_fix_ids) == 500
 
 
+class TestExecuteRollback:
+    def test_rollback_action_not_found(self):
+        from sre_agent.monitor import execute_rollback
+
+        result = execute_rollback("nonexistent-id")
+        assert result["error"] == "Action not found"
+
+    def test_rollback_not_completed(self):
+        from sre_agent.monitor import execute_rollback
+
+        action = _make_action_report(
+            finding_id="f-1",
+            tool="restart_deployment",
+            inp={},
+            status="failed",
+        )
+        save_action(action, category="workloads", resources=[])
+        result = execute_rollback(action["id"])
+        assert "Cannot rollback" in result["error"]
+
+    def test_rollback_no_rollback_data(self):
+        from sre_agent.monitor import execute_rollback
+
+        action = _make_action_report(
+            finding_id="f-1",
+            tool="delete_pod",
+            inp={},
+            status="completed",
+        )
+        save_action(action, category="crashloop", resources=[])
+        result = execute_rollback(action["id"])
+        assert "not available" in result["error"]
+
+    def test_rollback_calls_rollback_deployment(self):
+        from sre_agent.monitor import execute_rollback
+
+        action = _make_action_report(
+            finding_id="f-1",
+            tool="restart_deployment",
+            inp={},
+            status="completed",
+        )
+        finding = {"_rollback_meta": {"name": "web", "namespace": "prod", "revision": "3"}}
+        save_action(action, category="workloads", resources=[], finding=finding)
+
+        with patch(
+            "sre_agent.k8s_tools.rollback_deployment", return_value="Rolled back prod/web to revision 3"
+        ) as mock_rb:
+            result = execute_rollback(action["id"])
+            mock_rb.assert_called_once_with("prod", "web", 3)
+            assert result["status"] == "rolled_back"
+            assert result["actionId"] == action["id"]
+
+
 class TestBriefing:
     def test_briefing_returns_greeting(self):
         from sre_agent.monitor import get_briefing

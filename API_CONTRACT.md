@@ -25,6 +25,10 @@ Defines the REST and WebSocket protocol between the Pulse UI and Pulse Agent. Bo
 | `POST` | `/simulate` | token | Predict impact of a tool action without executing it |
 | `GET` | `/memory/export` | token | Export learned runbooks and patterns as JSON |
 | `POST` | `/memory/import` | token | Import runbooks and patterns from another pod's export |
+| `GET` | `/memory/stats` | token | Memory system stats: incident count, runbook count, pattern count |
+| `GET` | `/memory/runbooks` | token | List learned runbooks sorted by success rate |
+| `GET` | `/memory/incidents` | token | Search past incidents by query similarity |
+| `GET` | `/memory/patterns` | token | List detected recurring patterns |
 | `GET` | `/monitor/capabilities` | token | Max trust level and supported auto-fix categories |
 | `POST` | `/monitor/pause` | token | Emergency kill switch — pause all auto-fix actions |
 | `POST` | `/monitor/resume` | token | Resume auto-fix actions after a pause |

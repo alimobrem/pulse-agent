@@ -419,25 +419,21 @@ def execute_rollback(action_id: str) -> dict:
     if tool == "rollback_deployment":
         inp = rollback_data.get("input", {})
         try:
-            apps = get_apps_client()
+            from .k8s_tools import rollback_deployment
+
             name = inp["name"]
             ns = inp["namespace"]
-            # Clear the restartedAt annotation to undo the rolling restart
-            body = {
-                "spec": {
-                    "template": {
-                        "metadata": {
-                            "annotations": {"kubectl.kubernetes.io/restartedAt": ""},
-                        }
-                    }
-                }
-            }
-            apps.patch_namespaced_deployment(name, ns, body=body)
+            revision = int(inp.get("revision", 0)) if inp.get("revision") else 0
+            result_text = rollback_deployment(ns, name, revision)
+
+            if "error" in result_text.lower() or "not found" in result_text.lower():
+                return {"error": f"Rollback failed: {result_text}"}
+
             # Update status in database
             db = get_database()
             db.execute("UPDATE actions SET status = 'rolled_back' WHERE id = ?", (action_id,))
             db.commit()
-            return {"status": "rolled_back", "actionId": action_id}
+            return {"status": "rolled_back", "actionId": action_id, "detail": result_text}
         except Exception as e:
             return {"error": f"Rollback failed: {e}"}
 

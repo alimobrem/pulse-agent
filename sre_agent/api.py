@@ -1281,6 +1281,80 @@ async def import_memory(
     return {"imported_runbooks": imported_rb, "imported_patterns": imported_pat}
 
 
+@app.get("/memory/stats")
+async def memory_stats(
+    authorization: str | None = Header(None),
+    token: str | None = Query(None),
+):
+    """Memory system stats: incident count, runbook count, pattern count, top metrics."""
+    _verify_rest_token(authorization, token)
+    from .memory import get_manager
+
+    manager = get_manager()
+    if not manager:
+        return {"enabled": False, "incidents": 0, "runbooks": 0, "patterns": 0, "metrics": {}}
+    return {
+        "enabled": True,
+        "incidents": manager.store.get_incident_count(),
+        "runbooks": len(manager.store.list_runbooks()),
+        "patterns": len(manager.store.list_patterns()),
+        "metrics": manager.store.get_metrics_summary(),
+    }
+
+
+@app.get("/memory/runbooks")
+async def memory_runbooks(
+    limit: int = Query(20, ge=1, le=100),
+    authorization: str | None = Header(None),
+    token: str | None = Query(None),
+):
+    """List learned runbooks sorted by success rate."""
+    _verify_rest_token(authorization, token)
+    from .memory import get_manager
+
+    manager = get_manager()
+    if not manager:
+        return {"runbooks": []}
+    runbooks = manager.store.list_runbooks()[:limit]
+    return {"runbooks": runbooks}
+
+
+@app.get("/memory/incidents")
+async def memory_incidents(
+    search: str = Query("", max_length=200),
+    limit: int = Query(10, ge=1, le=50),
+    authorization: str | None = Header(None),
+    token: str | None = Query(None),
+):
+    """Search past incidents by query similarity."""
+    _verify_rest_token(authorization, token)
+    from .memory import get_manager
+
+    manager = get_manager()
+    if not manager:
+        return {"incidents": []}
+    if search:
+        incidents = manager.store.search_incidents(search, limit=limit)
+    else:
+        incidents = manager.store.search_incidents("", limit=limit)
+    return {"incidents": incidents}
+
+
+@app.get("/memory/patterns")
+async def memory_patterns(
+    authorization: str | None = Header(None),
+    token: str | None = Query(None),
+):
+    """List detected recurring patterns."""
+    _verify_rest_token(authorization, token)
+    from .memory import get_manager
+
+    manager = get_manager()
+    if not manager:
+        return {"patterns": []}
+    return {"patterns": manager.store.list_patterns()}
+
+
 @app.get("/context")
 async def get_shared_context(
     authorization: str | None = Header(None),
