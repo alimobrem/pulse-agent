@@ -31,6 +31,28 @@ def test_suite_gate_fails_when_blockers_present():
     assert result.scenario_count == len(scenarios)
 
 
+def test_max_overall_enforcement():
+    """Scenarios scoring above max_overall should fail the gate."""
+    from sre_agent.evals.types import EvalExpected, EvalScenario
+
+    # A scenario that scores well but has a max_overall cap of 0.3
+    scenario = EvalScenario(
+        scenario_id="test-max-cap",
+        category="test",
+        description="Test max overall cap",
+        tool_calls=["list_pods"],
+        rejected_tools=0,
+        duration_seconds=5.0,
+        user_confirmed_resolution=True,
+        final_response="All good, pods are running fine.",
+        expected=EvalExpected(max_overall=0.3),
+    )
+    score = score_scenario(scenario)
+    # The scenario should score well above 0.3, so max_overall should fail it
+    assert score.overall > 0.3
+    assert score.passed_gate is False
+
+
 def test_release_suite_has_broad_coverage():
     scenarios = load_suite("release")
     assert len(scenarios) >= 10

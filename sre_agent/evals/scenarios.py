@@ -43,7 +43,6 @@ def load_suite(suite_name: str) -> list[EvalScenario]:
                 missing_confirmation=bool(raw.get("missing_confirmation", False)),
                 verification_passed=raw.get("verification_passed"),
                 rollback_available=bool(raw.get("rollback_available", False)),
-                rollback_used=bool(raw.get("rollback_used", False)),
                 retry_attempts=int(raw.get("retry_attempts", 0)),
                 transient_failures=int(raw.get("transient_failures", 0)),
                 completed=bool(raw.get("completed", True)),

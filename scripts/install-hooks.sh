@@ -12,6 +12,7 @@ cat > "$HOOK_DIR/pre-commit" << 'HOOK'
 echo "Running pre-commit checks..."
 python3 -m ruff check sre_agent/ tests/ || exit 1
 python3 -m ruff format --check sre_agent/ tests/ || exit 1
+python3 -m mypy sre_agent/ --ignore-missing-imports || exit 1
 python3 -m pytest tests/ -q || exit 1
 echo "Pre-commit checks passed."
 HOOK

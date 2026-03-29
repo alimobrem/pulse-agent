@@ -54,7 +54,8 @@ Pulse Agent connects directly to your cluster's Kubernetes API and uses Claude O
 - **Fix Categories:**
   - `crashloop` — Deletes crash-looping pods to trigger fresh scheduling
   - `workloads` — Restarts degraded deployments via rollout restart
-- **Rollback** — Every applied fix records a `beforeState` snapshot. Rollback via `POST /api/agent/actions/:id/rollback` or the UI's Actions tab
+  - `image_pull` — Restarts the owning controller (Deployment/StatefulSet/DaemonSet) for ImagePullBackOff pods
+- **Rollback** — Every applied fix records a `beforeState` snapshot. Deployment, StatefulSet, and DaemonSet restarts are rollbackable via `POST /api/agent/actions/:id/rollback` or the UI's Actions tab
 - **Confirmation Gate** — Write operations still require the programmatic confirmation round-trip at all trust levels; auto-fix pre-approves on behalf of the user
 
 ### Database
@@ -415,8 +416,8 @@ Only needed when `pyproject.toml` changes or for security patches:
 ### Build Image
 
 ```bash
-docker build -t your-registry/pulse-agent:1.5.0 .
-docker push your-registry/pulse-agent:1.5.0
+docker build -t your-registry/pulse-agent:1.5.3 .
+docker push your-registry/pulse-agent:1.5.3
 ```
 
 ### Helm Install
@@ -543,8 +544,8 @@ chart/                   # Helm chart
 
 | Workflow | Trigger | What it does |
 |----------|---------|-------------|
-| `build-push.yml` | `v*` tag push, manual dispatch | Builds `Dockerfile.full`, pushes to `quay.io/amobrem/pulse-agent` with tag + `latest` |
-| `evals.yml` | PR, push to main, daily 6am UTC, manual | Lint, format check, unit tests, docs consistency, release eval gate, replay evals, safety/integration suites, outcome regression, weekly digest |
+| `build-push.yml` | `v*` tag push, manual dispatch | Lint, tests, then builds `Dockerfile.full` and pushes to `quay.io/amobrem/pulse-agent` with tag + `latest` |
+| `evals.yml` | PR, push to main, daily 6am UTC, manual | Lint, format check, unit tests, version sync check, Helm lint, docs consistency, release eval gate, replay evals, safety/integration suites, outcome regression, weekly digest |
 
 ### Image Registry
 
@@ -552,9 +553,8 @@ Images are hosted on **Quay.io** at `quay.io/amobrem/pulse-agent`.
 
 **To release a new version:**
 ```bash
-git tag v1.6.0
-git push origin v1.6.0
-# GitHub Actions builds and pushes automatically
+make release VERSION=1.6.0   # bumps version everywhere, commits, tags
+git push && git push --tags   # GitHub Actions builds and pushes automatically
 ```
 
 **Manual build:**
@@ -576,7 +576,7 @@ pip install -e '.[test]'
 python -m pytest tests/ -v
 ```
 
-320 tests covering all tools, agent loop safety mechanisms, error classification, error tracking, config validation, unit parsing, orchestrator, context bus, handoff tools, and the memory system. All tests run without a cluster or API key (fully mocked).
+373 tests covering all tools, agent loop safety mechanisms, error classification, error tracking, config validation, unit parsing, orchestrator, context bus, handoff tools, and the memory system. All tests run without a cluster or API key (fully mocked).
 
 ## Evaluation Framework
 
@@ -630,7 +630,7 @@ Suites:
 ---
 
 <p align="center">
-  <strong>109 tools</strong> &bull; <strong>11 scanners</strong> &bull; <strong>10 runbooks</strong> &bull; <strong>8 tool categories</strong> &bull; <strong>320 tests</strong> &bull; <strong>Protocol v2</strong>
+  <strong>109 tools</strong> &bull; <strong>11 scanners</strong> &bull; <strong>10 runbooks</strong> &bull; <strong>8 tool categories</strong> &bull; <strong>373 tests</strong> &bull; <strong>Protocol v2</strong>
 </p>
 
 <p align="center">

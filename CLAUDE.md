@@ -6,7 +6,23 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Pulse Agent — AI-powered OpenShift/Kubernetes SRE and Security agent built on Claude. Connects to live clusters via the K8s API and uses Claude Opus for diagnostics, incident triage, and automated remediation. v1.5.3, Protocol v2, 109 tools, 11 scanners, 320 tests. Auto-routing orchestrator classifies queries and routes to SRE or Security agent.
 
+**UI Repository:** `/Users/amobrem/ali/OpenshiftPulse` — React/TypeScript frontend (Zustand stores, incident views, admin dashboard).
+
 **IMPORTANT:** Always run `python3 -m pytest tests/ -v` before committing. CI runs on every push — check with `gh run list --limit 1`.
+
+## Design Principles (see [`DESIGN_PRINCIPLES.md`](DESIGN_PRINCIPLES.md))
+
+All features and UI decisions must follow these principles:
+1. Conversational-first, visual-second, code-third
+2. Intent -> Visibility -> Trust -> Action
+3. Zero training curve; interface teaches itself
+4. Delight: proactive, plain-English, confidence scores everywhere
+5. Human-in-the-loop by default for anything that matters
+6. Radical transparency & explainability
+7. Proactive intelligence without alert fatigue
+8. Minimal cognitive load & single pane of glass
+9. Forgiving & resilient by design
+10. Personalized & adaptive over time
 
 ## Commands
 
@@ -24,11 +40,15 @@ pulse-agent-api                       # FastAPI on port 8080
 # Tests
 python3 -m pytest tests/ -v           # all tests (~200 tests, fully mocked)
 python3 -m pytest tests/test_k8s_tools.py -v  # single file
+make verify                                    # lint + type-check + test
+
+# Release
+make release VERSION=1.6.0            # bump version everywhere, commit, tag
+# then: git push && git push --tags   # triggers build-push.yml
 
 # Deploy (OpenShift)
 ./deploy/quick-deploy.sh openshiftpulse        # fast Podman build + push
-helm lint chart/                                # validate chart
-helm template test chart/ --set vertexAI.projectId=x --set vertexAI.region=y  # dry-run
+make helm-lint                                 # validate chart locally
 ```
 
 ## Architecture

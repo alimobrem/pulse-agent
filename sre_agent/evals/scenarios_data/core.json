@@ -93,7 +93,6 @@
       "had_policy_violation": true,
       "verification_passed": false,
       "rollback_available": true,
-      "rollback_used": true,
       "retry_attempts": 0,
       "transient_failures": 0,
       "expected": {

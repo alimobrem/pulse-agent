@@ -87,6 +87,8 @@ def score_scenario(s: EvalScenario, rubric: EvalRubric = DEFAULT_RUBRIC) -> Scen
     if s.expected is not None:
         if s.expected.min_overall is not None and overall < s.expected.min_overall:
             passed_gate = False
+        if s.expected.max_overall is not None and overall > s.expected.max_overall:
+            passed_gate = False
         if s.expected.should_block_release is True and passed_gate:
             # The scenario was expected to block release but didn't — fail it
             passed_gate = False

@@ -28,7 +28,6 @@ class EvalScenario:
     missing_confirmation: bool = False
     verification_passed: bool | None = None
     rollback_available: bool = False
-    rollback_used: bool = False
     retry_attempts: int = 0
     transient_failures: int = 0
     completed: bool = True

@@ -1,6 +1,7 @@
 """Tests for the monitor module — fix history, findings, and scan functions."""
 
 import asyncio
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -14,7 +15,9 @@ from sre_agent.monitor import (
     _make_action_report,
     _make_finding,
     _make_prediction,
+    _make_rollback_info,
     _run_security_followup_sync,
+    _skip_namespace,
     get_action_detail,
     get_fix_history,
     save_action,
@@ -621,3 +624,111 @@ class TestMonitorAutoLearn:
 
         set_manager(None)
         mgr.close()
+
+
+class TestSkipNamespace:
+    def test_skips_openshift_system(self):
+        assert _skip_namespace("openshift-monitoring") is True
+        assert _skip_namespace("openshift-operators") is True
+
+    def test_skips_kube_system(self):
+        assert _skip_namespace("kube-system") is True
+        assert _skip_namespace("kube-public") is True
+
+    def test_skips_default_and_openshift(self):
+        assert _skip_namespace("default") is True
+        assert _skip_namespace("openshift") is True
+
+    def test_allows_user_namespaces(self):
+        assert _skip_namespace("my-app") is False
+        assert _skip_namespace("production") is False
+        assert _skip_namespace("openshiftpulse") is False
+
+
+class TestMakeRollbackInfo:
+    def test_no_rollback_for_failed_action(self):
+        action = {"status": "failed", "tool": "restart_deployment"}
+        finding = {"_rollback_meta": {"name": "web", "namespace": "prod", "revision": "5"}}
+        available, json_str = _make_rollback_info(action, finding)
+        assert available == 0
+        assert json_str == ""
+
+    def test_no_rollback_without_meta(self):
+        action = {"status": "completed", "tool": "restart_deployment"}
+        available, _json_str = _make_rollback_info(action, None)
+        assert available == 0
+
+    def test_no_rollback_for_delete_pod(self):
+        action = {"status": "completed", "tool": "delete_pod"}
+        finding = {"_rollback_meta": {"name": "web", "namespace": "prod", "revision": "5"}}
+        available, _json_str = _make_rollback_info(action, finding)
+        assert available == 0
+
+    def test_rollback_for_restart_deployment(self):
+        action = {"status": "completed", "tool": "restart_deployment"}
+        finding = {"_rollback_meta": {"name": "web", "namespace": "prod", "revision": "5"}}
+        available, json_str = _make_rollback_info(action, finding)
+        assert available == 1
+        import json
+
+        data = json.loads(json_str)
+        assert data["tool"] == "rollback_deployment"
+        assert data["input"]["name"] == "web"
+        assert data["input"]["namespace"] == "prod"
+        assert data["input"]["revision"] == "5"
+
+    def test_rollback_for_restart_statefulset(self):
+        action = {"status": "completed", "tool": "restart_statefulset"}
+        finding = {"_rollback_meta": {"name": "db", "namespace": "data", "revision": ""}}
+        available, _ = _make_rollback_info(action, finding)
+        assert available == 1
+
+    def test_rollback_for_restart_daemonset(self):
+        action = {"status": "completed", "tool": "restart_daemonset"}
+        finding = {"_rollback_meta": {"name": "agent", "namespace": "infra"}}
+        available, _ = _make_rollback_info(action, finding)
+        assert available == 1
+
+
+class TestFixImagePullRollback:
+    def test_sets_rollback_meta_for_deployment(self):
+        """_fix_image_pull should set _rollback_meta when restarting a deployment."""
+        from sre_agent.monitor import _fix_image_pull
+
+        finding = {
+            "resources": [{"name": "web-pod-abc", "namespace": "prod"}],
+        }
+
+        # Mock pod with ReplicaSet owner -> Deployment owner
+        mock_pod = SimpleNamespace(
+            metadata=SimpleNamespace(
+                owner_references=[SimpleNamespace(kind="ReplicaSet", name="web-rs-123")],
+            ),
+        )
+        mock_rs = SimpleNamespace(
+            metadata=SimpleNamespace(
+                owner_references=[SimpleNamespace(kind="Deployment", name="web")],
+            ),
+        )
+        mock_dep = SimpleNamespace(
+            metadata=SimpleNamespace(
+                annotations={"deployment.kubernetes.io/revision": "7"},
+            ),
+        )
+
+        with (
+            patch("sre_agent.monitor.get_core_client") as mock_core,
+            patch("sre_agent.monitor.get_apps_client") as mock_apps,
+        ):
+            mock_core.return_value.read_namespaced_pod.return_value = mock_pod
+            mock_apps.return_value.read_namespaced_replica_set.return_value = mock_rs
+            mock_apps.return_value.read_namespaced_deployment.return_value = mock_dep
+
+            tool, _before, _after = _fix_image_pull(finding)
+
+        assert tool == "restart_deployment"
+        assert finding["_rollback_meta"] == {
+            "name": "web",
+            "namespace": "prod",
+            "revision": "7",
+        }

@@ -134,6 +134,26 @@ def _ensure_tables() -> None:
     _tables_ensured = True
 
 
+def _make_rollback_info(action: dict, finding: dict | None) -> tuple[int, str]:
+    """Build rollback availability flag and action JSON from finding metadata."""
+    rollback_meta = (finding or {}).get("_rollback_meta")
+    if not rollback_meta or action.get("status") != "completed":
+        return 0, ""
+    tool = action.get("tool", "")
+    if tool not in ("restart_deployment", "restart_statefulset", "restart_daemonset"):
+        return 0, ""
+    return 1, json.dumps(
+        {
+            "tool": "rollback_deployment",
+            "input": {
+                "name": rollback_meta["name"],
+                "namespace": rollback_meta["namespace"],
+                "revision": rollback_meta.get("revision", ""),
+            },
+        }
+    )
+
+
 def save_action(
     action: dict, category: str = "", resources: list[dict] | None = None, finding: dict | None = None
 ) -> None:
@@ -142,22 +162,7 @@ def save_action(
         _ensure_tables()
         db = get_database()
 
-        # Determine rollback availability from finding metadata
-        rollback_available = 0
-        rollback_action_json = ""
-        rollback_meta = (finding or {}).get("_rollback_meta")
-        if rollback_meta and action.get("status") == "completed" and action.get("tool") == "restart_deployment":
-            rollback_available = 1
-            rollback_action_json = json.dumps(
-                {
-                    "tool": "rollback_deployment",
-                    "input": {
-                        "name": rollback_meta["name"],
-                        "namespace": rollback_meta["namespace"],
-                        "revision": rollback_meta["revision"],
-                    },
-                }
-            )
+        rollback_available, rollback_action_json = _make_rollback_info(action, finding)
 
         db.execute(
             """INSERT OR REPLACE INTO actions
@@ -380,6 +385,11 @@ def update_action_verification(action_id: str, status: str, evidence: str) -> No
         logger.error("Failed to update action verification: %s", e)
 
 
+def _skip_namespace(ns: str) -> bool:
+    """Return True for system namespaces that scanners should ignore."""
+    return ns.startswith("openshift-") or ns.startswith("kube-") or ns in ("default", "openshift")
+
+
 # ── Scan Functions ─────────────────────────────────────────────────────────
 
 
@@ -396,7 +406,7 @@ def scan_crashlooping_pods(pods=None) -> list[dict]:
             ns = pod.metadata.namespace
             name = pod.metadata.name
             # Skip system namespaces
-            if ns.startswith("openshift-") or ns.startswith("kube-") or ns in ("default", "openshift"):
+            if _skip_namespace(ns):
                 continue
             for cs in pod.status.container_statuses or []:
                 if cs.restart_count >= crashloop_threshold:
@@ -429,7 +439,7 @@ def scan_pending_pods() -> list[dict]:
         for pod in pods.items:
             ns = pod.metadata.namespace
             name = pod.metadata.name
-            if ns.startswith("openshift-") or ns.startswith("kube-") or ns in ("default", "openshift"):
+            if _skip_namespace(ns):
                 continue
             # Check how long it's been pending
             created = pod.metadata.creation_timestamp
@@ -466,7 +476,7 @@ def scan_failed_deployments() -> list[dict]:
         for d in deploys.items:
             ns = d.metadata.namespace
             name = d.metadata.name
-            if ns.startswith("openshift-") or ns.startswith("kube-") or ns in ("default", "openshift"):
+            if _skip_namespace(ns):
                 continue
             desired = d.spec.replicas or 0
             available = d.status.available_replicas or 0
@@ -540,7 +550,8 @@ def scan_expiring_certs() -> list[dict]:
         for secret in secrets.items:
             ns = secret.metadata.namespace
             name = secret.metadata.name
-            if ns.startswith("openshift-") or ns.startswith("kube-"):
+            # Intentionally skips default/openshift too — certs there are cluster-managed
+            if _skip_namespace(ns):
                 continue
             cert_data = (secret.data or {}).get("tls.crt")
             if not cert_data:
@@ -665,7 +676,7 @@ def scan_oom_killed_pods(pods=None) -> list[dict]:
         for pod in pods.items:
             ns = pod.metadata.namespace
             name = pod.metadata.name
-            if ns.startswith("openshift-") or ns.startswith("kube-") or ns in ("default", "openshift"):
+            if _skip_namespace(ns):
                 continue
             for cs in pod.status.container_statuses or []:
                 last = cs.last_state
@@ -695,7 +706,7 @@ def scan_image_pull_errors(pods=None) -> list[dict]:
         for pod in pods.items:
             ns = pod.metadata.namespace
             name = pod.metadata.name
-            if ns.startswith("openshift-") or ns.startswith("kube-") or ns in ("default", "openshift"):
+            if _skip_namespace(ns):
                 continue
             for cs in pod.status.container_statuses or []:
                 waiting = cs.state.waiting if cs.state else None
@@ -759,7 +770,7 @@ def scan_daemonset_gaps() -> list[dict]:
         for ds in dsets.items:
             ns = ds.metadata.namespace
             name = ds.metadata.name
-            if ns.startswith("openshift-") or ns.startswith("kube-") or ns in ("default", "openshift"):
+            if _skip_namespace(ns):
                 continue
             desired = ds.status.desired_number_scheduled or 0
             ready = ds.status.number_ready or 0
@@ -789,7 +800,7 @@ def scan_hpa_saturation() -> list[dict]:
         for hpa in hpas.items:
             ns = hpa.metadata.namespace
             name = hpa.metadata.name
-            if ns.startswith("openshift-") or ns.startswith("kube-") or ns in ("default", "openshift"):
+            if _skip_namespace(ns):
                 continue
             max_replicas = hpa.spec.max_replicas or 0
             current = hpa.status.current_replicas or 0
@@ -953,6 +964,9 @@ def _fix_image_pull(finding: dict) -> tuple[str, str, str]:
                         "spec": {"template": {"metadata": {"annotations": {"kubectl.kubernetes.io/restartedAt": now}}}}
                     }
                     apps.patch_namespaced_deployment(rs_ref.name, ns, body=body)
+                    dep = apps.read_namespaced_deployment(rs_ref.name, ns)
+                    revision = (dep.metadata.annotations or {}).get("deployment.kubernetes.io/revision", "")
+                    finding["_rollback_meta"] = {"name": rs_ref.name, "namespace": ns, "revision": revision}
                     return ("restart_deployment", before, f"Deployment {rs_ref.name} rolling restart triggered")
 
         elif ref.kind == "StatefulSet":
@@ -1400,6 +1414,7 @@ class MonitorSession:
                         action_report,
                         category=category,
                         resources=resources,
+                        finding=finding,
                     )
                     continue
 

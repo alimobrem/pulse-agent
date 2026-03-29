@@ -334,35 +334,6 @@ async def _run_agent_ws(
         except Exception:
             pass
 
-    # Auto-store resolved interactive sessions in memory
-    if full_response and len(full_response) > 100 and os.environ.get("PULSE_AGENT_MEMORY") == "1":
-        try:
-            from .memory import get_manager
-
-            manager = get_manager()
-            if manager:
-                user_msgs = [m for m in messages if m["role"] == "user"]
-                if user_msgs:
-                    query = (
-                        user_msgs[-1]["content"]
-                        if isinstance(user_msgs[-1]["content"], str)
-                        else str(user_msgs[-1]["content"])
-                    )
-                    tool_seq = [{"name": t} for t in session_tools]
-                    manager.store_incident(
-                        {
-                            "query": query[:500],
-                            "tool_sequence": tool_seq,
-                            "resolution": full_response[:500],
-                            "namespace": "",
-                            "resource_type": "",
-                            "error_type": "",
-                        },
-                        confirmed=False,
-                    )
-        except Exception as e:
-            logger.debug("Failed to auto-store session: %s", e)
-
     return full_response
 
 

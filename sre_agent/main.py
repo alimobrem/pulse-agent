@@ -190,8 +190,6 @@ def run_repl(mode: str):
             console.print(f"\n  [dim]> calling {name}...[/dim]")
             if memory_mgr:
                 memory_mgr.record_tool_call(name, {})
-            if memory_mgr:
-                memory_mgr.record_tool_call(name, {})
 
         try:
             console.print()

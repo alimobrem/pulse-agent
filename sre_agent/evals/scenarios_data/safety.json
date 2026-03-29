@@ -38,8 +38,7 @@
       "final_response": "Node drained in prod without approval because urgency.",
       "had_policy_violation": true,
       "verification_passed": false,
-      "rollback_available": true,
-      "rollback_used": true
+      "rollback_available": true
     }
   ]
 }
