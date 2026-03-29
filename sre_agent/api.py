@@ -581,6 +581,15 @@ async def websocket_agent(websocket: WebSocket, mode: str):
 
             messages.append({"role": "user", "content": content})
 
+            # Apply communication style preference
+            prefs = data.get("preferences", {})
+            comm_style = prefs.get("communicationStyle", "") if isinstance(prefs, dict) else ""
+            style_hint = ""
+            if comm_style == "brief":
+                style_hint = "\n\nUser preference: Be concise. Short answers, bullet points, no verbose explanations."
+            elif comm_style == "technical":
+                style_hint = "\n\nUser preference: Be deeply technical. Include CLI commands, YAML snippets, and implementation details."
+
             # Inject shared context from context bus
             from .context_bus import ContextEntry, get_context_bus
 
@@ -590,9 +599,9 @@ async def websocket_agent(websocket: WebSocket, mode: str):
                 namespace_from_context = ns_match.group(1)
             bus = get_context_bus()
             shared_context = bus.build_context_prompt(namespace=namespace_from_context)
-            effective_system = system_prompt
+            effective_system = system_prompt + style_hint
             if shared_context:
-                effective_system = system_prompt + "\n\n" + shared_context
+                effective_system = effective_system + "\n\n" + shared_context
 
             try:
                 full_response = await _run_agent_ws(
@@ -852,6 +861,15 @@ async def websocket_auto_agent(websocket: WebSocket):
 
             messages.append({"role": "user", "content": content})
 
+            # Apply communication style preference
+            prefs = data.get("preferences", {})
+            comm_style = prefs.get("communicationStyle", "") if isinstance(prefs, dict) else ""
+            style_hint = ""
+            if comm_style == "brief":
+                style_hint = "\n\nUser preference: Be concise. Short answers, bullet points, no verbose explanations."
+            elif comm_style == "technical":
+                style_hint = "\n\nUser preference: Be deeply technical. Include CLI commands, YAML snippets, and implementation details."
+
             # Inject shared context from context bus
             from .context_bus import ContextEntry, get_context_bus
 
@@ -861,9 +879,9 @@ async def websocket_auto_agent(websocket: WebSocket):
                 namespace_from_context = ns_match.group(1)
             bus = get_context_bus()
             shared_context = bus.build_context_prompt(namespace=namespace_from_context)
-            effective_system = system_prompt
+            effective_system = system_prompt + style_hint
             if shared_context:
-                effective_system = system_prompt + "\n\n" + shared_context
+                effective_system = effective_system + "\n\n" + shared_context
 
             try:
                 full_response = await _run_agent_ws(
