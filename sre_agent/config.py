@@ -1,56 +1,114 @@
-"""Startup configuration validation."""
+"""Startup configuration with Pydantic v2 Settings."""
 
+from __future__ import annotations
 import logging
 import os
+from pydantic import field_validator, SecretStr
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 logger = logging.getLogger("pulse_agent")
 
 
-def validate_config() -> None:
-    """Validate required configuration on startup. Raises SystemExit on error."""
-    errors = []
+class PulseAgentSettings(BaseSettings):
+    model_config = SettingsConfigDict(
+        env_prefix="PULSE_AGENT_",
+        env_file=".env",
+        env_file_encoding="utf-8",
+        case_sensitive=False,
+    )
 
-    # API key
-    if not os.getenv("ANTHROPIC_API_KEY") and not os.getenv("ANTHROPIC_VERTEX_PROJECT_ID"):
-        errors.append("Must set ANTHROPIC_API_KEY or ANTHROPIC_VERTEX_PROJECT_ID")
+    # Agent
+    model: str = "claude-opus-4-6"
+    max_tokens: int = 16000
+    harness: bool = True
 
-    # Circuit breaker
-    try:
-        cb_timeout = float(os.getenv("PULSE_AGENT_CB_TIMEOUT", "60"))
-        if cb_timeout <= 0:
-            errors.append("PULSE_AGENT_CB_TIMEOUT must be > 0")
-    except ValueError:
-        errors.append("PULSE_AGENT_CB_TIMEOUT must be a number")
-
-    try:
-        cb_threshold = int(os.getenv("PULSE_AGENT_CB_THRESHOLD", "3"))
-        if cb_threshold <= 0:
-            errors.append("PULSE_AGENT_CB_THRESHOLD must be > 0")
-    except ValueError:
-        errors.append("PULSE_AGENT_CB_THRESHOLD must be an integer")
-
-    # Model
-    model = os.getenv("PULSE_AGENT_MODEL", "claude-opus-4-6")
-    if not model.startswith("claude"):
-        errors.append(f"PULSE_AGENT_MODEL '{model}' doesn't look like a Claude model")
-
-    # Tool timeout
-    try:
-        tool_timeout = int(os.getenv("PULSE_AGENT_TOOL_TIMEOUT", "30"))
-        if tool_timeout <= 0:
-            errors.append("PULSE_AGENT_TOOL_TIMEOUT must be > 0")
-    except ValueError:
-        errors.append("PULSE_AGENT_TOOL_TIMEOUT must be an integer")
+    # Database
+    database_url: str = "sqlite:///tmp/pulse_agent/pulse.db"
 
     # Memory
-    memory_enabled = os.getenv("PULSE_AGENT_MEMORY", "1").lower()
-    if memory_enabled not in ("0", "1", "true", "false", "yes", "no", ""):
-        errors.append(f"PULSE_AGENT_MEMORY '{memory_enabled}' is not a valid boolean (use 1/0/true/false)")
-    db_url = os.getenv("PULSE_AGENT_DATABASE_URL", "sqlite:///tmp/pulse_agent/pulse.db")
-    if memory_enabled in ("1", "true", "yes") and not db_url:
-        errors.append("PULSE_AGENT_DATABASE_URL must be set when memory is enabled")
+    memory: bool = True
 
-    if errors:
-        for e in errors:
-            logger.critical("Config error: %s", e)
+    # Monitor
+    scan_interval: int = 60
+    crashloop_threshold: int = 3
+    max_daily_investigations: int = 20
+    investigation_timeout: int = 20
+    autofix_enabled: bool = True
+    security_followup: bool = False
+
+    # WebSocket
+    ws_token: str = ""
+
+    # Circuit breaker
+    cb_threshold: int = 3
+    cb_timeout: float = 60.0
+
+    # Tool timeout
+    tool_timeout: int = 30
+
+    # Webhook
+    webhook_url: str = ""
+    webhook_secret: str = ""
+
+    # Trusted registries
+    trusted_registries: list[str] = [
+        "registry.redhat.io",
+        "registry.access.redhat.com",
+        "quay.io",
+        "image-registry.openshift-image-registry.svc",
+    ]
+
+    @field_validator("model")
+    @classmethod
+    def model_must_be_claude(cls, v: str) -> str:
+        if not v.startswith("claude"):
+            raise ValueError(f"Model '{v}' doesn't look like a Claude model")
+        return v
+
+    @field_validator("cb_timeout")
+    @classmethod
+    def cb_timeout_positive(cls, v: float) -> float:
+        if v <= 0:
+            raise ValueError("cb_timeout must be > 0")
+        return v
+
+    @field_validator("tool_timeout")
+    @classmethod
+    def tool_timeout_positive(cls, v: int) -> int:
+        if v <= 0:
+            raise ValueError("tool_timeout must be > 0")
+        return v
+
+
+# Singleton
+_settings: PulseAgentSettings | None = None
+
+def get_settings() -> PulseAgentSettings:
+    global _settings
+    if _settings is None:
+        _settings = PulseAgentSettings()
+    return _settings
+
+def _reset_settings() -> None:
+    """Reset the singleton — for testing only."""
+    global _settings
+    _settings = None
+
+def validate_config() -> None:
+    """Validate config on startup. Raises SystemExit on error."""
+    try:
+        _reset_settings()
+        settings = get_settings()
+
+        # Check AI backend (these are Claude SDK env vars, not PULSE_AGENT_ prefixed)
+        has_key = bool(os.getenv("ANTHROPIC_API_KEY"))
+        has_vertex = bool(os.getenv("ANTHROPIC_VERTEX_PROJECT_ID"))
+        if not has_key and not has_vertex:
+            logger.critical("Config error: Must set ANTHROPIC_API_KEY or ANTHROPIC_VERTEX_PROJECT_ID")
+            raise SystemExit(1)
+
+    except SystemExit:
+        raise
+    except Exception as e:
+        logger.critical("Config error: %s", e)
         raise SystemExit(1)

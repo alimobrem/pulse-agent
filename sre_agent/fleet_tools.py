@@ -481,3 +481,8 @@ FLEET_TOOLS = [
     fleet_get_alerts,
     fleet_compare_resource,
 ]
+
+# Register fleet tools in the central registry (all read-only)
+from .tool_registry import register_tool
+for _tool in FLEET_TOOLS:
+    register_tool(_tool, is_write=False)

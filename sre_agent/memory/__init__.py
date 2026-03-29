@@ -16,6 +16,13 @@ from .store import IncidentStore
 
 logger = logging.getLogger("pulse_agent")
 
+__all__ = [
+    "MemoryManager",
+    "get_manager",
+    "set_manager",
+    "is_memory_enabled",
+]
+
 # Module-level singleton so monitor.py can access memory without plumbing
 _manager_instance: "MemoryManager | None" = None
 

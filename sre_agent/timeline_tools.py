@@ -238,3 +238,8 @@ def correlate_incident(
 
 
 TIMELINE_TOOLS = [correlate_incident]
+
+# Register timeline tools in the central registry (read-only)
+from .tool_registry import register_tool
+for _tool in TIMELINE_TOOLS:
+    register_tool(_tool, is_write=False)

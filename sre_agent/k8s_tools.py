@@ -2078,3 +2078,8 @@ ALL_TOOLS = [
     # Audit
     record_audit_entry,
 ]
+
+# Register all tools in the central registry
+from .tool_registry import register_tool
+for _tool in ALL_TOOLS:
+    register_tool(_tool, is_write=(_tool.name in WRITE_TOOLS))

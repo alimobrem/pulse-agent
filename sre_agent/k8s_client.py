@@ -10,6 +10,8 @@ from typing import Any, Optional
 from kubernetes import client, config
 from kubernetes.client.rest import ApiException
 
+from .errors import classify_api_error
+
 logger = logging.getLogger("pulse_agent")
 
 _initialized = False
@@ -123,7 +125,6 @@ def safe(fn) -> Any:
     try:
         return fn()
     except ApiException as e:
-        from .errors import classify_api_error
         return classify_api_error(e)
 
 

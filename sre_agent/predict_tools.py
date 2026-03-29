@@ -352,3 +352,8 @@ def suggest_remediation(error_type: str, namespace: str = "", resource_name: str
 
 
 PREDICT_TOOLS = [forecast_quota_exhaustion, analyze_hpa_thrashing, suggest_remediation]
+
+# Register predict tools in the central registry (all read-only)
+from .tool_registry import register_tool
+for _tool in PREDICT_TOOLS:
+    register_tool(_tool, is_write=False)

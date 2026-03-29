@@ -49,3 +49,9 @@ def request_sre_investigation(namespace: str, resource_kind: str = "", resource_
         namespace=namespace,
     ))
     return f"SRE investigation requested for {resource_kind}/{resource_name} in namespace '{namespace}'. The monitor will investigate on the next scan cycle."
+
+
+# Register handoff tools in the central registry (read-only — they publish messages, not mutate cluster)
+from .tool_registry import register_tool
+register_tool(request_security_scan, is_write=False)
+register_tool(request_sre_investigation, is_write=False)

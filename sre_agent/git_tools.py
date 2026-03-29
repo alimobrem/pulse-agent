@@ -226,3 +226,8 @@ def get_argo_app_source(name: str, namespace: str = "openshift-gitops") -> str:
 
 
 GIT_TOOLS = [propose_git_change, get_argo_app_source]
+
+# Register git tools in the central registry
+from .tool_registry import register_tool
+register_tool(propose_git_change, is_write=True)
+register_tool(get_argo_app_source, is_write=False)

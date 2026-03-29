@@ -12,6 +12,7 @@ from datetime import datetime, timezone
 
 import anthropic
 
+from .config import get_settings
 from .k8s_tools import ALL_TOOLS as _K8S_TOOLS, WRITE_TOOLS
 from .fleet_tools import FLEET_TOOLS
 from .gitops_tools import GITOPS_TOOLS
@@ -100,8 +101,8 @@ class CircuitBreaker:
 
 # Global circuit breaker instance
 _circuit_breaker = CircuitBreaker(
-    failure_threshold=int(os.environ.get("PULSE_AGENT_CB_THRESHOLD", "3")),
-    recovery_timeout=float(os.environ.get("PULSE_AGENT_CB_TIMEOUT", "60")),
+    failure_threshold=get_settings().cb_threshold,
+    recovery_timeout=get_settings().cb_timeout,
 )
 
 SYSTEM_PROMPT = """\
@@ -263,7 +264,7 @@ def _execute_tool(name: str, input_data: dict, tool_map: dict) -> tuple[str, dic
         return f"Error executing {name}: {type(e).__name__}", None
 
 
-TOOL_TIMEOUT = int(os.environ.get("PULSE_AGENT_TOOL_TIMEOUT", "30"))
+TOOL_TIMEOUT = get_settings().tool_timeout
 
 def _execute_tool_with_timeout(name: str, input_data: dict, tool_map: dict, timeout: int | None = None) -> tuple[str, dict | None]:
     """Execute a tool with a timeout guard."""
@@ -322,9 +323,10 @@ def run_agent_streaming(
     full_text_parts = []
     iterations = 0
 
-    model = os.environ.get("PULSE_AGENT_MODEL", "claude-opus-4-6")
-    max_tokens = int(os.environ.get("PULSE_AGENT_MAX_TOKENS", "16000"))
-    use_harness = os.environ.get("PULSE_AGENT_HARNESS", "1") == "1"
+    settings = get_settings()
+    model = settings.model
+    max_tokens = settings.max_tokens
+    use_harness = settings.harness
 
     # Circuit breaker check — reject immediately if API is in Silent Mode
     if not _circuit_breaker.allow_request():

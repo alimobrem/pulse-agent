@@ -27,21 +27,45 @@ class Database:
         self.is_postgres = url.startswith("postgres")
         self._lock = threading.Lock()
         self._conn: Any = None
+        self._connect()
 
+    def _connect(self) -> None:
+        """Establish a new database connection."""
         if self.is_postgres:
             import psycopg2
 
-            self._conn = psycopg2.connect(url)
+            self._conn = psycopg2.connect(self.url)
             self._conn.autocommit = False
         else:
-            # Parse sqlite:///path or just use as path
-            path = url.replace("sqlite:///", "") if url.startswith("sqlite:///") else url
+            path = self.url.replace("sqlite:///", "") if self.url.startswith("sqlite:///") else self.url
             parent = os.path.dirname(path)
             if parent:
                 os.makedirs(parent, exist_ok=True)
             self._conn = sqlite3.connect(path, check_same_thread=False)
             self._conn.row_factory = sqlite3.Row
             self._conn.execute("PRAGMA journal_mode=WAL")
+
+    def _ensure_connection(self) -> None:
+        """Reconnect if the connection is stale."""
+        if self._conn is None:
+            self._connect()
+            return
+        try:
+            if self.is_postgres:
+                # PostgreSQL: check if connection is still alive
+                cur = self._conn.cursor()
+                cur.execute("SELECT 1")
+                cur.close()
+            else:
+                self._conn.execute("SELECT 1")
+        except Exception:
+            logger.warning("Database connection lost, reconnecting...")
+            try:
+                self._conn.close()
+            except Exception:
+                pass
+            self._conn = None
+            self._connect()
 
     def _translate_query(self, query: str) -> str:
         """Translate SQLite ``?`` placeholders to PostgreSQL ``%s``."""
@@ -61,6 +85,7 @@ class Database:
 
     def execute(self, query: str, params: tuple = ()) -> Any:
         """Execute a query with parameter translation."""
+        self._ensure_connection()
         with self._lock:
             translated = self._translate_query(query)
             if self.is_postgres:
@@ -79,6 +104,7 @@ class Database:
 
     def fetchone(self, query: str, params: tuple = ()) -> dict | None:
         """Execute and fetch one row as dict."""
+        self._ensure_connection()
         with self._lock:
             translated = self._translate_query(query)
             if self.is_postgres:
@@ -95,6 +121,7 @@ class Database:
 
     def fetchall(self, query: str, params: tuple = ()) -> list[dict]:
         """Execute and fetch all rows as dicts."""
+        self._ensure_connection()
         with self._lock:
             translated = self._translate_query(query)
             if self.is_postgres:
@@ -119,6 +146,9 @@ class Database:
             self._conn.close()
             self._conn = None
 
+    def __del__(self):
+        self.close()
+
     @property
     def lastrowid(self) -> int | None:
         """Get last inserted row ID (SQLite only, PostgreSQL uses RETURNING)."""
@@ -128,9 +158,17 @@ class Database:
             return None
 
     def health_check(self) -> bool:
-        """Check if the connection is alive."""
+        """Check if the current connection is alive (does not reconnect)."""
+        if self._conn is None:
+            return False
         try:
-            self.execute("SELECT 1")
+            with self._lock:
+                if self.is_postgres:
+                    cur = self._conn.cursor()
+                    cur.execute("SELECT 1")
+                    cur.close()
+                else:
+                    self._conn.execute("SELECT 1")
             return True
         except Exception:
             return False

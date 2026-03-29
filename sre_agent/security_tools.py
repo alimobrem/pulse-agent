@@ -544,3 +544,8 @@ ALL_SECURITY_TOOLS = [
     scan_secrets,
     get_security_summary,
 ]
+
+# Register all security tools in the central registry (all read-only)
+from .tool_registry import register_tool
+for _tool in ALL_SECURITY_TOOLS:
+    register_tool(_tool, is_write=False)
