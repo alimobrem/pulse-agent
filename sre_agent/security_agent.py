@@ -11,6 +11,7 @@ from .k8s_tools import ALL_TOOLS as SRE_TOOLS
 from .gitops_tools import GITOPS_TOOLS
 from .timeline_tools import TIMELINE_TOOLS
 from .predict_tools import PREDICT_TOOLS
+from .handoff_tools import request_sre_investigation
 
 # Combine SRE read tools with security tools so the agent can also
 # inspect pods/logs/events when investigating findings.
@@ -28,7 +29,7 @@ _SRE_READ_TOOL_NAMES = {
 _READ_TOOLS = [t for t in SRE_TOOLS if t.name in _SRE_READ_TOOL_NAMES]
 
 # Add read-only pillar tools for security investigations
-ALL_TOOLS = ALL_SECURITY_TOOLS + _READ_TOOLS + GITOPS_TOOLS + TIMELINE_TOOLS + PREDICT_TOOLS
+ALL_TOOLS = ALL_SECURITY_TOOLS + _READ_TOOLS + GITOPS_TOOLS + TIMELINE_TOOLS + PREDICT_TOOLS + [request_sre_investigation]
 TOOL_DEFS = [t.to_dict() for t in ALL_TOOLS]
 TOOL_MAP = {t.name: t for t in ALL_TOOLS}
 

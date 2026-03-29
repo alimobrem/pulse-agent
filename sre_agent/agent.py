@@ -18,6 +18,7 @@ from .gitops_tools import GITOPS_TOOLS
 from .timeline_tools import TIMELINE_TOOLS
 from .git_tools import GIT_TOOLS
 from .predict_tools import PREDICT_TOOLS
+from .handoff_tools import request_security_scan
 from .runbooks import RUNBOOKS, ALERT_TRIAGE_CONTEXT
 from .harness import (
     select_tools,
@@ -26,7 +27,7 @@ from .harness import (
     COMPONENT_HINT,
 )
 
-ALL_TOOLS = _K8S_TOOLS + FLEET_TOOLS + GITOPS_TOOLS + TIMELINE_TOOLS + GIT_TOOLS + PREDICT_TOOLS
+ALL_TOOLS = _K8S_TOOLS + FLEET_TOOLS + GITOPS_TOOLS + TIMELINE_TOOLS + GIT_TOOLS + PREDICT_TOOLS + [request_security_scan]
 
 # Add tools that require confirmation
 WRITE_TOOLS = WRITE_TOOLS | {"propose_git_change", "install_gitops_operator", "create_argo_application"}

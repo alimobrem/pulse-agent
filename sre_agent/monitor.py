@@ -1028,15 +1028,30 @@ def _run_proactive_investigation_sync(finding: dict) -> dict[str, Any]:
         TOOL_MAP as SRE_TOOL_MAP,
         WRITE_TOOLS as SRE_WRITE_TOOLS,
     )
+    from .harness import select_tools, build_cached_system_prompt, get_cluster_context, COMPONENT_HINT
 
     readonly_defs = [tool_def for tool_def in SRE_TOOL_DEFS if tool_def.get("name") not in SRE_WRITE_TOOLS]
     readonly_map = {name: tool for name, tool in SRE_TOOL_MAP.items() if name not in SRE_WRITE_TOOLS}
-    client = create_client()
+
+    # Harness: dynamic tool selection based on investigation prompt
     prompt = _build_investigation_prompt(finding)
+    filtered_defs, filtered_map = select_tools(prompt, list(readonly_map.values()), readonly_map)
+    if len(filtered_defs) < len(readonly_defs):
+        readonly_defs = filtered_defs
+        readonly_map = {**filtered_map}
+
+    # Harness: cached system prompt with cluster context
+    cluster_ctx = get_cluster_context()
+    effective_system = build_cached_system_prompt(
+        SRE_SYSTEM_PROMPT + COMPONENT_HINT,
+        cluster_ctx,
+    )
+
+    client = create_client()
     response = run_agent_streaming(
         client=client,
         messages=[{"role": "user", "content": prompt}],
-        system_prompt=SRE_SYSTEM_PROMPT,
+        system_prompt=effective_system,
         tool_defs=readonly_defs,
         tool_map=readonly_map,
         write_tools=set(),
@@ -1071,6 +1086,7 @@ def _run_security_followup_sync(finding: dict) -> dict:
         TOOL_DEFS as SEC_TOOL_DEFS,
         TOOL_MAP as SEC_TOOL_MAP,
     )
+    from .harness import select_tools, build_cached_system_prompt, get_cluster_context, COMPONENT_HINT
 
     client = create_client()
     resources = finding.get("resources", [])
@@ -1085,12 +1101,27 @@ def _run_security_followup_sync(finding: dict) -> dict:
         'Return: {"security_issues": [...], "risk_level": "low|medium|high"}\n'
     )
 
+    # Harness: dynamic tool selection based on security prompt
+    sec_tool_defs = list(SEC_TOOL_DEFS)
+    sec_tool_map = dict(SEC_TOOL_MAP)
+    filtered_defs, filtered_map = select_tools(prompt, list(sec_tool_map.values()), sec_tool_map)
+    if len(filtered_defs) < len(sec_tool_defs):
+        sec_tool_defs = filtered_defs
+        sec_tool_map = {**filtered_map}
+
+    # Harness: cached system prompt with cluster context
+    cluster_ctx = get_cluster_context()
+    effective_system = build_cached_system_prompt(
+        SECURITY_SYSTEM_PROMPT + COMPONENT_HINT,
+        cluster_ctx,
+    )
+
     response = run_agent_streaming(
         client=client,
         messages=[{"role": "user", "content": prompt}],
-        system_prompt=SECURITY_SYSTEM_PROMPT,
-        tool_defs=SEC_TOOL_DEFS,
-        tool_map=SEC_TOOL_MAP,
+        system_prompt=effective_system,
+        tool_defs=sec_tool_defs,
+        tool_map=sec_tool_map,
         write_tools=set(),  # read-only
     )
 
@@ -1685,6 +1716,78 @@ class MonitorSession:
             await self.auto_fix(all_findings)
 
         await self.process_verifications(all_findings)
+
+        await self.process_handoffs()
+
+    async def process_handoffs(self) -> None:
+        """Process agent-to-agent handoff requests from the context bus."""
+        db = get_database()
+        timeout_seconds = int(os.environ.get("PULSE_AGENT_INVESTIGATION_TIMEOUT", "20"))
+
+        # Find recent handoff requests (last 5 minutes)
+        cutoff = int(time.time() * 1000) - 300_000
+        try:
+            rows = db.fetchall(
+                "SELECT * FROM context_entries WHERE category = ? AND timestamp > ? ORDER BY timestamp DESC LIMIT 5",
+                ("handoff_request", cutoff),
+            )
+        except Exception as e:
+            logger.error("Failed to query handoff requests: %s", e)
+            return
+
+        for row in rows:
+            details = row.get("details", "{}")
+            if isinstance(details, str):
+                try:
+                    details = json.loads(details)
+                except (json.JSONDecodeError, TypeError):
+                    details = {}
+            target = details.get("target", "")
+            namespace = row.get("namespace", "") or details.get("namespace", "")
+            context = _sanitize_for_prompt(details.get("context", ""))
+
+            if target == "security_agent" and namespace:
+                finding = {
+                    "category": "handoff",
+                    "title": f"Security scan requested for {_sanitize_for_prompt(namespace)}",
+                    "summary": context,
+                    "severity": "warning",
+                    "resources": [{"kind": "Namespace", "name": namespace, "namespace": namespace}],
+                }
+                try:
+                    await asyncio.wait_for(
+                        asyncio.to_thread(_run_security_followup_sync, finding),
+                        timeout=timeout_seconds,
+                    )
+                    logger.info("Handoff security scan completed for %s", namespace)
+                except Exception as e:
+                    logger.error("Handoff security scan failed: %s", e)
+
+            elif target == "sre_agent" and namespace:
+                finding = {
+                    "id": f"f-handoff-{uuid.uuid4().hex[:8]}",
+                    "category": "handoff",
+                    "title": f"SRE investigation requested: {_sanitize_for_prompt(details.get('kind', ''))}/{_sanitize_for_prompt(details.get('name', ''))}",
+                    "summary": context,
+                    "severity": "warning",
+                    "resources": [{"kind": details.get("kind", ""), "name": details.get("name", ""), "namespace": namespace}],
+                }
+                try:
+                    await asyncio.wait_for(
+                        asyncio.to_thread(_run_proactive_investigation_sync, finding),
+                        timeout=timeout_seconds,
+                    )
+                    logger.info("Handoff SRE investigation completed for %s", namespace)
+                except Exception as e:
+                    logger.error("Handoff SRE investigation failed: %s", e)
+
+        # Clean up processed requests
+        if rows:
+            try:
+                db.execute("DELETE FROM context_entries WHERE category = ? AND timestamp > ?", ("handoff_request", cutoff))
+                db.commit()
+            except Exception as e:
+                logger.error("Failed to clean up handoff requests: %s", e)
 
     async def run_loop(self) -> None:
         """Main monitor loop — scan periodically until disconnected."""
