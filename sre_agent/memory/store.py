@@ -289,7 +289,7 @@ class IncidentStore:
     @db_safe(default=None)
     def record_metric(self, metric_name: str, value: float, window: str = "session") -> None:
         self.db.execute(
-            "INSERT INTO metrics (timestamp, metric_name, value, window) VALUES (?, ?, ?, ?)",
+            "INSERT INTO metrics (timestamp, metric_name, value, time_window) VALUES (?, ?, ?, ?)",
             (datetime.now(UTC).isoformat(), metric_name, value, window),
         )
         self.db.commit()

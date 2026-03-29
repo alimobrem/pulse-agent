@@ -58,7 +58,7 @@ CREATE TABLE IF NOT EXISTS metrics (
     timestamp TEXT NOT NULL,
     metric_name TEXT NOT NULL,
     value REAL NOT NULL,
-    window TEXT DEFAULT 'session'
+    time_window TEXT DEFAULT 'session'
 );
 """
 
