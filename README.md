@@ -1,7 +1,7 @@
 # Pulse Agent
 
 <p>
-  <a href="https://github.com/alimobrem/pulse-agent/releases/tag/v1.7.0"><img src="https://img.shields.io/badge/release-v1.7.0-2563eb?style=for-the-badge" alt="Version"></a>
+  <a href="https://github.com/alimobrem/pulse-agent/releases/tag/v1.7.1"><img src="https://img.shields.io/badge/release-v1.7.1-2563eb?style=for-the-badge" alt="Version"></a>
   <img src="https://img.shields.io/badge/tools-109-10b981?style=for-the-badge" alt="Tools">
   <img src="https://img.shields.io/badge/scanners-11-10b981?style=for-the-badge" alt="Scanners">
   <img src="https://img.shields.io/badge/tests-320-10b981?style=for-the-badge" alt="Tests">
@@ -394,6 +394,7 @@ Supported: `data_table`, `info_card_grid`, `badge_list`, `status_list`, `key_val
 
 | Pulse Agent | OpenShift Pulse UI | Protocol |
 |------------|-------------------|----------|
+| v1.7.1 | v5.14.0+ | 2 |
 | v1.7.0 | v5.14.0+ | 2 |
 | v1.6.1 | v5.13.0+ | 2 |
 | v1.5.3 | v5.13.0+ | 2 |
@@ -571,8 +572,8 @@ git push && git push --tags   # GitHub Actions builds and pushes automatically
 
 **Manual build:**
 ```bash
-docker build -f Dockerfile.full -t quay.io/amobrem/pulse-agent:v1.7.0 .
-docker push quay.io/amobrem/pulse-agent:v1.7.0
+docker build -f Dockerfile.full -t quay.io/amobrem/pulse-agent:v1.7.1 .
+docker push quay.io/amobrem/pulse-agent:v1.7.1
 ```
 
 **Required GitHub Secrets:**
