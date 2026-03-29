@@ -67,8 +67,7 @@ def get_learned_runbooks(query: str = "") -> str:
     for rb in results:
         steps = json.loads(rb["tool_sequence"])
         step_list = "\n".join(
-            f"    {i + 1}. {s['name']}({json.dumps(s.get('input_summary', {}))})"
-            for i, s in enumerate(steps)
+            f"    {i + 1}. {s['name']}({json.dumps(s.get('input_summary', {}))})" for i, s in enumerate(steps)
         )
         lines.append(
             f"**{rb['name']}** (success: {rb['success_count']}, failures: {rb['failure_count']})\n"

@@ -14,9 +14,10 @@ MAX_MEMORY_CHARS = 1500
 # TF-IDF similarity helpers (stdlib only, no external deps)
 # ---------------------------------------------------------------------------
 
+
 def _tokenize(text: str) -> list[str]:
     """Simple whitespace + lowercase tokenization."""
-    return [w.lower().strip('.,!?()[]{}:;"\'') for w in text.split() if len(w) > 2]
+    return [w.lower().strip(".,!?()[]{}:;\"'") for w in text.split() if len(w) > 2]
 
 
 def _tfidf_similarity(query: str, documents: list[str]) -> list[float]:
@@ -49,8 +50,8 @@ def _tfidf_similarity(query: str, documents: list[str]) -> list[float]:
 
         # Cosine similarity
         dot = sum(query_vec.get(t, 0) * doc_vec.get(t, 0) for t in all_tokens)
-        mag_q = math.sqrt(sum(v ** 2 for v in query_vec.values())) or 1
-        mag_d = math.sqrt(sum(v ** 2 for v in doc_vec.values())) or 1
+        mag_q = math.sqrt(sum(v**2 for v in query_vec.values())) or 1
+        mag_d = math.sqrt(sum(v**2 for v in doc_vec.values())) or 1
         scores.append(dot / (mag_q * mag_d))
 
     return scores
@@ -72,7 +73,7 @@ def build_memory_context(store: IncidentStore, user_query: str) -> str:
             tools = json.loads(inc["tool_sequence"])
             tool_names = [t["name"] for t in tools[:5]]
             inc_lines.append(
-                f"- Query: \"{inc['query'][:100]}\" | "
+                f'- Query: "{inc["query"][:100]}" | '
                 f"Tools: {', '.join(tool_names)} | "
                 f"Outcome: {inc['outcome']} | Score: {inc['score']:.1f}"
             )
@@ -103,14 +104,11 @@ def build_memory_context(store: IncidentStore, user_query: str) -> str:
             tools = json.loads(inc["tool_sequence"])
             tool_names = [t["name"] for t in tools[:5]]
             anti_lines.append(
-                f"- Query: \"{inc['query'][:80]}\" | "
+                f'- Query: "{inc["query"][:80]}" | '
                 f"Tools: {', '.join(tool_names)} | "
                 f"Outcome: {inc['outcome']} | Score: {inc['score']:.1f}"
             )
-        sections.append(
-            "## Avoid These Approaches (low-scoring past attempts)\n"
-            + "\n".join(anti_lines)
-        )
+        sections.append("## Avoid These Approaches (low-scoring past attempts)\n" + "\n".join(anti_lines))
 
     # Matching runbooks (top 2)
     runbooks = store.find_runbooks(user_query, limit=2)
@@ -142,6 +140,5 @@ def build_memory_context(store: IncidentStore, user_query: str) -> str:
 
     return (
         "\n\n---\n## Agent Memory (from past interactions)\n"
-        "Use this context to inform your approach. Follow proven runbooks when applicable.\n\n"
-        + context + "\n---\n"
+        "Use this context to inform your approach. Follow proven runbooks when applicable.\n\n" + context + "\n---\n"
     )

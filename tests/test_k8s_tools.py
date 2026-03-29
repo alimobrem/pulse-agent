@@ -4,11 +4,36 @@ from __future__ import annotations
 
 import json
 from types import SimpleNamespace
-from unittest.mock import MagicMock
 
-import pytest
 from kubernetes.client.rest import ApiException
 
+from sre_agent.k8s_tools import (
+    MAX_REPLICAS,
+    MAX_TAIL_LINES,
+    WRITE_TOOLS,
+    cordon_node,
+    delete_pod,
+    describe_deployment,
+    describe_node,
+    describe_pod,
+    get_cluster_operators,
+    get_cluster_version,
+    get_configmap,
+    get_events,
+    get_node_metrics,
+    get_persistent_volume_claims,
+    get_pod_logs,
+    get_pod_metrics,
+    get_resource_quotas,
+    get_services,
+    list_deployments,
+    list_namespaces,
+    list_nodes,
+    list_pods,
+    restart_deployment,
+    scale_deployment,
+    uncordon_node,
+)
 from tests.conftest import (
     _list_result,
     _make_deployment,
@@ -20,41 +45,15 @@ from tests.conftest import (
     _ts,
 )
 
-from sre_agent.k8s_tools import (
-    list_namespaces,
-    list_pods,
-    describe_pod,
-    get_pod_logs,
-    list_nodes,
-    describe_node,
-    get_events,
-    list_deployments,
-    describe_deployment,
-    get_resource_quotas,
-    get_services,
-    get_persistent_volume_claims,
-    get_cluster_version,
-    get_cluster_operators,
-    get_configmap,
-    scale_deployment,
-    restart_deployment,
-    delete_pod,
-    cordon_node,
-    uncordon_node,
-    get_node_metrics,
-    get_pod_metrics,
-    WRITE_TOOLS,
-    MAX_TAIL_LINES,
-    MAX_REPLICAS,
-)
-
 
 class TestListNamespaces:
     def test_returns_namespaces(self, mock_k8s):
-        mock_k8s["core"].list_namespace.return_value = _list_result([
-            _make_namespace("default"),
-            _make_namespace("kube-system"),
-        ])
+        mock_k8s["core"].list_namespace.return_value = _list_result(
+            [
+                _make_namespace("default"),
+                _make_namespace("kube-system"),
+            ]
+        )
         result = list_namespaces.call({})
         assert "default" in result
         assert "kube-system" in result
@@ -72,19 +71,23 @@ class TestListNamespaces:
 
 class TestListPods:
     def test_returns_pods(self, mock_k8s):
-        mock_k8s["core"].list_namespaced_pod.return_value = _list_result([
-            _make_pod("web-1"),
-            _make_pod("web-2", restarts=5),
-        ])
+        mock_k8s["core"].list_namespaced_pod.return_value = _list_result(
+            [
+                _make_pod("web-1"),
+                _make_pod("web-2", restarts=5),
+            ]
+        )
         result = _text(list_pods.call({"namespace": "default"}))
         assert "web-1" in result
         assert "web-2" in result
         assert "Restarts=5" in result
 
     def test_all_namespaces(self, mock_k8s):
-        mock_k8s["core"].list_pod_for_all_namespaces.return_value = _list_result([
-            _make_pod("pod-a", namespace="ns1"),
-        ])
+        mock_k8s["core"].list_pod_for_all_namespaces.return_value = _list_result(
+            [
+                _make_pod("pod-a", namespace="ns1"),
+            ]
+        )
         result = _text(list_pods.call({"namespace": "ALL"}))
         assert "ns1/pod-a" in result
 
@@ -99,9 +102,11 @@ class TestListPods:
 class TestDescribePod:
     def test_returns_details(self, mock_k8s):
         mock_k8s["core"].read_namespaced_pod.return_value = _make_pod("my-pod")
-        mock_k8s["core"].list_namespaced_event.return_value = _list_result([
-            _make_event(),
-        ])
+        mock_k8s["core"].list_namespaced_event.return_value = _list_result(
+            [
+                _make_event(),
+            ]
+        )
         result = describe_pod.call({"namespace": "default", "pod_name": "my-pod"})
         assert '"name": "my-pod"' in result
         assert '"state": "running"' in result
@@ -150,10 +155,12 @@ class TestGetPodLogs:
 
 class TestListNodes:
     def test_returns_nodes(self, mock_k8s):
-        mock_k8s["core"].list_node.return_value = _list_result([
-            _make_node("node-1", roles=["master"]),
-            _make_node("node-2", roles=["worker"]),
-        ])
+        mock_k8s["core"].list_node.return_value = _list_result(
+            [
+                _make_node("node-1", roles=["master"]),
+                _make_node("node-2", roles=["worker"]),
+            ]
+        )
         result = list_nodes.call({})
         assert "node-1" in result
         assert "master" in result
@@ -162,10 +169,12 @@ class TestListNodes:
 
 class TestGetEvents:
     def test_returns_events(self, mock_k8s):
-        mock_k8s["core"].list_namespaced_event.return_value = _list_result([
-            _make_event(reason="Pulled", message="Pulled image nginx", event_type="Normal"),
-            _make_event(reason="BackOff", message="Back-off restarting", event_type="Warning"),
-        ])
+        mock_k8s["core"].list_namespaced_event.return_value = _list_result(
+            [
+                _make_event(reason="Pulled", message="Pulled image nginx", event_type="Normal"),
+                _make_event(reason="BackOff", message="Back-off restarting", event_type="Warning"),
+            ]
+        )
         result = _text(get_events.call({"namespace": "default"}))
         assert "Pulled" in result
         assert "BackOff" in result
@@ -184,17 +193,21 @@ class TestGetEvents:
 
 class TestListDeployments:
     def test_returns_deployments(self, mock_k8s):
-        mock_k8s["apps"].list_namespaced_deployment.return_value = _list_result([
-            _make_deployment("nginx", ready=3),
-        ])
+        mock_k8s["apps"].list_namespaced_deployment.return_value = _list_result(
+            [
+                _make_deployment("nginx", ready=3),
+            ]
+        )
         result = _text(list_deployments.call({"namespace": "default"}))
         assert "nginx" in result
         assert "Ready=3/3" in result
 
     def test_all_namespaces(self, mock_k8s):
-        mock_k8s["apps"].list_deployment_for_all_namespaces.return_value = _list_result([
-            _make_deployment("api", namespace="prod"),
-        ])
+        mock_k8s["apps"].list_deployment_for_all_namespaces.return_value = _list_result(
+            [
+                _make_deployment("api", namespace="prod"),
+            ]
+        )
         result = _text(list_deployments.call({"namespace": "ALL"}))
         assert "prod/api" in result
 
@@ -275,21 +288,20 @@ class TestGetPersistentVolumeClaims:
 
 class TestGetClusterVersion:
     def test_returns_k8s_version(self, mock_k8s):
-        mock_k8s["version"].get_code.return_value = SimpleNamespace(
-            git_version="v1.28.0", platform="linux/amd64"
-        )
+        mock_k8s["version"].get_code.return_value = SimpleNamespace(git_version="v1.28.0", platform="linux/amd64")
         mock_k8s["custom"].get_cluster_custom_object.side_effect = ApiException(status=404, reason="Not Found")
         result = get_cluster_version.call({})
         assert "v1.28.0" in result
 
     def test_returns_ocp_version(self, mock_k8s):
-        mock_k8s["version"].get_code.return_value = SimpleNamespace(
-            git_version="v1.28.0", platform="linux/amd64"
-        )
+        mock_k8s["version"].get_code.return_value = SimpleNamespace(git_version="v1.28.0", platform="linux/amd64")
         mock_k8s["custom"].get_cluster_custom_object.return_value = {
-            "status": {"desired": {"version": "4.14.5"}, "conditions": [
-                {"type": "Available", "status": "True"},
-            ]},
+            "status": {
+                "desired": {"version": "4.14.5"},
+                "conditions": [
+                    {"type": "Available", "status": "True"},
+                ],
+            },
             "spec": {"channel": "stable-4.14"},
         }
         result = get_cluster_version.call({})
@@ -300,14 +312,18 @@ class TestGetClusterVersion:
 class TestGetClusterOperators:
     def test_returns_operators(self, mock_k8s):
         mock_k8s["custom"].list_cluster_custom_object.return_value = {
-            "items": [{
-                "metadata": {"name": "dns"},
-                "status": {"conditions": [
-                    {"type": "Available", "status": "True"},
-                    {"type": "Progressing", "status": "False"},
-                    {"type": "Degraded", "status": "False"},
-                ]},
-            }],
+            "items": [
+                {
+                    "metadata": {"name": "dns"},
+                    "status": {
+                        "conditions": [
+                            {"type": "Available", "status": "True"},
+                            {"type": "Progressing", "status": "False"},
+                            {"type": "Degraded", "status": "False"},
+                        ]
+                    },
+                }
+            ],
         }
         result = get_cluster_operators.call({})
         assert "dns" in result
@@ -410,8 +426,14 @@ class TestMetricsTools:
     def test_pod_metrics_sort_by_memory(self, mock_k8s):
         mock_k8s["custom"].list_namespaced_custom_object.return_value = {
             "items": [
-                {"metadata": {"name": "low-mem", "namespace": "default"}, "containers": [{"name": "c", "usage": {"cpu": "10m", "memory": "64Mi"}}]},
-                {"metadata": {"name": "high-mem", "namespace": "default"}, "containers": [{"name": "c", "usage": {"cpu": "10m", "memory": "2048Mi"}}]},
+                {
+                    "metadata": {"name": "low-mem", "namespace": "default"},
+                    "containers": [{"name": "c", "usage": {"cpu": "10m", "memory": "64Mi"}}],
+                },
+                {
+                    "metadata": {"name": "high-mem", "namespace": "default"},
+                    "containers": [{"name": "c", "usage": {"cpu": "10m", "memory": "2048Mi"}}],
+                },
             ]
         }
         result = get_pod_metrics.call({"namespace": "default", "sort_by": "memory"})
@@ -421,7 +443,10 @@ class TestMetricsTools:
     def test_pod_metrics_all_namespaces(self, mock_k8s):
         mock_k8s["custom"].list_cluster_custom_object.return_value = {
             "items": [
-                {"metadata": {"name": "p1", "namespace": "ns1"}, "containers": [{"name": "c", "usage": {"cpu": "50m", "memory": "128Mi"}}]},
+                {
+                    "metadata": {"name": "p1", "namespace": "ns1"},
+                    "containers": [{"name": "c", "usage": {"cpu": "50m", "memory": "128Mi"}}],
+                },
             ]
         }
         result = get_pod_metrics.call({"namespace": "ALL"})

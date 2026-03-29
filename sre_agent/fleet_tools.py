@@ -15,16 +15,16 @@ import logging
 from typing import Any
 
 from anthropic import beta_tool
-from kubernetes.client.rest import ApiException
 
 from .errors import ToolError
-from .k8s_client import get_core_client, get_apps_client, get_custom_client, safe, age
+from .k8s_client import age, get_apps_client, get_core_client, get_custom_client
 
 logger = logging.getLogger("pulse_agent.fleet")
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _get_managed_clusters() -> list[dict]:
     """Discover ACM managed clusters."""
@@ -57,14 +57,13 @@ def _get_proxy_api_client(cluster_name: str):
     so that requests are properly authenticated.
     """
     from kubernetes import client
+
     # Get the default config (already loaded by _load_k8s)
     default_config = client.Configuration.get_default_copy()
     # Create a new config with the ACM proxy host, inheriting auth
     proxy_config = client.Configuration()
     proxy_config.host = (
-        f"{default_config.host}"
-        f"/apis/cluster.open-cluster-management.io/v1"
-        f"/managedclusters/{cluster_name}/proxy"
+        f"{default_config.host}/apis/cluster.open-cluster-management.io/v1/managedclusters/{cluster_name}/proxy"
     )
     proxy_config.api_key = default_config.api_key
     proxy_config.api_key_prefix = default_config.api_key_prefix
@@ -78,12 +77,14 @@ def _get_proxy_api_client(cluster_name: str):
 def _proxy_core_client(cluster_name: str):
     """Get a CoreV1Api client proxied through ACM for a managed cluster."""
     from kubernetes import client
+
     return client.CoreV1Api(_get_proxy_api_client(cluster_name))
 
 
 def _proxy_apps_client(cluster_name: str):
     """Get an AppsV1Api client proxied through ACM for a managed cluster."""
     from kubernetes import client
+
     return client.AppsV1Api(_get_proxy_api_client(cluster_name))
 
 
@@ -149,14 +150,16 @@ def fleet_list_pods(namespace: str = "default", label_selector: str = "") -> str
 
         for pod in result.items[:50]:
             restarts = sum((cs.restart_count for cs in (pod.status.container_statuses or [])), 0)
-            all_rows.append({
-                "cluster": "local",
-                "namespace": pod.metadata.namespace,
-                "name": pod.metadata.name,
-                "status": pod.status.phase or "Unknown",
-                "restarts": restarts,
-                "age": age(pod.metadata.creation_timestamp),
-            })
+            all_rows.append(
+                {
+                    "cluster": "local",
+                    "namespace": pod.metadata.namespace,
+                    "name": pod.metadata.name,
+                    "status": pod.status.phase or "Unknown",
+                    "restarts": restarts,
+                    "age": age(pod.metadata.creation_timestamp),
+                }
+            )
         lines.append(f"local: {len(result.items)} pods")
     except Exception as e:
         lines.append(f"local: Error - {e}")
@@ -178,33 +181,39 @@ def fleet_list_pods(namespace: str = "default", label_selector: str = "") -> str
 
             for pod in result.items[:50]:
                 restarts = sum((cs.restart_count for cs in (pod.status.container_statuses or [])), 0)
-                all_rows.append({
-                    "cluster": cluster["name"],
-                    "namespace": pod.metadata.namespace,
-                    "name": pod.metadata.name,
-                    "status": pod.status.phase or "Unknown",
-                    "restarts": restarts,
-                    "age": age(pod.metadata.creation_timestamp),
-                })
+                all_rows.append(
+                    {
+                        "cluster": cluster["name"],
+                        "namespace": pod.metadata.namespace,
+                        "name": pod.metadata.name,
+                        "status": pod.status.phase or "Unknown",
+                        "restarts": restarts,
+                        "age": age(pod.metadata.creation_timestamp),
+                    }
+                )
             lines.append(f"{cluster['name']}: {len(result.items)} pods")
         except Exception as e:
             lines.append(f"{cluster['name']}: Error - {e}")
 
     text = f"Fleet pods in {namespace}:\n" + "\n".join(lines) + f"\n\nTotal: {len(all_rows)} pods across fleet"
 
-    component = {
-        "kind": "data_table",
-        "title": f"Fleet Pods ({len(all_rows)})",
-        "columns": [
-            {"id": "cluster", "header": "Cluster"},
-            {"id": "namespace", "header": "Namespace"},
-            {"id": "name", "header": "Name"},
-            {"id": "status", "header": "Status"},
-            {"id": "restarts", "header": "Restarts"},
-            {"id": "age", "header": "Age"},
-        ],
-        "rows": all_rows,
-    } if all_rows else None
+    component = (
+        {
+            "kind": "data_table",
+            "title": f"Fleet Pods ({len(all_rows)})",
+            "columns": [
+                {"id": "cluster", "header": "Cluster"},
+                {"id": "namespace", "header": "Namespace"},
+                {"id": "name", "header": "Name"},
+                {"id": "status", "header": "Status"},
+                {"id": "restarts", "header": "Restarts"},
+                {"id": "age", "header": "Age"},
+            ],
+            "rows": all_rows,
+        }
+        if all_rows
+        else None
+    )
 
     return (text, component)
 
@@ -234,13 +243,15 @@ def fleet_list_deployments(namespace: str = "default") -> str:
         for dep in result.items[:50]:
             ready = dep.status.ready_replicas or 0
             desired = dep.spec.replicas or 0
-            all_rows.append({
-                "cluster": "local",
-                "namespace": dep.metadata.namespace,
-                "name": dep.metadata.name,
-                "ready": f"{ready}/{desired}",
-                "age": age(dep.metadata.creation_timestamp),
-            })
+            all_rows.append(
+                {
+                    "cluster": "local",
+                    "namespace": dep.metadata.namespace,
+                    "name": dep.metadata.name,
+                    "ready": f"{ready}/{desired}",
+                    "age": age(dep.metadata.creation_timestamp),
+                }
+            )
         lines.append(f"local: {len(result.items)} deployments")
     except Exception as e:
         lines.append(f"local: Error - {e}")
@@ -259,31 +270,37 @@ def fleet_list_deployments(namespace: str = "default") -> str:
             for dep in result.items[:50]:
                 ready = dep.status.ready_replicas or 0
                 desired = dep.spec.replicas or 0
-                all_rows.append({
-                    "cluster": cluster["name"],
-                    "namespace": dep.metadata.namespace,
-                    "name": dep.metadata.name,
-                    "ready": f"{ready}/{desired}",
-                    "age": age(dep.metadata.creation_timestamp),
-                })
+                all_rows.append(
+                    {
+                        "cluster": cluster["name"],
+                        "namespace": dep.metadata.namespace,
+                        "name": dep.metadata.name,
+                        "ready": f"{ready}/{desired}",
+                        "age": age(dep.metadata.creation_timestamp),
+                    }
+                )
             lines.append(f"{cluster['name']}: {len(result.items)} deployments")
         except Exception as e:
             lines.append(f"{cluster['name']}: Error - {e}")
 
     text = f"Fleet deployments in {namespace}:\n" + "\n".join(lines) + f"\n\nTotal: {len(all_rows)} across fleet"
 
-    component = {
-        "kind": "data_table",
-        "title": f"Fleet Deployments ({len(all_rows)})",
-        "columns": [
-            {"id": "cluster", "header": "Cluster"},
-            {"id": "namespace", "header": "Namespace"},
-            {"id": "name", "header": "Name"},
-            {"id": "ready", "header": "Ready"},
-            {"id": "age", "header": "Age"},
-        ],
-        "rows": all_rows,
-    } if all_rows else None
+    component = (
+        {
+            "kind": "data_table",
+            "title": f"Fleet Deployments ({len(all_rows)})",
+            "columns": [
+                {"id": "cluster", "header": "Cluster"},
+                {"id": "namespace", "header": "Namespace"},
+                {"id": "name", "header": "Name"},
+                {"id": "ready", "header": "Ready"},
+                {"id": "age", "header": "Age"},
+            ],
+            "rows": all_rows,
+        }
+        if all_rows
+        else None
+    )
 
     return (text, component)
 
@@ -301,6 +318,7 @@ def fleet_get_alerts() -> str:
     # Local cluster alerts
     try:
         from .k8s_tools import get_firing_alerts
+
         result = get_firing_alerts()
         if isinstance(result, tuple):
             text_result, _ = result
@@ -401,8 +419,15 @@ def fleet_compare_resource(kind: str, name: str, namespace: str = "default") -> 
 
     # Compare key fields
     diffs = []
-    ignore_prefixes = {"metadata.uid", "metadata.resource_version", "metadata.creation_timestamp",
-                       "metadata.managed_fields", "metadata.generation", "metadata.self_link", "status"}
+    ignore_prefixes = {
+        "metadata.uid",
+        "metadata.resource_version",
+        "metadata.creation_timestamp",
+        "metadata.managed_fields",
+        "metadata.generation",
+        "metadata.self_link",
+        "status",
+    }
 
     def flatten(obj: Any, prefix: str = "") -> dict[str, Any]:
         items: dict[str, Any] = {}
@@ -462,12 +487,9 @@ def fleet_compare_resource(kind: str, name: str, namespace: str = "default") -> 
         "title": f"Configuration Drift: {kind}/{name} ({len(diffs)} differences)",
         "columns": [
             {"id": "field", "header": "Field"},
-            *[{"id": cn, "header": cn} for cn in flat_resources.keys()],
+            *[{"id": cn, "header": cn} for cn in flat_resources],
         ],
-        "rows": [
-            {"field": d["field"], **d["values"]}
-            for d in diffs[:50]
-        ],
+        "rows": [{"field": d["field"], **d["values"]} for d in diffs[:50]],
     }
 
     return (text, component)
@@ -484,5 +506,6 @@ FLEET_TOOLS = [
 
 # Register fleet tools in the central registry (all read-only)
 from .tool_registry import register_tool
+
 for _tool in FLEET_TOOLS:
     register_tool(_tool, is_write=False)

@@ -19,24 +19,38 @@ import uuid
 from contextlib import asynccontextmanager
 from importlib.metadata import version as pkg_version
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Query, Header, HTTPException
+from fastapi import FastAPI, Header, HTTPException, Query, WebSocket, WebSocketDisconnect
 
 from .agent import (
-    create_client,
-    run_agent_streaming,
     ALL_TOOLS as SRE_ALL_TOOLS,
-    WRITE_TOOLS,
+)
+from .agent import (
     SYSTEM_PROMPT as SRE_SYSTEM_PROMPT,
+)
+from .agent import (
     TOOL_DEFS as SRE_TOOL_DEFS,
+)
+from .agent import (
     TOOL_MAP as SRE_TOOL_MAP,
 )
+from .agent import (
+    WRITE_TOOLS,
+    create_client,
+    run_agent_streaming,
+)
+from .orchestrator import build_orchestrated_config, classify_intent
 from .security_agent import (
     ALL_TOOLS as SEC_ALL_TOOLS,
+)
+from .security_agent import (
     SECURITY_SYSTEM_PROMPT,
+)
+from .security_agent import (
     TOOL_DEFS as SEC_TOOL_DEFS,
+)
+from .security_agent import (
     TOOL_MAP as SEC_TOOL_MAP,
 )
-from .orchestrator import classify_intent, build_orchestrated_config
 
 logger = logging.getLogger("pulse_agent.api")
 
@@ -64,7 +78,7 @@ MAX_MESSAGE_SIZE = 1_048_576
 MAX_MESSAGES_PER_MINUTE = 10
 
 # Allowed characters in context fields (K8s name rules + slashes/dots)
-_SAFE_CONTEXT = re.compile(r'^[a-zA-Z0-9\-._/: ]{0,253}$')
+_SAFE_CONTEXT = re.compile(r"^[a-zA-Z0-9\-._/: ]{0,253}$")
 
 
 def _sanitize_context_field(value: str) -> str:
@@ -89,6 +103,7 @@ async def lifespan(app: FastAPI):
         )
     try:
         from .k8s_client import get_core_client
+
         get_core_client().list_namespace(limit=1)
         logger.info("Connected to cluster")
     except Exception:
@@ -107,6 +122,7 @@ app = FastAPI(title="Pulse Agent API", version=_get_agent_version(), lifespan=li
 
 
 PROTOCOL_VERSION = "2"
+
 
 @app.get("/healthz")
 async def healthz():
@@ -130,8 +146,9 @@ async def health(
     token: str | None = Query(None),
 ):
     _verify_rest_token(authorization, token)
-    from .error_tracker import get_tracker
     from .agent import _circuit_breaker
+    from .error_tracker import get_tracker
+
     tracker = get_tracker()
     summary = tracker.get_summary()
     return {
@@ -240,7 +257,7 @@ async def _run_agent_ws(
             def _on_done(f):
                 try:
                     waiter.set_result(f.result())
-                except Exception as e:
+                except Exception:
                     waiter.set_result(False)
 
             loop.call_soon_threadsafe(confirm_future.add_done_callback, _on_done)
@@ -276,20 +293,28 @@ async def _run_agent_ws(
     if full_response and len(full_response) > 100 and os.environ.get("PULSE_AGENT_MEMORY") == "1":
         try:
             from .memory import get_manager
+
             manager = get_manager()
             if manager:
                 user_msgs = [m for m in messages if m["role"] == "user"]
                 if user_msgs:
-                    query = user_msgs[-1]["content"] if isinstance(user_msgs[-1]["content"], str) else str(user_msgs[-1]["content"])
+                    query = (
+                        user_msgs[-1]["content"]
+                        if isinstance(user_msgs[-1]["content"], str)
+                        else str(user_msgs[-1]["content"])
+                    )
                     tool_seq = [{"name": t} for t in session_tools]
-                    manager.store_incident({
-                        "query": query[:500],
-                        "tool_sequence": tool_seq,
-                        "resolution": full_response[:500],
-                        "namespace": "",
-                        "resource_type": "",
-                        "error_type": "",
-                    }, confirmed=False)
+                    manager.store_incident(
+                        {
+                            "query": query[:500],
+                            "tool_sequence": tool_seq,
+                            "resolution": full_response[:500],
+                            "namespace": "",
+                            "resource_type": "",
+                            "error_type": "",
+                        },
+                        confirmed=False,
+                    )
         except Exception as e:
             logger.debug("Failed to auto-store session: %s", e)
 
@@ -313,6 +338,7 @@ def _cleanup_stale_pending():
 async def _create_and_register_future(ws_id: str, tool_name: str, tool_input: dict, websocket: WebSocket):
     """Create a Future on the event loop and send the confirm request with a JIT nonce."""
     import secrets
+
     _cleanup_stale_pending()  # Opportunistic cleanup
     loop = asyncio.get_running_loop()
     future = loop.create_future()
@@ -320,12 +346,14 @@ async def _create_and_register_future(ws_id: str, tool_name: str, tool_input: di
     _pending_confirms[ws_id] = future
     _pending_nonces[ws_id] = nonce
     _pending_timestamps[ws_id] = time.time()
-    await websocket.send_json({
-        "type": "confirm_request",
-        "tool": tool_name,
-        "input": tool_input,
-        "nonce": nonce,
-    })
+    await websocket.send_json(
+        {
+            "type": "confirm_request",
+            "tool": tool_name,
+            "input": tool_input,
+            "nonce": nonce,
+        }
+    )
     return future
 
 
@@ -358,11 +386,14 @@ async def websocket_agent(websocket: WebSocket, mode: str):
         await websocket_auto_agent(websocket)
         return
     if mode not in ("sre", "security"):
-        await websocket.close(code=4000, reason="Invalid mode. Use 'sre', 'security', or 'agent'. For monitoring, use /ws/monitor.")
+        await websocket.close(
+            code=4000, reason="Invalid mode. Use 'sre', 'security', or 'agent'. For monitoring, use /ws/monitor."
+        )
         return
 
     # Token authentication — mandatory unless explicitly disabled
     import hmac
+
     expected_token = os.environ.get("PULSE_AGENT_WS_TOKEN", "")
     if not expected_token:
         await websocket.close(code=4001, reason="Server not configured. PULSE_AGENT_WS_TOKEN is required.")
@@ -422,7 +453,9 @@ async def websocket_agent(websocket: WebSocket, mode: str):
                         future.set_result(False)
                     else:
                         future.set_result(data.get("approved", False))
-                        logger.info("Confirmation received: approved=%s nonce=%s", data.get("approved"), received_nonce[:8])
+                        logger.info(
+                            "Confirmation received: approved=%s nonce=%s", data.get("approved"), received_nonce[:8]
+                        )
                     _pending_nonces.pop(session_id, None)
                     continue
 
@@ -502,7 +535,8 @@ async def websocket_agent(websocket: WebSocket, mode: str):
             messages.append({"role": "user", "content": content})
 
             # Inject shared context from context bus
-            from .context_bus import get_context_bus, ContextEntry
+            from .context_bus import ContextEntry, get_context_bus
+
             namespace_from_context = ""
             ns_match = re.search(r"Namespace:\s*'?([a-zA-Z0-9\-._]+)'?", content)
             if ns_match:
@@ -515,36 +549,47 @@ async def websocket_agent(websocket: WebSocket, mode: str):
 
             try:
                 full_response = await _run_agent_ws(
-                    websocket, messages, effective_system,
-                    tool_defs, tool_map, write_tools, session_id,
+                    websocket,
+                    messages,
+                    effective_system,
+                    tool_defs,
+                    tool_map,
+                    write_tools,
+                    session_id,
                 )
                 messages.append({"role": "assistant", "content": full_response})
 
                 # Publish agent response to shared context bus
                 if full_response:
-                    bus.publish(ContextEntry(
-                        source="sre_agent" if mode == "sre" else "security_agent",
-                        category="user_resolution" if "resolved" in full_response.lower() else "diagnosis",
-                        summary=full_response[:200],
-                        details={"mode": mode, "full_length": len(full_response)},
-                        namespace=namespace_from_context,
-                    ))
+                    bus.publish(
+                        ContextEntry(
+                            source="sre_agent" if mode == "sre" else "security_agent",
+                            category="user_resolution" if "resolved" in full_response.lower() else "diagnosis",
+                            summary=full_response[:200],
+                            details={"mode": mode, "full_length": len(full_response)},
+                            namespace=namespace_from_context,
+                        )
+                    )
 
-                await websocket.send_json({
-                    "type": "done",
-                    "full_response": full_response,
-                })
-            except Exception as e:
+                await websocket.send_json(
+                    {
+                        "type": "done",
+                        "full_response": full_response,
+                    }
+                )
+            except Exception:
                 logger.exception("Agent error")
                 if messages:
                     messages.pop()
-                await websocket.send_json({
-                    "type": "error",
-                    "message": "Agent encountered an error. Please try again.",
-                    "category": "server",
-                    "suggestions": [],
-                    "operation": "",
-                })
+                await websocket.send_json(
+                    {
+                        "type": "error",
+                        "message": "Agent encountered an error. Please try again.",
+                        "category": "server",
+                        "suggestions": [],
+                        "operation": "",
+                    }
+                )
 
     except Exception:
         logger.exception("WebSocket error")
@@ -571,6 +616,7 @@ async def websocket_auto_agent(websocket: WebSocket):
     """Unified agent endpoint — auto-routes between SRE and Security based on query intent."""
     # Token authentication — same pattern as /ws/sre
     import hmac
+
     expected_token = os.environ.get("PULSE_AGENT_WS_TOKEN", "")
     if not expected_token:
         await websocket.close(code=4001, reason="Server not configured. PULSE_AGENT_WS_TOKEN is required.")
@@ -619,7 +665,9 @@ async def websocket_auto_agent(websocket: WebSocket):
                         future.set_result(False)
                     else:
                         future.set_result(data.get("approved", False))
-                        logger.info("Confirmation received: approved=%s nonce=%s", data.get("approved"), received_nonce[:8])
+                        logger.info(
+                            "Confirmation received: approved=%s nonce=%s", data.get("approved"), received_nonce[:8]
+                        )
                     _pending_nonces.pop(session_id, None)
                     continue
 
@@ -710,7 +758,8 @@ async def websocket_auto_agent(websocket: WebSocket):
             messages.append({"role": "user", "content": content})
 
             # Inject shared context from context bus
-            from .context_bus import get_context_bus, ContextEntry
+            from .context_bus import ContextEntry, get_context_bus
+
             namespace_from_context = ""
             ns_match = re.search(r"Namespace:\s*'?([a-zA-Z0-9\-._]+)'?", content)
             if ns_match:
@@ -723,37 +772,48 @@ async def websocket_auto_agent(websocket: WebSocket):
 
             try:
                 full_response = await _run_agent_ws(
-                    websocket, messages, effective_system,
-                    tool_defs, tool_map, write_tools, session_id,
+                    websocket,
+                    messages,
+                    effective_system,
+                    tool_defs,
+                    tool_map,
+                    write_tools,
+                    session_id,
                 )
                 messages.append({"role": "assistant", "content": full_response})
 
                 # Publish agent response to shared context bus
                 if full_response:
                     source = "sre_agent" if last_mode == "sre" else "security_agent"
-                    bus.publish(ContextEntry(
-                        source=source,
-                        category="user_resolution" if "resolved" in full_response.lower() else "diagnosis",
-                        summary=full_response[:200],
-                        details={"mode": last_mode, "full_length": len(full_response)},
-                        namespace=namespace_from_context,
-                    ))
+                    bus.publish(
+                        ContextEntry(
+                            source=source,
+                            category="user_resolution" if "resolved" in full_response.lower() else "diagnosis",
+                            summary=full_response[:200],
+                            details={"mode": last_mode, "full_length": len(full_response)},
+                            namespace=namespace_from_context,
+                        )
+                    )
 
-                await websocket.send_json({
-                    "type": "done",
-                    "full_response": full_response,
-                })
-            except Exception as e:
+                await websocket.send_json(
+                    {
+                        "type": "done",
+                        "full_response": full_response,
+                    }
+                )
+            except Exception:
                 logger.exception("Agent error")
                 if messages:
                     messages.pop()
-                await websocket.send_json({
-                    "type": "error",
-                    "message": "Agent encountered an error. Please try again.",
-                    "category": "server",
-                    "suggestions": [],
-                    "operation": "",
-                })
+                await websocket.send_json(
+                    {
+                        "type": "error",
+                        "message": "Agent encountered an error. Please try again.",
+                        "category": "server",
+                        "suggestions": [],
+                        "operation": "",
+                    }
+                )
 
     except Exception:
         logger.exception("WebSocket error")
@@ -774,7 +834,14 @@ async def websocket_auto_agent(websocket: WebSocket):
 
 # ── Protocol v2: /ws/monitor ──────────────────────────────────────────────
 
-from .monitor import MonitorSession, get_fix_history, get_action_detail, execute_rollback, get_investigation_stats, is_autofix_paused
+from .monitor import (
+    MonitorSession,
+    execute_rollback,
+    get_action_detail,
+    get_fix_history,
+    get_investigation_stats,
+    is_autofix_paused,
+)
 
 
 @app.websocket("/ws/monitor")
@@ -786,6 +853,7 @@ async def websocket_monitor(websocket: WebSocket):
     """
     # Token authentication
     import hmac as _hmac
+
     expected_token = os.environ.get("PULSE_AGENT_WS_TOKEN", "")
     if not expected_token:
         await websocket.close(code=4001, reason="Server not configured. PULSE_AGENT_WS_TOKEN is required.")
@@ -816,12 +884,16 @@ async def websocket_monitor(websocket: WebSocket):
                 logger.warning("Invalid trust level %r, defaulting to 1", requested_trust)
                 trust_level = 1
             auto_fix_categories = [
-                str(c) for c in (data.get("autoFixCategories") or [])
-                if isinstance(c, str) and len(c) < 64
+                str(c) for c in (data.get("autoFixCategories") or []) if isinstance(c, str) and len(c) < 64
             ]
-            logger.info("Monitor subscribed: trust=%d (requested=%s, max=%d) categories=%s",
-                        trust_level, requested_trust, max_trust_level, auto_fix_categories)
-    except (asyncio.TimeoutError, Exception):
+            logger.info(
+                "Monitor subscribed: trust=%d (requested=%s, max=%d) categories=%s",
+                trust_level,
+                requested_trust,
+                max_trust_level,
+                auto_fix_categories,
+            )
+    except (TimeoutError, Exception):
         pass  # Use defaults
 
     session = MonitorSession(websocket, trust_level, auto_fix_categories)
@@ -896,6 +968,7 @@ async def websocket_monitor(websocket: WebSocket):
 def _verify_rest_token(authorization: str | None = Header(None), token: str | None = Query(None)):
     """Verify token for REST endpoints — accepts Bearer header or query param."""
     import hmac as _hmac
+
     expected = os.environ.get("PULSE_AGENT_WS_TOKEN", "")
     if not expected:
         raise HTTPException(status_code=503, detail="Server not configured")
@@ -944,6 +1017,7 @@ async def rest_action_detail(
     result = get_action_detail(action_id)
     if result is None:
         from fastapi.responses import JSONResponse
+
         return JSONResponse(status_code=404, content={"error": "Action not found"})
     return result
 
@@ -959,6 +1033,7 @@ async def rollback_action(
     result = execute_rollback(action_id)
     if "error" in result:
         from fastapi.responses import JSONResponse
+
         return JSONResponse(status_code=400, content=result)
     return result
 
@@ -975,7 +1050,11 @@ async def rest_predictions(
     Currently predictions are only pushed over the WebSocket stream.
     """
     _verify_rest_token(authorization, token)
-    return {"predictions": [], "total": 0, "note": "Predictions are currently only available via the /ws/monitor WebSocket stream."}
+    return {
+        "predictions": [],
+        "total": 0,
+        "note": "Predictions are currently only available via the /ws/monitor WebSocket stream.",
+    }
 
 
 @app.get("/monitor/capabilities")
@@ -1002,6 +1081,7 @@ async def pause_autofix(
     """Emergency kill switch — pause all auto-fix actions."""
     _verify_rest_token(authorization, token)
     from .monitor import set_autofix_paused
+
     set_autofix_paused(True)
     logger.warning("Auto-fix PAUSED via /monitor/pause")
     return {"autofix_paused": True}
@@ -1015,6 +1095,7 @@ async def resume_autofix(
     """Resume auto-fix actions after a pause."""
     _verify_rest_token(authorization, token)
     from .monitor import set_autofix_paused
+
     set_autofix_paused(False)
     logger.info("Auto-fix RESUMED via /monitor/resume")
     return {"autofix_paused": False}
@@ -1028,6 +1109,7 @@ async def export_memory(
     """Export learned runbooks and patterns for cross-pod sharing."""
     _verify_rest_token(authorization, token)
     from .memory import get_manager
+
     manager = get_manager()
     if not manager:
         return {"runbooks": [], "patterns": []}
@@ -1046,6 +1128,7 @@ async def import_memory(
     """Import runbooks and patterns from another pod's export."""
     _verify_rest_token(authorization, token)
     from .memory import get_manager
+
     manager = get_manager()
     if not manager:
         return {"imported_runbooks": 0, "imported_patterns": 0, "error": "Memory system not enabled"}
@@ -1064,6 +1147,7 @@ async def get_shared_context(
     """View recent shared context entries across all agents."""
     _verify_rest_token(authorization, token)
     from .context_bus import get_context_bus
+
     bus = get_context_bus()
     entries = bus.get_context_for(limit=20)
     return {

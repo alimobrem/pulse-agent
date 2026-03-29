@@ -16,9 +16,9 @@ import urllib.parse
 import urllib.request
 
 from anthropic import beta_tool
+from kubernetes.client.rest import ApiException
 
 from .k8s_client import get_custom_client
-from kubernetes.client.rest import ApiException
 
 # Per-thread PR counter to prevent runaway PR creation (thread-safe)
 _pr_local = threading.local()
@@ -26,7 +26,7 @@ _MAX_PRS_PER_SESSION = int(os.environ.get("PULSE_AGENT_MAX_PRS", "5"))
 
 
 def _get_pr_count() -> int:
-    return getattr(_pr_local, 'count', 0)
+    return getattr(_pr_local, "count", 0)
 
 
 def _increment_pr_count():
@@ -114,7 +114,9 @@ def propose_git_change(
 
     # Per-session rate limit
     if _get_pr_count() >= _MAX_PRS_PER_SESSION:
-        return f"Error: PR rate limit reached ({_MAX_PRS_PER_SESSION} per session). Set PULSE_AGENT_MAX_PRS to increase."
+        return (
+            f"Error: PR rate limit reached ({_MAX_PRS_PER_SESSION} per session). Set PULSE_AGENT_MAX_PRS to increase."
+        )
 
     try:
         # 1. Get the default branch and its SHA
@@ -126,12 +128,18 @@ def propose_git_change(
         # 2. Create a branch
         if not branch_name:
             import time
+
             branch_name = f"pulse-agent/{int(time.time())}"
 
-        _github_api("POST", f"/repos/{repo}/git/refs", token=token, body={
-            "ref": f"refs/heads/{branch_name}",
-            "sha": base_sha,
-        })
+        _github_api(
+            "POST",
+            f"/repos/{repo}/git/refs",
+            token=token,
+            body={
+                "ref": f"refs/heads/{branch_name}",
+                "sha": base_sha,
+            },
+        )
 
         # 3. Get the current file (if it exists) for the SHA
         file_sha = None
@@ -163,12 +171,17 @@ def propose_git_change(
                 f"Please review before merging."
             )
 
-        pr = _github_api("POST", f"/repos/{repo}/pulls", token=token, body={
-            "title": pr_title,
-            "body": pr_body,
-            "head": branch_name,
-            "base": default_branch,
-        })
+        pr = _github_api(
+            "POST",
+            f"/repos/{repo}/pulls",
+            token=token,
+            body={
+                "title": pr_title,
+                "body": pr_body,
+                "head": branch_name,
+                "base": default_branch,
+            },
+        )
 
         _increment_pr_count()
 
@@ -215,19 +228,23 @@ def get_argo_app_source(name: str, namespace: str = "openshift-gitops") -> str:
             clean = clean[:-4]
         github_repo = clean.split("github.com")[-1].strip("/:")
 
-    return json.dumps({
-        "repo_url": repo,
-        "github_repo": github_repo,
-        "path": path,
-        "target_revision": revision,
-        "app_name": name,
-        "destination_namespace": app.get("spec", {}).get("destination", {}).get("namespace", ""),
-    }, indent=2)
+    return json.dumps(
+        {
+            "repo_url": repo,
+            "github_repo": github_repo,
+            "path": path,
+            "target_revision": revision,
+            "app_name": name,
+            "destination_namespace": app.get("spec", {}).get("destination", {}).get("namespace", ""),
+        },
+        indent=2,
+    )
 
 
 GIT_TOOLS = [propose_git_change, get_argo_app_source]
 
 # Register git tools in the central registry
 from .tool_registry import register_tool
+
 register_tool(propose_git_change, is_write=True)
 register_tool(get_argo_app_source, is_write=False)

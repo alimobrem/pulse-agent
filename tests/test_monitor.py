@@ -1,33 +1,34 @@
 """Tests for the monitor module — fix history, findings, and scan functions."""
 
 import asyncio
-import json
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
+
 import pytest
 
-from sre_agent.db import Database, set_database, reset_database
+from sre_agent.db import Database, reset_database, set_database
 from sre_agent.monitor import (
+    SEVERITY_CRITICAL,
+    SEVERITY_INFO,
+    SEVERITY_WARNING,
+    MonitorSession,
+    _make_action_report,
     _make_finding,
     _make_prediction,
-    _make_action_report,
-    save_action,
-    get_fix_history,
+    _run_security_followup_sync,
     get_action_detail,
-    SEVERITY_CRITICAL,
-    SEVERITY_WARNING,
-    SEVERITY_INFO,
+    get_fix_history,
+    save_action,
     save_investigation,
     update_action_verification,
-    MonitorSession,
-    _run_security_followup_sync,
 )
 
 
 @pytest.fixture(autouse=True)
 def _use_temp_db(monkeypatch, tmp_path):
     """Use a temp database for each test."""
-    import sre_agent.monitor as _mon
     import sre_agent.context_bus as _cb
+    import sre_agent.monitor as _mon
+
     db_path = str(tmp_path / "test_fix_history.db")
     db = Database(f"sqlite:///{db_path}")
     set_database(db)
@@ -210,6 +211,7 @@ class TestFixHistory:
         }
         save_investigation(report, finding)
         from sre_agent.db import get_database
+
         db = get_database()
         row = db.fetchone("SELECT finding_id, status, summary FROM investigations WHERE id = ?", ("i-test-1",))
         assert row is not None
@@ -257,9 +259,13 @@ class TestSecurityFollowup:
             summary="restarts",
             resources=[{"kind": "Pod", "name": "web-1", "namespace": "prod"}],
         )
-        with patch("sre_agent.agent.create_client", return_value=MagicMock()), \
-             patch("sre_agent.agent.run_agent_streaming",
-                   return_value='{"security_issues": [{"issue": "no netpol"}], "risk_level": "high"}') as mock_run:
+        with (
+            patch("sre_agent.agent.create_client", return_value=MagicMock()),
+            patch(
+                "sre_agent.agent.run_agent_streaming",
+                return_value='{"security_issues": [{"issue": "no netpol"}], "risk_level": "high"}',
+            ) as mock_run,
+        ):
             result = _run_security_followup_sync(finding)
 
         assert result["risk_level"] == "high"
@@ -274,12 +280,16 @@ class TestSecurityFollowup:
     def test_run_security_followup_sync_handles_bad_json(self):
         """_run_security_followup_sync returns empty defaults on unparseable response."""
         finding = _make_finding(
-            severity="critical", category="crashloop",
-            title="Pod crashing", summary="s",
+            severity="critical",
+            category="crashloop",
+            title="Pod crashing",
+            summary="s",
             resources=[{"kind": "Pod", "name": "x", "namespace": "ns"}],
         )
-        with patch("sre_agent.agent.create_client", return_value=MagicMock()), \
-             patch("sre_agent.agent.run_agent_streaming", return_value="not json at all"):
+        with (
+            patch("sre_agent.agent.create_client", return_value=MagicMock()),
+            patch("sre_agent.agent.run_agent_streaming", return_value="not json at all"),
+        ):
             result = _run_security_followup_sync(finding)
         assert result["security_issues"] == []
         assert result["risk_level"] == "unknown"
@@ -299,14 +309,18 @@ class TestSecurityFollowup:
         session = MonitorSession(FakeSocket(), trust_level=1)
 
         finding = _make_finding(
-            severity="critical", category="crashloop",
-            title="Pod crashing", summary="restarts",
+            severity="critical",
+            category="crashloop",
+            title="Pod crashing",
+            summary="restarts",
             resources=[{"kind": "Pod", "name": "web-1", "namespace": "prod"}],
         )
 
         mock_inv_result = {
-            "summary": "OOM cause", "suspectedCause": "mem limit",
-            "recommendedFix": "increase mem", "confidence": 0.8,
+            "summary": "OOM cause",
+            "suspectedCause": "mem limit",
+            "recommendedFix": "increase mem",
+            "confidence": 0.8,
         }
         mock_sec_result = {
             "security_issues": [{"issue": "no netpol"}],
@@ -314,13 +328,13 @@ class TestSecurityFollowup:
             "raw_response": "test",
         }
 
-        with patch("sre_agent.monitor._run_proactive_investigation_sync", return_value=mock_inv_result), \
-             patch("sre_agent.monitor._run_security_followup_sync", return_value=mock_sec_result) as mock_sec, \
-             patch("sre_agent.agent._circuit_breaker") as mock_cb:
+        with (
+            patch("sre_agent.monitor._run_proactive_investigation_sync", return_value=mock_inv_result),
+            patch("sre_agent.monitor._run_security_followup_sync", return_value=mock_sec_result) as mock_sec,
+            patch("sre_agent.agent._circuit_breaker") as mock_cb,
+        ):
             mock_cb.is_open = False
-            asyncio.get_event_loop().run_until_complete(
-                session.run_investigations([finding])
-            )
+            asyncio.get_event_loop().run_until_complete(session.run_investigations([finding]))
 
         mock_sec.assert_called_once_with(finding)
         # The investigation_report should have securityFollowup field
@@ -345,23 +359,27 @@ class TestSecurityFollowup:
         session = MonitorSession(FakeSocket(), trust_level=1)
 
         finding = _make_finding(
-            severity="critical", category="crashloop",
-            title="Pod crashing", summary="restarts",
+            severity="critical",
+            category="crashloop",
+            title="Pod crashing",
+            summary="restarts",
             resources=[{"kind": "Pod", "name": "web-1", "namespace": "prod"}],
         )
 
         mock_inv_result = {
-            "summary": "cause", "suspectedCause": "x",
-            "recommendedFix": "y", "confidence": 0.5,
+            "summary": "cause",
+            "suspectedCause": "x",
+            "recommendedFix": "y",
+            "confidence": 0.5,
         }
 
-        with patch("sre_agent.monitor._run_proactive_investigation_sync", return_value=mock_inv_result), \
-             patch("sre_agent.monitor._run_security_followup_sync") as mock_sec, \
-             patch("sre_agent.agent._circuit_breaker") as mock_cb:
+        with (
+            patch("sre_agent.monitor._run_proactive_investigation_sync", return_value=mock_inv_result),
+            patch("sre_agent.monitor._run_security_followup_sync") as mock_sec,
+            patch("sre_agent.agent._circuit_breaker") as mock_cb,
+        ):
             mock_cb.is_open = False
-            asyncio.get_event_loop().run_until_complete(
-                session.run_investigations([finding])
-            )
+            asyncio.get_event_loop().run_until_complete(session.run_investigations([finding]))
 
         mock_sec.assert_not_called()
         reports = [m for m in sent_messages if m.get("type") == "investigation_report"]
@@ -384,28 +402,34 @@ class TestSecurityFollowup:
 
         findings = [
             _make_finding(
-                severity="critical", category="crashloop",
-                title=f"Pod {i} crashing", summary="restarts",
+                severity="critical",
+                category="crashloop",
+                title=f"Pod {i} crashing",
+                summary="restarts",
                 resources=[{"kind": "Pod", "name": f"web-{i}", "namespace": "prod"}],
             )
             for i in range(3)
         ]
 
         mock_inv_result = {
-            "summary": "cause", "suspectedCause": "x",
-            "recommendedFix": "y", "confidence": 0.5,
+            "summary": "cause",
+            "suspectedCause": "x",
+            "recommendedFix": "y",
+            "confidence": 0.5,
         }
         mock_sec_result = {
-            "security_issues": [], "risk_level": "low", "raw_response": "",
+            "security_issues": [],
+            "risk_level": "low",
+            "raw_response": "",
         }
 
-        with patch("sre_agent.monitor._run_proactive_investigation_sync", return_value=mock_inv_result), \
-             patch("sre_agent.monitor._run_security_followup_sync", return_value=mock_sec_result) as mock_sec, \
-             patch("sre_agent.agent._circuit_breaker") as mock_cb:
+        with (
+            patch("sre_agent.monitor._run_proactive_investigation_sync", return_value=mock_inv_result),
+            patch("sre_agent.monitor._run_security_followup_sync", return_value=mock_sec_result) as mock_sec,
+            patch("sre_agent.agent._circuit_breaker") as mock_cb,
+        ):
             mock_cb.is_open = False
-            asyncio.get_event_loop().run_until_complete(
-                session.run_investigations(findings)
-            )
+            asyncio.get_event_loop().run_until_complete(session.run_investigations(findings))
 
         # Should only be called once despite multiple investigations
         assert mock_sec.call_count == 1
@@ -421,6 +445,7 @@ class TestMonitorAutoLearn:
         monkeypatch.setenv("PULSE_AGENT_INVESTIGATION_TIMEOUT", "10")
 
         from sre_agent.memory import MemoryManager, set_manager
+
         mgr = MemoryManager(db_path=str(tmp_path / "learn.db"))
         set_manager(mgr)
 
@@ -433,22 +458,26 @@ class TestMonitorAutoLearn:
         session = MonitorSession(FakeSocket(), trust_level=1)
 
         finding = _make_finding(
-            severity="critical", category="crashloop",
-            title="Pod crashing", summary="restarts",
+            severity="critical",
+            category="crashloop",
+            title="Pod crashing",
+            summary="restarts",
             resources=[{"kind": "Pod", "name": "web-1", "namespace": "prod"}],
         )
 
         mock_inv_result = {
-            "summary": "OOM root cause", "suspectedCause": "mem limit",
-            "recommendedFix": "increase mem", "confidence": 0.85,
+            "summary": "OOM root cause",
+            "suspectedCause": "mem limit",
+            "recommendedFix": "increase mem",
+            "confidence": 0.85,
         }
 
-        with patch("sre_agent.monitor._run_proactive_investigation_sync", return_value=mock_inv_result), \
-             patch("sre_agent.agent._circuit_breaker") as mock_cb:
+        with (
+            patch("sre_agent.monitor._run_proactive_investigation_sync", return_value=mock_inv_result),
+            patch("sre_agent.agent._circuit_breaker") as mock_cb,
+        ):
             mock_cb.is_open = False
-            asyncio.get_event_loop().run_until_complete(
-                session.run_investigations([finding])
-            )
+            asyncio.get_event_loop().run_until_complete(session.run_investigations([finding]))
 
         # Verify incident was stored in memory
         results = mgr.store.search_incidents("investigation", limit=5)
@@ -467,6 +496,7 @@ class TestMonitorAutoLearn:
         monkeypatch.setenv("PULSE_AGENT_INVESTIGATION_TIMEOUT", "10")
 
         from sre_agent.memory import MemoryManager, set_manager
+
         mgr = MemoryManager(db_path=str(tmp_path / "learn2.db"))
         set_manager(mgr)
 
@@ -479,22 +509,26 @@ class TestMonitorAutoLearn:
         session = MonitorSession(FakeSocket(), trust_level=1)
 
         finding = _make_finding(
-            severity="warning", category="scheduling",
-            title="Pod pending", summary="pending",
+            severity="warning",
+            category="scheduling",
+            title="Pod pending",
+            summary="pending",
             resources=[{"kind": "Pod", "name": "api-1", "namespace": "default"}],
         )
 
         mock_inv_result = {
-            "summary": "Not sure", "suspectedCause": "unknown",
-            "recommendedFix": "investigate", "confidence": 0.3,
+            "summary": "Not sure",
+            "suspectedCause": "unknown",
+            "recommendedFix": "investigate",
+            "confidence": 0.3,
         }
 
-        with patch("sre_agent.monitor._run_proactive_investigation_sync", return_value=mock_inv_result), \
-             patch("sre_agent.agent._circuit_breaker") as mock_cb:
+        with (
+            patch("sre_agent.monitor._run_proactive_investigation_sync", return_value=mock_inv_result),
+            patch("sre_agent.agent._circuit_breaker") as mock_cb,
+        ):
             mock_cb.is_open = False
-            asyncio.get_event_loop().run_until_complete(
-                session.run_investigations([finding])
-            )
+            asyncio.get_event_loop().run_until_complete(session.run_investigations([finding]))
 
         # No incident stored (confidence too low)
         results = mgr.store.search_incidents("investigation", limit=5)
@@ -510,6 +544,7 @@ class TestMonitorAutoLearn:
         monkeypatch.setenv("PULSE_AGENT_INVESTIGATION_TIMEOUT", "10")
 
         from sre_agent.memory import set_manager
+
         set_manager(None)
 
         sent_messages = []
@@ -521,29 +556,34 @@ class TestMonitorAutoLearn:
         session = MonitorSession(FakeSocket(), trust_level=1)
 
         finding = _make_finding(
-            severity="critical", category="crashloop",
-            title="Pod crashing", summary="restarts",
+            severity="critical",
+            category="crashloop",
+            title="Pod crashing",
+            summary="restarts",
             resources=[{"kind": "Pod", "name": "web-1", "namespace": "prod"}],
         )
 
         mock_inv_result = {
-            "summary": "cause found", "suspectedCause": "x",
-            "recommendedFix": "y", "confidence": 0.9,
+            "summary": "cause found",
+            "suspectedCause": "x",
+            "recommendedFix": "y",
+            "confidence": 0.9,
         }
 
-        with patch("sre_agent.monitor._run_proactive_investigation_sync", return_value=mock_inv_result), \
-             patch("sre_agent.agent._circuit_breaker") as mock_cb:
+        with (
+            patch("sre_agent.monitor._run_proactive_investigation_sync", return_value=mock_inv_result),
+            patch("sre_agent.agent._circuit_breaker") as mock_cb,
+        ):
             mock_cb.is_open = False
             # Should not raise even without memory
-            asyncio.get_event_loop().run_until_complete(
-                session.run_investigations([finding])
-            )
+            asyncio.get_event_loop().run_until_complete(session.run_investigations([finding]))
 
     def test_auto_learn_from_verified_fix(self, monkeypatch, tmp_path):
         """Verified fixes are stored in memory as confirmed incidents."""
         monkeypatch.setenv("PULSE_AGENT_MEMORY", "1")
 
         from sre_agent.memory import MemoryManager, set_manager
+
         mgr = MemoryManager(db_path=str(tmp_path / "learn3.db"))
         set_manager(mgr)
 
@@ -571,9 +611,7 @@ class TestMonitorAutoLearn:
         }
 
         # Simulate no active finding → verified
-        asyncio.get_event_loop().run_until_complete(
-            session.process_verifications([])
-        )
+        asyncio.get_event_loop().run_until_complete(session.process_verifications([]))
 
         # Check that a confirmed incident was stored
         results = mgr.store.search_incidents("auto-fix", limit=5)

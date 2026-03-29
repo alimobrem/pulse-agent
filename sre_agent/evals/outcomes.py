@@ -12,7 +12,6 @@ from typing import Any
 
 from ..db import Database
 
-
 DEFAULT_FIX_DB_PATH = os.environ.get(
     "PULSE_AGENT_DATABASE_URL",
     "sqlite:///tmp/pulse_agent/pulse.db",

@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import json
 import os
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from anthropic import beta_tool
 from kubernetes.client.rest import ApiException
@@ -16,13 +16,11 @@ from kubernetes.client.rest import ApiException
 from .errors import ToolError
 from .k8s_client import (
     get_core_client,
-    get_apps_client,
     get_custom_client,
     get_networking_client,
     get_rbac_client,
     safe,
 )
-
 
 # ---------------------------------------------------------------------------
 # Pod Security Scanning
@@ -110,11 +108,11 @@ def scan_images(namespace: str = "ALL") -> str:
     if isinstance(result, ToolError):
         return str(result)
 
-    default_trusted = "registry.redhat.io/,registry.access.redhat.com/,quay.io/,image-registry.openshift-image-registry.svc:"
+    default_trusted = (
+        "registry.redhat.io/,registry.access.redhat.com/,quay.io/,image-registry.openshift-image-registry.svc:"
+    )
     trusted_prefixes = [
-        p.strip() for p in
-        os.environ.get("PULSE_AGENT_TRUSTED_REGISTRIES", default_trusted).split(",")
-        if p.strip()
+        p.strip() for p in os.environ.get("PULSE_AGENT_TRUSTED_REGISTRIES", default_trusted).split(",") if p.strip()
     ]
 
     findings = []
@@ -192,8 +190,6 @@ def scan_rbac_risks() -> str:
         for rule in cr.rules or []:
             verbs = set(rule.verbs or [])
             resources = set(rule.resources or [])
-            api_groups = set(rule.api_groups or [])
-
             if "*" in verbs and "*" in resources:
                 findings.append(f"HIGH: ClusterRole/{name} has wildcard verbs AND resources (*/*)")
             elif "*" in verbs:
@@ -206,7 +202,9 @@ def scan_rbac_risks() -> str:
                 findings.append(f"HIGH: ClusterRole/{name} grants {bad_verbs} on {resources}")
 
             if resources & sensitive_resources and ("get" in verbs or "list" in verbs or "*" in verbs):
-                findings.append(f"MEDIUM: ClusterRole/{name} allows read on sensitive resources: {resources & sensitive_resources}")
+                findings.append(
+                    f"MEDIUM: ClusterRole/{name} allows read on sensitive resources: {resources & sensitive_resources}"
+                )
 
     if not findings:
         return "No significant RBAC risks found."
@@ -239,10 +237,7 @@ def list_service_account_secrets(namespace: str = "default") -> str:
         auto_mount = sa.automount_service_account_token
         auto_str = "default(true)" if auto_mount is None else str(auto_mount)
         secret_count = len(sa.secrets or [])
-        lines.append(
-            f"{sa.metadata.namespace}/{sa.metadata.name}  "
-            f"automountToken={auto_str}  secrets={secret_count}"
-        )
+        lines.append(f"{sa.metadata.namespace}/{sa.metadata.name}  automountToken={auto_str}  secrets={secret_count}")
     return "\n".join(lines) or "No service accounts found."
 
 
@@ -383,9 +378,7 @@ def scan_scc_usage(namespace: str = "ALL") -> str:
         scc_counts[scc] = scc_counts.get(scc, 0) + 1
 
         if scc in risky_sccs:
-            findings.append(
-                f"  {pod.metadata.namespace}/{pod.metadata.name} → SCC={scc}"
-            )
+            findings.append(f"  {pod.metadata.namespace}/{pod.metadata.name} → SCC={scc}")
 
     summary = "SCC usage summary:\n" + "\n".join(
         f"  {scc}: {count} pods" for scc, count in sorted(scc_counts.items(), key=lambda x: -x[1])
@@ -449,15 +442,19 @@ def scan_secrets(namespace: str = "ALL") -> str:
     findings = []
 
     # Old secrets (> 90 days)
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     old_secrets = []
     for s in secrets.items:
-        if s.type in ("kubernetes.io/service-account-token", "kubernetes.io/dockercfg", "kubernetes.io/dockerconfigjson"):
+        if s.type in (
+            "kubernetes.io/service-account-token",
+            "kubernetes.io/dockercfg",
+            "kubernetes.io/dockerconfigjson",
+        ):
             continue
         ts = s.metadata.creation_timestamp
         if ts.tzinfo is None:
-            ts = ts.replace(tzinfo=timezone.utc)
-        age_days = (now - ts.astimezone(timezone.utc)).days
+            ts = ts.replace(tzinfo=UTC)
+        age_days = (now - ts.astimezone(UTC)).days
         if age_days > 90:
             old_secrets.append(f"  {s.metadata.namespace}/{s.metadata.name} ({age_days} days old, type={s.type})")
 
@@ -470,12 +467,18 @@ def scan_secrets(namespace: str = "ALL") -> str:
     # Count unreferenced secrets (excluding system types)
     all_secret_keys = set()
     for s in secrets.items:
-        if s.type in ("kubernetes.io/service-account-token", "kubernetes.io/dockercfg", "kubernetes.io/dockerconfigjson"):
+        if s.type in (
+            "kubernetes.io/service-account-token",
+            "kubernetes.io/dockercfg",
+            "kubernetes.io/dockerconfigjson",
+        ):
             continue
         all_secret_keys.add(f"{s.metadata.namespace}/{s.metadata.name}")
     unreferenced = all_secret_keys - referenced_secrets
     if unreferenced:
-        findings.append(f"Potentially unused secrets ({len(unreferenced)}):\n  " + "\n  ".join(sorted(unreferenced)[:20]))
+        findings.append(
+            f"Potentially unused secrets ({len(unreferenced)}):\n  " + "\n  ".join(sorted(unreferenced)[:20])
+        )
 
     if not findings:
         return "No secret hygiene issues found."
@@ -513,7 +516,8 @@ def get_security_summary() -> str:
     if not isinstance(ns_list, ToolError) and not isinstance(netpols, ToolError):
         ns_with_policies = {np.metadata.namespace for np in netpols.items}
         user_ns = [
-            ns.metadata.name for ns in ns_list.items
+            ns.metadata.name
+            for ns in ns_list.items
             if not ns.metadata.name.startswith(("openshift-", "kube-", "default"))
         ]
         summary["user_namespaces"] = len(user_ns)
@@ -547,5 +551,6 @@ ALL_SECURITY_TOOLS = [
 
 # Register all security tools in the central registry (all read-only)
 from .tool_registry import register_tool
+
 for _tool in ALL_SECURITY_TOOLS:
     register_tool(_tool, is_write=False)

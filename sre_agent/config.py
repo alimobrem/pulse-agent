@@ -1,9 +1,11 @@
 """Startup configuration with Pydantic v2 Settings."""
 
 from __future__ import annotations
+
 import logging
 import os
-from pydantic import field_validator, SecretStr
+
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 logger = logging.getLogger("pulse_agent")
@@ -83,22 +85,25 @@ class PulseAgentSettings(BaseSettings):
 # Singleton
 _settings: PulseAgentSettings | None = None
 
+
 def get_settings() -> PulseAgentSettings:
     global _settings
     if _settings is None:
         _settings = PulseAgentSettings()
     return _settings
 
+
 def _reset_settings() -> None:
     """Reset the singleton — for testing only."""
     global _settings
     _settings = None
 
+
 def validate_config() -> None:
     """Validate config on startup. Raises SystemExit on error."""
     try:
         _reset_settings()
-        settings = get_settings()
+        get_settings()
 
         # Check AI backend (these are Claude SDK env vars, not PULSE_AGENT_ prefixed)
         has_key = bool(os.getenv("ANTHROPIC_API_KEY"))

@@ -1,8 +1,7 @@
 """Tests for sre_agent.errors — error classification."""
 
 import json
-import pytest
-from unittest.mock import MagicMock
+
 from kubernetes.client.rest import ApiException
 
 from sre_agent.errors import ToolError, classify_api_error, classify_exception

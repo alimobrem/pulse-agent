@@ -9,8 +9,9 @@ echo "Installing pre-commit hook..."
 
 cat > "$HOOK_DIR/pre-commit" << 'HOOK'
 #!/bin/bash
-# Pre-commit hook: pytest
 echo "Running pre-commit checks..."
+python3 -m ruff check sre_agent/ tests/ || exit 1
+python3 -m ruff format --check sre_agent/ tests/ || exit 1
 python3 -m pytest tests/ -q || exit 1
 echo "Pre-commit checks passed."
 HOOK

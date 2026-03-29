@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import dataclasses
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from kubernetes.client.rest import ApiException
 
@@ -24,9 +24,7 @@ class ToolError:
     status_code: int | None = None
     operation: str = ""
     suggestions: list[str] = dataclasses.field(default_factory=list)
-    timestamp: str = dataclasses.field(
-        default_factory=lambda: datetime.now(timezone.utc).isoformat()
-    )
+    timestamp: str = dataclasses.field(default_factory=lambda: datetime.now(UTC).isoformat())
 
     def __str__(self) -> str:
         """Backward compat — tools that return str(result) get the message."""
@@ -43,6 +41,7 @@ def classify_api_error(e: ApiException, operation: str = "") -> ToolError:
     body_msg = ""
     try:
         import json
+
         body = json.loads(e.body) if e.body else {}
         body_msg = body.get("message", "")
     except Exception:
@@ -51,9 +50,7 @@ def classify_api_error(e: ApiException, operation: str = "") -> ToolError:
     msg = body_msg or f"Error ({status}): {reason}"
 
     # Quota errors are 403 with specific message content
-    if status == 403 and any(
-        kw in msg.lower() for kw in ("quota", "exceeded", "limit")
-    ):
+    if status == 403 and any(kw in msg.lower() for kw in ("quota", "exceeded", "limit")):
         return ToolError(
             message=msg,
             category="quota",
@@ -141,10 +138,7 @@ def classify_exception(e: Exception, operation: str = "") -> ToolError:
     msg = f"{type(e).__name__}: {e}"
 
     # Network-level errors
-    if any(
-        kw in type(e).__name__.lower()
-        for kw in ("connection", "timeout", "url", "socket")
-    ):
+    if any(kw in type(e).__name__.lower() for kw in ("connection", "timeout", "url", "socket")):
         return ToolError(
             message=msg,
             category="network",

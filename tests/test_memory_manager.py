@@ -1,10 +1,10 @@
 """Tests for MemoryManager.store_incident and module-level singleton."""
 
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock
 
 import pytest
 
-from sre_agent.memory import get_manager, set_manager, MemoryManager
+from sre_agent.memory import MemoryManager, get_manager, set_manager
 
 
 class TestSingleton:

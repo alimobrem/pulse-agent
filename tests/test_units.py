@@ -1,12 +1,10 @@
 """Tests for Kubernetes resource unit parsing."""
 
-import pytest
-
 from sre_agent.units import (
-    parse_cpu_millicores,
-    parse_memory_bytes,
     format_cpu,
     format_memory,
+    parse_cpu_millicores,
+    parse_memory_bytes,
 )
 
 

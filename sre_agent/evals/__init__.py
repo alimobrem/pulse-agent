@@ -9,7 +9,7 @@ __all__ = [
     "DEFAULT_RUBRIC",
     "EvalRubric",
     "evaluate_suite",
-    "score_scenario",
     "load_suite",
     "render_weekly_digest",
+    "score_scenario",
 ]

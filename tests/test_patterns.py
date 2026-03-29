@@ -1,10 +1,9 @@
 """Tests for pattern recognition."""
 
-from datetime import datetime, timezone, timedelta
-
 import pytest
-from sre_agent.memory.store import IncidentStore
+
 from sre_agent.memory.patterns import detect_patterns
+from sre_agent.memory.store import IncidentStore
 
 
 @pytest.fixture
@@ -42,9 +41,10 @@ class TestDetectPatterns:
         for i in range(5):
             store.record_incident(
                 query=f"pods crashing attempt {i}",
-                tool_sequence=[], resolution="r",
+                tool_sequence=[],
+                resolution="r",
             )
-        p1 = detect_patterns(store)
+        detect_patterns(store)
         p2 = detect_patterns(store)
         # Second run should not create duplicates
         assert len(p2) == 0

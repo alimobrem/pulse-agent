@@ -6,30 +6,51 @@ Uses the shared agent loop from agent.py — no write tools, read-only.
 from __future__ import annotations
 
 from .agent import run_agent_streaming
-from .security_tools import ALL_SECURITY_TOOLS
-from .k8s_tools import ALL_TOOLS as SRE_TOOLS
 from .gitops_tools import GITOPS_TOOLS
-from .timeline_tools import TIMELINE_TOOLS
-from .predict_tools import PREDICT_TOOLS
 from .handoff_tools import request_sre_investigation
+from .k8s_tools import ALL_TOOLS as SRE_TOOLS
+from .predict_tools import PREDICT_TOOLS
+from .security_tools import ALL_SECURITY_TOOLS
+from .timeline_tools import TIMELINE_TOOLS
 
 # Combine SRE read tools with security tools so the agent can also
 # inspect pods/logs/events when investigating findings.
 _SRE_READ_TOOL_NAMES = {
-    "list_namespaces", "list_pods", "describe_pod", "get_pod_logs",
-    "list_nodes", "describe_node", "get_events", "list_deployments",
-    "describe_deployment", "get_services", "get_cluster_version",
-    "get_cluster_operators", "get_configmap",
-    "list_statefulsets", "list_daemonsets", "list_ingresses", "list_routes",
-    "list_hpas", "list_operator_subscriptions", "get_firing_alerts",
-    "describe_service", "get_endpoint_slices", "get_pod_disruption_budgets",
-    "list_limit_ranges", "get_tls_certificates", "get_pod_metrics",
-    "get_node_metrics", "get_prometheus_query",
+    "list_namespaces",
+    "list_pods",
+    "describe_pod",
+    "get_pod_logs",
+    "list_nodes",
+    "describe_node",
+    "get_events",
+    "list_deployments",
+    "describe_deployment",
+    "get_services",
+    "get_cluster_version",
+    "get_cluster_operators",
+    "get_configmap",
+    "list_statefulsets",
+    "list_daemonsets",
+    "list_ingresses",
+    "list_routes",
+    "list_hpas",
+    "list_operator_subscriptions",
+    "get_firing_alerts",
+    "describe_service",
+    "get_endpoint_slices",
+    "get_pod_disruption_budgets",
+    "list_limit_ranges",
+    "get_tls_certificates",
+    "get_pod_metrics",
+    "get_node_metrics",
+    "get_prometheus_query",
 }
 _READ_TOOLS = [t for t in SRE_TOOLS if t.name in _SRE_READ_TOOL_NAMES]
 
 # Add read-only pillar tools for security investigations
-ALL_TOOLS = ALL_SECURITY_TOOLS + _READ_TOOLS + GITOPS_TOOLS + TIMELINE_TOOLS + PREDICT_TOOLS + [request_sre_investigation]
+ALL_TOOLS = (
+    ALL_SECURITY_TOOLS + _READ_TOOLS + GITOPS_TOOLS + TIMELINE_TOOLS + PREDICT_TOOLS + [request_sre_investigation]
+)
 TOOL_DEFS = [t.to_dict() for t in ALL_TOOLS]
 TOOL_MAP = {t.name: t for t in ALL_TOOLS}
 

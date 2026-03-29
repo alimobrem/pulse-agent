@@ -15,7 +15,6 @@ from unittest.mock import MagicMock
 
 from ..agent import run_agent_streaming
 
-
 # ---------------------------------------------------------------------------
 # Fixture loading
 # ---------------------------------------------------------------------------
@@ -33,7 +32,7 @@ def load_fixture(name: str) -> dict:
     path = _FIXTURES_DIR / f"{name}.json"
     if not path.exists():
         raise FileNotFoundError(f"Fixture not found: {path}")
-    with open(path, "r", encoding="utf-8") as fh:
+    with open(path, encoding="utf-8") as fh:
         return json.load(fh)
 
 
@@ -126,15 +125,17 @@ class ReplayHarness:
         """Generate minimal tool definitions from recorded response keys."""
         defs = []
         for name in self.recorded_responses:
-            defs.append({
-                "name": name,
-                "description": f"Recorded stub for {name}",
-                "input_schema": {
-                    "type": "object",
-                    "properties": {},
-                    "required": [],
-                },
-            })
+            defs.append(
+                {
+                    "name": name,
+                    "description": f"Recorded stub for {name}",
+                    "input_schema": {
+                        "type": "object",
+                        "properties": {},
+                        "required": [],
+                    },
+                }
+            )
         return defs
 
 
@@ -167,39 +168,47 @@ def score_replay(result: dict, expected: dict) -> dict:
     # 1. Keyword mentions
     for keyword in expected.get("should_mention", []):
         found = keyword.lower() in response_lower
-        checks.append({
-            "check": f"mentions '{keyword}'",
-            "passed": found,
-            "weight": 1,
-        })
+        checks.append(
+            {
+                "check": f"mentions '{keyword}'",
+                "passed": found,
+                "weight": 1,
+            }
+        )
 
     # 2. Required tool usage
     for tool in expected.get("should_use_tools", []):
         found = tool in called_tools
-        checks.append({
-            "check": f"used tool '{tool}'",
-            "passed": found,
-            "weight": 1,
-        })
+        checks.append(
+            {
+                "check": f"used tool '{tool}'",
+                "passed": found,
+                "weight": 1,
+            }
+        )
 
     # 3. Forbidden tools
     for tool in expected.get("should_not_use_tools", []):
         found = tool in called_tools
-        checks.append({
-            "check": f"avoided tool '{tool}'",
-            "passed": not found,
-            "weight": 1,
-        })
+        checks.append(
+            {
+                "check": f"avoided tool '{tool}'",
+                "passed": not found,
+                "weight": 1,
+            }
+        )
 
     # 4. Tool call budget
     max_calls = expected.get("max_tool_calls")
     if max_calls is not None:
         within = len(called_tools) <= max_calls
-        checks.append({
-            "check": f"tool calls <= {max_calls} (actual: {len(called_tools)})",
-            "passed": within,
-            "weight": 1,
-        })
+        checks.append(
+            {
+                "check": f"tool calls <= {max_calls} (actual: {len(called_tools)})",
+                "passed": within,
+                "weight": 1,
+            }
+        )
 
     # Compute score
     if not checks:

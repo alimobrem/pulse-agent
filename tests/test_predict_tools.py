@@ -7,8 +7,8 @@ import pytest
 from kubernetes.client.rest import ApiException
 
 from sre_agent.predict_tools import (
-    forecast_quota_exhaustion,
     analyze_hpa_thrashing,
+    forecast_quota_exhaustion,
     suggest_remediation,
 )
 
@@ -86,9 +86,7 @@ class TestForecastQuotaExhaustion:
         assert "prometheus" in result
 
     def test_api_error(self, mock_predict):
-        mock_predict["core"].list_namespaced_resource_quota.side_effect = ApiException(
-            status=403, reason="Forbidden"
-        )
+        mock_predict["core"].list_namespaced_resource_quota.side_effect = ApiException(status=403, reason="Forbidden")
         result = forecast_quota_exhaustion.call({"namespace": "default"})
         assert "Error (403)" in result
 
@@ -108,7 +106,9 @@ class TestAnalyzeHpaThrashing:
                 current_metrics=[],
             ),
         )
-        mock_predict["auto"].list_horizontal_pod_autoscaler_for_all_namespaces.return_value = SimpleNamespace(items=[hpa])
+        mock_predict["auto"].list_horizontal_pod_autoscaler_for_all_namespaces.return_value = SimpleNamespace(
+            items=[hpa]
+        )
         result = analyze_hpa_thrashing.call({"namespace": "ALL"})
         assert "No HPA issues" in result
 
@@ -126,7 +126,9 @@ class TestAnalyzeHpaThrashing:
                 current_metrics=[],
             ),
         )
-        mock_predict["auto"].list_horizontal_pod_autoscaler_for_all_namespaces.return_value = SimpleNamespace(items=[hpa])
+        mock_predict["auto"].list_horizontal_pod_autoscaler_for_all_namespaces.return_value = SimpleNamespace(
+            items=[hpa]
+        )
         result = analyze_hpa_thrashing.call({"namespace": "ALL"})
         assert "Wide scaling range" in result
         assert "Suggested min-replicas" in result
@@ -142,16 +144,20 @@ class TestAnalyzeHpaThrashing:
             status=SimpleNamespace(
                 current_replicas=5,
                 conditions=[],
-                current_metrics=[SimpleNamespace(
-                    type="Resource",
-                    resource=SimpleNamespace(
-                        name="cpu",
-                        current=SimpleNamespace(average_utilization=90),
-                    ),
-                )],
+                current_metrics=[
+                    SimpleNamespace(
+                        type="Resource",
+                        resource=SimpleNamespace(
+                            name="cpu",
+                            current=SimpleNamespace(average_utilization=90),
+                        ),
+                    )
+                ],
             ),
         )
-        mock_predict["auto"].list_horizontal_pod_autoscaler_for_all_namespaces.return_value = SimpleNamespace(items=[hpa])
+        mock_predict["auto"].list_horizontal_pod_autoscaler_for_all_namespaces.return_value = SimpleNamespace(
+            items=[hpa]
+        )
         result = analyze_hpa_thrashing.call({"namespace": "ALL"})
         assert "max replicas" in result.lower()
         assert "increasing" in result.lower() or "increase" in result.lower()
@@ -191,9 +197,11 @@ class TestSuggestRemediation:
         assert "Available guides" in result
 
     def test_with_context(self):
-        result = suggest_remediation.call({
-            "error_type": "OOMKilled",
-            "namespace": "prod",
-            "resource_name": "web-1",
-        })
+        result = suggest_remediation.call(
+            {
+                "error_type": "OOMKilled",
+                "namespace": "prod",
+                "resource_name": "web-1",
+            }
+        )
         assert "prod/web-1" in result

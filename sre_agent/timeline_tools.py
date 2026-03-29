@@ -8,9 +8,9 @@ from __future__ import annotations
 
 import json
 import os
-import urllib.request
 import urllib.error
-from datetime import datetime, timezone, timedelta
+import urllib.request
+from datetime import UTC, datetime, timedelta
 
 from anthropic import beta_tool
 from kubernetes.client.rest import ApiException
@@ -34,7 +34,7 @@ def correlate_incident(
         resource_name: Optional resource name to focus on.
     """
     minutes_back = min(max(1, minutes_back), 120)
-    cutoff = datetime.now(timezone.utc) - timedelta(minutes=minutes_back)
+    cutoff = datetime.now(UTC) - timedelta(minutes=minutes_back)
     timeline: list[dict] = []
 
     core = get_core_client()
@@ -55,16 +55,18 @@ def correlate_incident(
             if ts is None:
                 continue
             if ts.tzinfo is None:
-                ts = ts.replace(tzinfo=timezone.utc)
+                ts = ts.replace(tzinfo=UTC)
             if ts < cutoff:
                 continue
-            timeline.append({
-                "time": ts.isoformat(),
-                "source": "k8s-event",
-                "severity": "warning" if e.type == "Warning" else "info",
-                "summary": f"[{e.type}] {e.involved_object.kind}/{e.involved_object.name}: {e.reason} — {e.message}",
-                "namespace": e.involved_object.namespace or "",
-            })
+            timeline.append(
+                {
+                    "time": ts.isoformat(),
+                    "source": "k8s-event",
+                    "severity": "warning" if e.type == "Warning" else "info",
+                    "summary": f"[{e.type}] {e.involved_object.kind}/{e.involved_object.name}: {e.reason} — {e.message}",
+                    "namespace": e.involved_object.namespace or "",
+                }
+            )
 
     # 2. Deployment rollouts (probable cause)
     if namespace.upper() == "ALL":
@@ -79,18 +81,20 @@ def correlate_incident(
                     continue
                 ts = cond.last_transition_time
                 if ts.tzinfo is None:
-                    ts = ts.replace(tzinfo=timezone.utc)
+                    ts = ts.replace(tzinfo=UTC)
                 if ts < cutoff:
                     continue
                 if cond.type in ("Progressing", "Available"):
-                    timeline.append({
-                        "time": ts.isoformat(),
-                        "source": "deployment",
-                        "severity": "change",
-                        "summary": f"Deployment {dep.metadata.namespace}/{dep.metadata.name}: "
-                                   f"{cond.type}={cond.status} — {cond.message}",
-                        "namespace": dep.metadata.namespace,
-                    })
+                    timeline.append(
+                        {
+                            "time": ts.isoformat(),
+                            "source": "deployment",
+                            "severity": "change",
+                            "summary": f"Deployment {dep.metadata.namespace}/{dep.metadata.name}: "
+                            f"{cond.type}={cond.status} — {cond.message}",
+                            "namespace": dep.metadata.namespace,
+                        }
+                    )
 
     # 3. ReplicaSet creation (tracks image changes)
     if namespace.upper() == "ALL":
@@ -104,7 +108,7 @@ def correlate_incident(
             if ts is None:
                 continue
             if ts.tzinfo is None:
-                ts = ts.replace(tzinfo=timezone.utc)
+                ts = ts.replace(tzinfo=UTC)
             if ts < cutoff:
                 continue
             images = [c.image for c in (rs.spec.template.spec.containers or [])]
@@ -113,14 +117,15 @@ def correlate_incident(
                 if ref.kind == "Deployment":
                     owner = ref.name
             if owner:
-                timeline.append({
-                    "time": ts.isoformat(),
-                    "source": "rollout",
-                    "severity": "change",
-                    "summary": f"New ReplicaSet for {rs.metadata.namespace}/{owner}: "
-                               f"images={', '.join(images)}",
-                    "namespace": rs.metadata.namespace,
-                })
+                timeline.append(
+                    {
+                        "time": ts.isoformat(),
+                        "source": "rollout",
+                        "severity": "change",
+                        "summary": f"New ReplicaSet for {rs.metadata.namespace}/{owner}: images={', '.join(images)}",
+                        "namespace": rs.metadata.namespace,
+                    }
+                )
 
     # 4. Prometheus alerts (symptoms — via configurable Alertmanager)
     alertmanager_url = os.environ.get("ALERTMANAGER_URL", "")
@@ -139,13 +144,16 @@ def correlate_incident(
             alert_svc = os.environ.get("ALERTMANAGER_SVC", "alertmanager-main:web")
             alert_ns = os.environ.get("ALERTMANAGER_NS", "openshift-monitoring")
             alert_result = core.connect_get_namespaced_service_proxy_with_path(
-                alert_svc, alert_ns, path="api/v2/alerts", _preload_content=False,
+                alert_svc,
+                alert_ns,
+                path="api/v2/alerts",
+                _preload_content=False,
             )
             alerts = json.loads(alert_result.data)
         except Exception:
             alerts = []
 
-    for a in (alerts or []):
+    for a in alerts or []:
         if a.get("status", {}).get("state") != "active":
             continue
         starts = a.get("startsAt", "")
@@ -155,23 +163,23 @@ def correlate_incident(
                 if ts >= cutoff:
                     labels = a.get("labels", {})
                     annotations = a.get("annotations", {})
-                    timeline.append({
-                        "time": ts.isoformat(),
-                        "source": "alert",
-                        "severity": labels.get("severity", "warning"),
-                        "summary": f"[ALERT] {labels.get('alertname', '?')}: "
-                                   f"{annotations.get('summary', annotations.get('message', ''))}",
-                        "namespace": labels.get("namespace", "cluster"),
-                    })
+                    timeline.append(
+                        {
+                            "time": ts.isoformat(),
+                            "source": "alert",
+                            "severity": labels.get("severity", "warning"),
+                            "summary": f"[ALERT] {labels.get('alertname', '?')}: "
+                            f"{annotations.get('summary', annotations.get('message', ''))}",
+                            "namespace": labels.get("namespace", "cluster"),
+                        }
+                    )
             except (ValueError, TypeError):
                 pass
 
     # 5. ArgoCD sync events (if available)
     try:
         if namespace.upper() == "ALL":
-            argo_apps = get_custom_client().list_cluster_custom_object(
-                "argoproj.io", "v1alpha1", "applications"
-            )
+            argo_apps = get_custom_client().list_cluster_custom_object("argoproj.io", "v1alpha1", "applications")
         else:
             argo_apps = get_custom_client().list_namespaced_custom_object(
                 "argoproj.io", "v1alpha1", namespace, "applications"
@@ -183,14 +191,16 @@ def correlate_incident(
                 try:
                     ts = datetime.fromisoformat(started.replace("Z", "+00:00"))
                     if ts >= cutoff:
-                        timeline.append({
-                            "time": ts.isoformat(),
-                            "source": "argocd",
-                            "severity": "change",
-                            "summary": f"ArgoCD sync: {app['metadata']['name']} — "
-                                       f"phase={op.get('phase', '?')} {op.get('message', '')}",
-                            "namespace": app["metadata"].get("namespace", ""),
-                        })
+                        timeline.append(
+                            {
+                                "time": ts.isoformat(),
+                                "source": "argocd",
+                                "severity": "change",
+                                "summary": f"ArgoCD sync: {app['metadata']['name']} — "
+                                f"phase={op.get('phase', '?')} {op.get('message', '')}",
+                                "namespace": app["metadata"].get("namespace", ""),
+                            }
+                        )
                 except (ValueError, TypeError):
                     pass
     except (ApiException, Exception):
@@ -210,8 +220,7 @@ def correlate_incident(
     for alert in alerts_and_warnings[:5]:
         alert_time = datetime.fromisoformat(alert["time"])
         preceding_changes = [
-            c for c in changes
-            if 0 < (alert_time - datetime.fromisoformat(c["time"])).total_seconds() <= 600
+            c for c in changes if 0 < (alert_time - datetime.fromisoformat(c["time"])).total_seconds() <= 600
         ]
         if preceding_changes:
             cause = preceding_changes[-1]  # Most recent change before the alert
@@ -230,7 +239,7 @@ def correlate_incident(
         lines.append(f"  {ts_short}  {icon}  [{src}] {e['summary']}")
 
     if correlation_notes:
-        lines.append(f"\n--- Correlations ---")
+        lines.append("\n--- Correlations ---")
         for note in correlation_notes:
             lines.append(note)
 
@@ -241,5 +250,6 @@ TIMELINE_TOOLS = [correlate_incident]
 
 # Register timeline tools in the central registry (read-only)
 from .tool_registry import register_tool
+
 for _tool in TIMELINE_TOOLS:
     register_tool(_tool, is_write=False)

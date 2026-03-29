@@ -11,7 +11,7 @@ import json
 from anthropic import beta_tool
 from kubernetes.client.rest import ApiException
 
-from .k8s_client import get_custom_client, get_core_client, safe
+from .k8s_client import get_core_client, get_custom_client
 
 _ARGO_GROUP = "argoproj.io"
 _ARGO_VERSION = "v1alpha1"
@@ -23,9 +23,7 @@ def check_argo_auto_sync(namespace: str, kind: str = "", name: str = "") -> str 
     Returns a warning string if auto-sync is on, None if safe to edit.
     """
     try:
-        apps = get_custom_client().list_cluster_custom_object(
-            _ARGO_GROUP, _ARGO_VERSION, "applications"
-        )
+        apps = get_custom_client().list_cluster_custom_object(_ARGO_GROUP, _ARGO_VERSION, "applications")
     except ApiException:
         return None  # ArgoCD not installed, safe to proceed
 
@@ -45,8 +43,7 @@ def check_argo_auto_sync(namespace: str, kind: str = "", name: str = "") -> str 
             prune = automated.get("prune", False)
 
             warning = (
-                f"WARNING: Namespace '{namespace}' is managed by ArgoCD application "
-                f"'{app_name}' with automated sync"
+                f"WARNING: Namespace '{namespace}' is managed by ArgoCD application '{app_name}' with automated sync"
             )
             if self_heal:
                 warning += " + selfHeal (changes WILL be reverted)"
@@ -70,9 +67,7 @@ def get_argo_applications(namespace: str = "ALL") -> str:
     """
     try:
         if namespace.upper() == "ALL":
-            result = get_custom_client().list_cluster_custom_object(
-                _ARGO_GROUP, _ARGO_VERSION, "applications"
-            )
+            result = get_custom_client().list_cluster_custom_object(_ARGO_GROUP, _ARGO_VERSION, "applications")
         else:
             result = get_custom_client().list_namespaced_custom_object(
                 _ARGO_GROUP, _ARGO_VERSION, namespace, "applications"
@@ -151,10 +146,7 @@ def get_argo_app_detail(name: str, namespace: str = "openshift-gitops") -> str:
             "namespace": spec.get("destination", {}).get("namespace", ""),
         },
         "revision": sync.get("revision", ""),
-        "conditions": [
-            {"type": c.get("type"), "message": c.get("message", "")}
-            for c in status.get("conditions", [])
-        ],
+        "conditions": [{"type": c.get("type"), "message": c.get("message", "")} for c in status.get("conditions", [])],
         "last_sync": {
             "phase": operation.get("phase", ""),
             "message": operation.get("message", ""),
@@ -169,13 +161,15 @@ def get_argo_app_detail(name: str, namespace: str = "openshift-gitops") -> str:
         res_sync = r.get("status", "Unknown")
         res_health = r.get("health", {}).get("status", "Unknown")
         drift_marker = " [DRIFT]" if res_sync == "OutOfSync" else ""
-        resources.append({
-            "kind": r.get("kind"),
-            "name": r.get("name"),
-            "namespace": r.get("namespace", ""),
-            "sync": res_sync + drift_marker,
-            "health": res_health,
-        })
+        resources.append(
+            {
+                "kind": r.get("kind"),
+                "name": r.get("name"),
+                "namespace": r.get("namespace", ""),
+                "sync": res_sync + drift_marker,
+                "health": res_health,
+            }
+        )
     info["resources"] = resources
 
     return json.dumps(info, indent=2, default=str)
@@ -190,9 +184,7 @@ def detect_gitops_drift(namespace: str = "ALL") -> str:
     """
     try:
         if namespace.upper() == "ALL":
-            result = get_custom_client().list_cluster_custom_object(
-                _ARGO_GROUP, _ARGO_VERSION, "applications"
-            )
+            result = get_custom_client().list_cluster_custom_object(_ARGO_GROUP, _ARGO_VERSION, "applications")
         else:
             result = get_custom_client().list_namespaced_custom_object(
                 _ARGO_GROUP, _ARGO_VERSION, namespace, "applications"
@@ -218,16 +210,13 @@ def detect_gitops_drift(namespace: str = "ALL") -> str:
         out_of_sync_resources = []
         for r in status.get("resources", []):
             if r.get("status") == "OutOfSync":
-                out_of_sync_resources.append(
-                    f"    {r.get('kind')}/{r.get('name')} in {r.get('namespace', 'cluster')}"
-                )
+                out_of_sync_resources.append(f"    {r.get('kind')}/{r.get('name')} in {r.get('namespace', 'cluster')}")
 
         drifted.append(
             f"APP: {app_name}\n"
             f"  Repo: {source.get('repoURL', '?')}\n"
             f"  Path: {source.get('path', '?')}\n"
-            f"  Drifted resources ({len(out_of_sync_resources)}):\n"
-            + "\n".join(out_of_sync_resources[:20])
+            f"  Drifted resources ({len(out_of_sync_resources)}):\n" + "\n".join(out_of_sync_resources[:20])
         )
 
     if not drifted:
@@ -272,8 +261,7 @@ def get_argo_sync_diff(name: str, namespace: str = "openshift-gitops") -> str:
             diffs.append(f"--- {kind}/{rname} (namespace: {rns})\n{diff_text}")
         else:
             diffs.append(
-                f"--- {kind}/{rname} (namespace: {rns})\n"
-                f"  Status: OutOfSync (diff details require ArgoCD server API)"
+                f"--- {kind}/{rname} (namespace: {rns})\n  Status: OutOfSync (diff details require ArgoCD server API)"
             )
 
     if not diffs:
@@ -295,7 +283,7 @@ def install_gitops_operator() -> str:
     ArgoCD instance and AppProject.
     """
     custom = get_custom_client()
-    core = get_core_client()
+    get_core_client()
 
     # Check if already installed
     try:
@@ -316,7 +304,9 @@ def install_gitops_operator() -> str:
     except ApiException as e:
         if e.status != 404:
             # API group exists but no resources — ArgoCD is installed
-            return "ArgoCD API (argoproj.io) is already available on this cluster. The operator appears to be installed."
+            return (
+                "ArgoCD API (argoproj.io) is already available on this cluster. The operator appears to be installed."
+            )
     except Exception:
         pass
 
@@ -339,7 +329,10 @@ def install_gitops_operator() -> str:
 
     try:
         custom.create_namespaced_custom_object(
-            "operators.coreos.com", "v1alpha1", "openshift-operators", "subscriptions",
+            "operators.coreos.com",
+            "v1alpha1",
+            "openshift-operators",
+            "subscriptions",
             body=subscription,
         )
     except ApiException as e:
@@ -424,7 +417,10 @@ def create_argo_application(
 
     try:
         custom.create_namespaced_custom_object(
-            _ARGO_GROUP, _ARGO_VERSION, "openshift-gitops", "applications",
+            _ARGO_GROUP,
+            _ARGO_VERSION,
+            "openshift-gitops",
+            "applications",
             body=application,
         )
     except ApiException as e:
@@ -432,7 +428,9 @@ def create_argo_application(
             return f"Application '{name}' already exists in openshift-gitops namespace."
         return f"Error creating Application: {e.reason} (HTTP {e.status})"
 
-    sync_info = "Auto-sync enabled (prune + self-heal)" if auto_sync else "Manual sync — you'll need to trigger syncs manually"
+    sync_info = (
+        "Auto-sync enabled (prune + self-heal)" if auto_sync else "Manual sync — you'll need to trigger syncs manually"
+    )
 
     return (
         f"ArgoCD Application '{name}' created successfully.\n\n"
@@ -457,6 +455,7 @@ GITOPS_TOOLS = [
 
 # Register gitops tools in the central registry
 from .tool_registry import register_tool
+
 _GITOPS_WRITE_TOOLS = {"install_gitops_operator", "create_argo_application"}
 for _tool in GITOPS_TOOLS:
     register_tool(_tool, is_write=(_tool.name in _GITOPS_WRITE_TOOLS))

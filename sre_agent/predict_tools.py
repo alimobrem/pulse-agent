@@ -8,17 +8,15 @@ from __future__ import annotations
 
 import json
 import os
-import urllib.request
 import urllib.error
 import urllib.parse
-from datetime import datetime, timezone
+import urllib.request
 
 from anthropic import beta_tool
-from kubernetes.client.rest import ApiException
 
 from .errors import ToolError
-from .k8s_client import get_autoscaling_client, get_core_client, get_custom_client, safe
-from .units import parse_cpu_millicores, parse_memory_bytes, format_cpu, format_memory
+from .k8s_client import get_autoscaling_client, get_core_client, safe
+from .units import parse_cpu_millicores, parse_memory_bytes
 
 
 def _query_prometheus_trend(query: str, hours: int = 24) -> float | None:
@@ -35,8 +33,10 @@ def _query_prometheus_trend(query: str, hours: int = 24) -> float | None:
             prom_query = f"deriv({query}[{hours}h])"
             path = f"api/v1/query?{urllib.parse.urlencode({'query': prom_query})}"
             result = core.connect_get_namespaced_service_proxy_with_path(
-                "thanos-querier:web", "openshift-monitoring",
-                path=path, _preload_content=False,
+                "thanos-querier:web",
+                "openshift-monitoring",
+                path=path,
+                _preload_content=False,
             )
             data = json.loads(result.data)
             if data.get("status") == "success":
@@ -99,16 +99,20 @@ def forecast_quota_exhaustion(namespace: str) -> str:
             if resource in ("cpu", "requests.cpu", "limits.cpu"):
                 hard_n = parse_cpu_millicores(hard_val)
                 used_n = parse_cpu_millicores(used_val)
-                unit = "m"
             elif resource in ("memory", "requests.memory", "limits.memory"):
                 hard_n = parse_memory_bytes(hard_val)
                 used_n = parse_memory_bytes(used_val)
-                unit = "bytes"
-            elif resource in ("pods", "count/pods", "services", "configmaps", "secrets",
-                              "persistentvolumeclaims", "replicationcontrollers"):
+            elif resource in (
+                "pods",
+                "count/pods",
+                "services",
+                "configmaps",
+                "secrets",
+                "persistentvolumeclaims",
+                "replicationcontrollers",
+            ):
                 hard_n = int(hard_val) if hard_val.isdigit() else 0
                 used_n = int(used_val) if used_val.isdigit() else 0
-                unit = "count"
             else:
                 continue
 
@@ -151,9 +155,7 @@ def forecast_quota_exhaustion(namespace: str) -> str:
             elif usage_pct >= 60:
                 severity = "WATCH"
 
-            forecast_line = (
-                f"[{severity}] {resource}: {used_val}/{hard_val} ({usage_pct:.0f}%)"
-            )
+            forecast_line = f"[{severity}] {resource}: {used_val}/{hard_val} ({usage_pct:.0f}%)"
             if hours_until_limit is not None:
                 if hours_until_limit < 1:
                     forecast_line += f"  EXHAUSTION IN ~{int(hours_until_limit * 60)}min ({trend_source})"
@@ -266,7 +268,7 @@ def suggest_remediation(error_type: str, namespace: str = "", resource_name: str
                 "4. Check if image exists in the registry",
             ],
             "heal": "If the issue is an expired registry secret, create a new one with: "
-                    "`oc create secret docker-registry <name> --docker-server=<registry> --docker-username=<user> --docker-password=<pass>`",
+            "`oc create secret docker-registry <name> --docker-server=<registry> --docker-username=<user> --docker-password=<pass>`",
         },
         "CrashLoopBackOff": {
             "cause": "Container starts and immediately crashes, restarting in a backoff loop.",
@@ -287,7 +289,7 @@ def suggest_remediation(error_type: str, namespace: str = "", resource_name: str
                 "3. Check for memory leaks: compare usage over time with `get_prometheus_query`",
             ],
             "heal": "Increase the memory limit. Recommended: set limit to 2x the observed peak usage. "
-                    "Use `scale_deployment` if needed to reduce per-pod load.",
+            "Use `scale_deployment` if needed to reduce per-pod load.",
         },
         "Pending": {
             "cause": "Pod cannot be scheduled. Common causes: insufficient resources, node taints/affinity, PVC not bound.",
@@ -299,7 +301,7 @@ def suggest_remediation(error_type: str, namespace: str = "", resource_name: str
                 "5. Check quotas: `forecast_quota_exhaustion` for limit hits",
             ],
             "heal": "If resource-constrained: scale up nodes or reduce resource requests. "
-                    "If taint-blocked: add tolerations to the pod spec.",
+            "If taint-blocked: add tolerations to the pod spec.",
         },
         "NodeNotReady": {
             "cause": "A node is reporting NotReady status. The kubelet may be unresponsive, or the node may have disk/memory pressure.",
@@ -310,7 +312,7 @@ def suggest_remediation(error_type: str, namespace: str = "", resource_name: str
                 "4. Check affected pods: `list_pods` with field_selector for the node",
             ],
             "heal": "If DiskPressure: clean up unused images/logs. "
-                    "If unresponsive: cordon the node and drain workloads to healthy nodes.",
+            "If unresponsive: cordon the node and drain workloads to healthy nodes.",
         },
         "ErrImagePull": {
             "cause": "Initial image pull failed. Same root causes as ImagePullBackOff but on first attempt.",
@@ -342,7 +344,7 @@ def suggest_remediation(error_type: str, namespace: str = "", resource_name: str
     lines = [
         f"Remediation for: {error_key}{context}",
         f"\nCause: {matched['cause']}",
-        f"\nDiagnostic Steps:",
+        "\nDiagnostic Steps:",
     ]
     for step in matched["steps"]:
         lines.append(f"  {step}")
@@ -355,5 +357,6 @@ PREDICT_TOOLS = [forecast_quota_exhaustion, analyze_hpa_thrashing, suggest_remed
 
 # Register predict tools in the central registry (all read-only)
 from .tool_registry import register_tool
+
 for _tool in PREDICT_TOOLS:
     register_tool(_tool, is_write=False)

@@ -8,15 +8,15 @@ from __future__ import annotations
 
 import json
 import re
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from anthropic import beta_tool
 from kubernetes import client
 from kubernetes.client.rest import ApiException
 
 # RFC 1123 name validation for K8s resources
-_K8S_NAME_RE = re.compile(r'^[a-z0-9]([a-z0-9\-\.]{0,251}[a-z0-9])?$')
-_K8S_NAMESPACE_RE = re.compile(r'^[a-z0-9]([a-z0-9\-]{0,61}[a-z0-9])?$')
+_K8S_NAME_RE = re.compile(r"^[a-z0-9]([a-z0-9\-\.]{0,251}[a-z0-9])?$")
+_K8S_NAMESPACE_RE = re.compile(r"^[a-z0-9]([a-z0-9\-]{0,61}[a-z0-9])?$")
 
 
 def _validate_k8s_name(value: str, field: str = "name") -> str | None:
@@ -40,6 +40,7 @@ def _validate_k8s_namespace(value: str) -> str | None:
         return f"Error: namespace '{value}' is not a valid Kubernetes namespace name."
     return None
 
+
 from .errors import ToolError
 from .k8s_client import (
     age,
@@ -59,9 +60,15 @@ _METRICS_VERSION = "v1beta1"
 
 # Write tools that require user confirmation before execution
 WRITE_TOOLS = {
-    "scale_deployment", "restart_deployment", "cordon_node", "uncordon_node",
-    "delete_pod", "apply_yaml", "create_network_policy",
-    "rollback_deployment", "drain_node",
+    "scale_deployment",
+    "restart_deployment",
+    "cordon_node",
+    "uncordon_node",
+    "delete_pod",
+    "apply_yaml",
+    "create_network_policy",
+    "rollback_deployment",
+    "drain_node",
 }
 
 MAX_TAIL_LINES = 1000
@@ -121,31 +128,37 @@ def list_pods(namespace: str = "default", label_selector: str = "", field_select
             f"{ns}/{pod.metadata.name}  Status={pod.status.phase}  "
             f"Restarts={restarts}  Age={age(pod.metadata.creation_timestamp)}"
         )
-        rows.append({
-            "namespace": ns,
-            "name": pod.metadata.name,
-            "status": pod.status.phase or "Unknown",
-            "restarts": restarts,
-            "age": age(pod.metadata.creation_timestamp),
-            "node": pod.spec.node_name or "",
-        })
+        rows.append(
+            {
+                "namespace": ns,
+                "name": pod.metadata.name,
+                "status": pod.status.phase or "Unknown",
+                "restarts": restarts,
+                "age": age(pod.metadata.creation_timestamp),
+                "node": pod.spec.node_name or "",
+            }
+        )
     total = len(result.items)
     if total > MAX_RESULTS:
         lines.append(f"... and {total - MAX_RESULTS} more pods (truncated)")
     text = "\n".join(lines) or "No pods found."
-    component = {
-        "kind": "data_table",
-        "title": f"Pods ({len(rows)})",
-        "columns": [
-            {"id": "namespace", "header": "Namespace"},
-            {"id": "name", "header": "Name"},
-            {"id": "status", "header": "Status"},
-            {"id": "restarts", "header": "Restarts"},
-            {"id": "age", "header": "Age"},
-            {"id": "node", "header": "Node"},
-        ],
-        "rows": rows,
-    } if rows else None
+    component = (
+        {
+            "kind": "data_table",
+            "title": f"Pods ({len(rows)})",
+            "columns": [
+                {"id": "namespace", "header": "Namespace"},
+                {"id": "name", "header": "Name"},
+                {"id": "status", "header": "Status"},
+                {"id": "restarts", "header": "Restarts"},
+                {"id": "age", "header": "Age"},
+                {"id": "node", "header": "Node"},
+            ],
+            "rows": rows,
+        }
+        if rows
+        else None
+    )
     return (text, component)
 
 
@@ -176,12 +189,14 @@ def describe_pod(namespace: str, pod_name: str) -> str:
     }
 
     for cond in pod.status.conditions or []:
-        info["conditions"].append({
-            "type": cond.type,
-            "status": cond.status,
-            "reason": cond.reason,
-            "message": cond.message,
-        })
+        info["conditions"].append(
+            {
+                "type": cond.type,
+                "status": cond.status,
+                "reason": cond.reason,
+                "message": cond.message,
+            }
+        )
 
     for cs in pod.status.container_statuses or []:
         state = "unknown"
@@ -194,30 +209,38 @@ def describe_pod(namespace: str, pod_name: str) -> str:
         elif cs.state.terminated:
             state = "terminated"
             reason = cs.state.terminated.reason or ""
-        info["containers"].append({
-            "name": cs.name,
-            "image": cs.image,
-            "ready": cs.ready,
-            "restarts": cs.restart_count,
-            "state": state,
-            "reason": reason,
-        })
+        info["containers"].append(
+            {
+                "name": cs.name,
+                "image": cs.image,
+                "ready": cs.ready,
+                "restarts": cs.restart_count,
+                "state": state,
+                "reason": reason,
+            }
+        )
 
-    events = safe(lambda: core.list_namespaced_event(
-        namespace,
-        field_selector=f"involvedObject.name={pod_name},involvedObject.kind=Pod",
-    ))
+    events = safe(
+        lambda: core.list_namespaced_event(
+            namespace,
+            field_selector=f"involvedObject.name={pod_name},involvedObject.kind=Pod",
+        )
+    )
     if not isinstance(events, ToolError):
         info["recent_events"] = [
             {"type": e.type, "reason": e.reason, "message": e.message, "age": age(e.last_timestamp)}
-            for e in sorted(events.items, key=lambda e: e.last_timestamp or datetime.min.replace(tzinfo=timezone.utc), reverse=True)[:10]
+            for e in sorted(
+                events.items, key=lambda e: e.last_timestamp or datetime.min.replace(tzinfo=UTC), reverse=True
+            )[:10]
         ]
 
     return json.dumps(info, indent=2, default=str)
 
 
 @beta_tool
-def get_pod_logs(namespace: str, pod_name: str, container: str = "", tail_lines: int = 100, previous: bool = False) -> str:
+def get_pod_logs(
+    namespace: str, pod_name: str, container: str = "", tail_lines: int = 100, previous: bool = False
+) -> str:
     """Get logs from a pod container.
 
     Args:
@@ -259,8 +282,8 @@ def list_nodes() -> str:
         alloc = node.status.allocatable or {}
         lines.append(
             f"{node.metadata.name}  Roles={','.join(roles)}  Ready={ready}  "
-            f"CPU(cap/alloc)={cap.get('cpu','?')}/{alloc.get('cpu','?')}  "
-            f"Mem(cap/alloc)={cap.get('memory','?')}/{alloc.get('memory','?')}  "
+            f"CPU(cap/alloc)={cap.get('cpu', '?')}/{alloc.get('cpu', '?')}  "
+            f"Mem(cap/alloc)={cap.get('memory', '?')}/{alloc.get('memory', '?')}  "
             f"Version={node.status.node_info.kubelet_version}  "
             f"Age={age(node.metadata.creation_timestamp)}"
         )
@@ -288,10 +311,7 @@ def describe_node(node_name: str) -> str:
             {"type": c.type, "status": c.status, "reason": c.reason, "message": c.message}
             for c in node.status.conditions or []
         ],
-        "taints": [
-            {"key": t.key, "value": t.value, "effect": t.effect}
-            for t in node.spec.taints or []
-        ],
+        "taints": [{"key": t.key, "value": t.value, "effect": t.effect} for t in node.spec.taints or []],
         "capacity": dict(node.status.capacity or {}),
         "allocatable": dict(node.status.allocatable or {}),
         "node_info": {
@@ -307,7 +327,9 @@ def describe_node(node_name: str) -> str:
 
 
 @beta_tool
-def get_events(namespace: str = "default", resource_kind: str = "", resource_name: str = "", event_type: str = "") -> str:
+def get_events(
+    namespace: str = "default", resource_kind: str = "", resource_name: str = "", event_type: str = ""
+) -> str:
     """Get cluster events, optionally filtered by resource.
 
     Args:
@@ -339,7 +361,7 @@ def get_events(namespace: str = "default", resource_kind: str = "", resource_nam
 
     events = sorted(
         result.items,
-        key=lambda e: e.last_timestamp or datetime.min.replace(tzinfo=timezone.utc),
+        key=lambda e: e.last_timestamp or datetime.min.replace(tzinfo=UTC),
         reverse=True,
     )[:50]
 
@@ -351,26 +373,32 @@ def get_events(namespace: str = "default", resource_kind: str = "", resource_nam
             f"{e.involved_object.kind}/{e.involved_object.name}  "
             f"{e.message}"
         )
-        rows.append({
-            "age": age(e.last_timestamp) + " ago",
-            "type": e.type or "Normal",
-            "reason": e.reason or "",
-            "resource": f"{e.involved_object.kind}/{e.involved_object.name}",
-            "message": (e.message or "")[:120],
-        })
+        rows.append(
+            {
+                "age": age(e.last_timestamp) + " ago",
+                "type": e.type or "Normal",
+                "reason": e.reason or "",
+                "resource": f"{e.involved_object.kind}/{e.involved_object.name}",
+                "message": (e.message or "")[:120],
+            }
+        )
     text = "\n".join(lines) or "No events found."
-    component = {
-        "kind": "data_table",
-        "title": f"Events ({len(rows)})",
-        "columns": [
-            {"id": "age", "header": "Age"},
-            {"id": "type", "header": "Type"},
-            {"id": "reason", "header": "Reason"},
-            {"id": "resource", "header": "Resource"},
-            {"id": "message", "header": "Message"},
-        ],
-        "rows": rows,
-    } if rows else None
+    component = (
+        {
+            "kind": "data_table",
+            "title": f"Events ({len(rows)})",
+            "columns": [
+                {"id": "age", "header": "Age"},
+                {"id": "type", "header": "Type"},
+                {"id": "reason", "header": "Reason"},
+                {"id": "resource", "header": "Resource"},
+                {"id": "message", "header": "Message"},
+            ],
+            "rows": rows,
+        }
+        if rows
+        else None
+    )
     return (text, component)
 
 
@@ -402,29 +430,37 @@ def list_deployments(namespace: str = "default") -> str:
             f"Available={s.available_replicas or 0}  "
             f"Age={age(dep.metadata.creation_timestamp)}"
         )
-        rows.append({
-            "namespace": dep.metadata.namespace,
-            "name": dep.metadata.name,
-            "ready": f"{ready}/{desired}",
-            "status": "Healthy" if ready == desired and desired > 0 else ("Degraded" if ready > 0 else "Unavailable"),
-            "updated": s.updated_replicas or 0,
-            "available": s.available_replicas or 0,
-            "age": age(dep.metadata.creation_timestamp),
-        })
+        rows.append(
+            {
+                "namespace": dep.metadata.namespace,
+                "name": dep.metadata.name,
+                "ready": f"{ready}/{desired}",
+                "status": "Healthy"
+                if ready == desired and desired > 0
+                else ("Degraded" if ready > 0 else "Unavailable"),
+                "updated": s.updated_replicas or 0,
+                "available": s.available_replicas or 0,
+                "age": age(dep.metadata.creation_timestamp),
+            }
+        )
     text = "\n".join(lines) or "No deployments found."
-    component = {
-        "kind": "data_table",
-        "title": f"Deployments ({len(rows)})",
-        "columns": [
-            {"id": "namespace", "header": "Namespace"},
-            {"id": "name", "header": "Name"},
-            {"id": "ready", "header": "Ready"},
-            {"id": "status", "header": "Status"},
-            {"id": "updated", "header": "Updated"},
-            {"id": "age", "header": "Age"},
-        ],
-        "rows": rows,
-    } if rows else None
+    component = (
+        {
+            "kind": "data_table",
+            "title": f"Deployments ({len(rows)})",
+            "columns": [
+                {"id": "namespace", "header": "Namespace"},
+                {"id": "name", "header": "Name"},
+                {"id": "ready", "header": "Ready"},
+                {"id": "status", "header": "Status"},
+                {"id": "updated", "header": "Updated"},
+                {"id": "age", "header": "Age"},
+            ],
+            "rows": rows,
+        }
+        if rows
+        else None
+    )
     return (text, component)
 
 
@@ -443,15 +479,17 @@ def describe_deployment(namespace: str, name: str) -> str:
     dep = result
     containers = []
     for c in dep.spec.template.spec.containers:
-        containers.append({
-            "name": c.name,
-            "image": c.image,
-            "resources": {
-                "requests": dict(c.resources.requests or {}) if c.resources else {},
-                "limits": dict(c.resources.limits or {}) if c.resources else {},
-            },
-            "ports": [{"port": p.container_port, "protocol": p.protocol} for p in (c.ports or [])],
-        })
+        containers.append(
+            {
+                "name": c.name,
+                "image": c.image,
+                "resources": {
+                    "requests": dict(c.resources.requests or {}) if c.resources else {},
+                    "limits": dict(c.resources.limits or {}) if c.resources else {},
+                },
+                "ports": [{"port": p.container_port, "protocol": p.protocol} for p in (c.ports or [])],
+            }
+        )
 
     info = {
         "name": dep.metadata.name,
@@ -511,8 +549,7 @@ def get_services(namespace: str = "default") -> str:
     lines = []
     for svc in result.items[:MAX_RESULTS]:
         ports = ", ".join(
-            f"{p.port}/{p.protocol}" + (f"→{p.target_port}" if p.target_port else "")
-            for p in (svc.spec.ports or [])
+            f"{p.port}/{p.protocol}" + (f"→{p.target_port}" if p.target_port else "") for p in (svc.spec.ports or [])
         )
         lines.append(
             f"{svc.metadata.namespace}/{svc.metadata.name}  "
@@ -558,15 +595,11 @@ def get_cluster_version() -> str:
     info = f"Kubernetes {result.git_version} (Platform: {result.platform})"
 
     try:
-        cv = get_custom_client().get_cluster_custom_object(
-            "config.openshift.io", "v1", "clusterversions", "version"
-        )
+        cv = get_custom_client().get_cluster_custom_object("config.openshift.io", "v1", "clusterversions", "version")
         ocp_version = cv.get("status", {}).get("desired", {}).get("version", "unknown")
         channel = cv.get("spec", {}).get("channel", "unknown")
         conditions = cv.get("status", {}).get("conditions", [])
-        cond_summary = ", ".join(
-            f"{c['type']}={c['status']}" for c in conditions
-        )
+        cond_summary = ", ".join(f"{c['type']}={c['status']}" for c in conditions)
         info += f"\nOpenShift {ocp_version} (Channel: {channel})"
         info += f"\nConditions: {cond_summary}"
     except ApiException:
@@ -579,9 +612,7 @@ def get_cluster_version() -> str:
 def get_cluster_operators() -> str:
     """List OpenShift ClusterOperators and their status (Available, Progressing, Degraded). Only works on OpenShift clusters."""
     try:
-        result = get_custom_client().list_cluster_custom_object(
-            "config.openshift.io", "v1", "clusteroperators"
-        )
+        result = get_custom_client().list_cluster_custom_object("config.openshift.io", "v1", "clusteroperators")
     except ApiException as e:
         return f"Error ({e.status}): {e.reason}. This may not be an OpenShift cluster."
 
@@ -590,9 +621,9 @@ def get_cluster_operators() -> str:
         name = co["metadata"]["name"]
         conditions = {c["type"]: c["status"] for c in co.get("status", {}).get("conditions", [])}
         lines.append(
-            f"{name}  Available={conditions.get('Available','?')}  "
-            f"Progressing={conditions.get('Progressing','?')}  "
-            f"Degraded={conditions.get('Degraded','?')}"
+            f"{name}  Available={conditions.get('Available', '?')}  "
+            f"Progressing={conditions.get('Progressing', '?')}  "
+            f"Degraded={conditions.get('Degraded', '?')}"
         )
     return "\n".join(lines) or "No ClusterOperators found."
 
@@ -611,12 +642,16 @@ def scale_deployment(namespace: str, name: str, replicas: int) -> str:
         name: Name of the deployment to scale.
         replicas: Desired number of replicas (0-100).
     """
-    if err := _validate_k8s_namespace(namespace): return err
-    if err := _validate_k8s_name(name): return err
+    if err := _validate_k8s_namespace(namespace):
+        return err
+    if err := _validate_k8s_name(name):
+        return err
     replicas = min(max(0, replicas), MAX_REPLICAS)
-    result = safe(lambda: get_apps_client().patch_namespaced_deployment_scale(
-        name, namespace, body={"spec": {"replicas": replicas}}
-    ))
+    result = safe(
+        lambda: get_apps_client().patch_namespaced_deployment_scale(
+            name, namespace, body={"spec": {"replicas": replicas}}
+        )
+    )
     if isinstance(result, ToolError):
         return str(result)
     return f"Scaled {namespace}/{name} to {replicas} replicas."
@@ -630,18 +665,12 @@ def restart_deployment(namespace: str, name: str) -> str:
         namespace: Kubernetes namespace.
         name: Name of the deployment to restart.
     """
-    if err := _validate_k8s_namespace(namespace): return err
-    if err := _validate_k8s_name(name): return err
-    now = datetime.now(timezone.utc).isoformat()
-    body = {
-        "spec": {
-            "template": {
-                "metadata": {
-                    "annotations": {"kubectl.kubernetes.io/restartedAt": now}
-                }
-            }
-        }
-    }
+    if err := _validate_k8s_namespace(namespace):
+        return err
+    if err := _validate_k8s_name(name):
+        return err
+    now = datetime.now(UTC).isoformat()
+    body = {"spec": {"template": {"metadata": {"annotations": {"kubectl.kubernetes.io/restartedAt": now}}}}}
     result = safe(lambda: get_apps_client().patch_namespaced_deployment(name, namespace, body=body))
     if isinstance(result, ToolError):
         return str(result)
@@ -655,7 +684,8 @@ def cordon_node(node_name: str) -> str:
     Args:
         node_name: Name of the node to cordon.
     """
-    if err := _validate_k8s_name(node_name, "node_name"): return err
+    if err := _validate_k8s_name(node_name, "node_name"):
+        return err
     result = safe(lambda: get_core_client().patch_node(node_name, body={"spec": {"unschedulable": True}}))
     if isinstance(result, ToolError):
         return str(result)
@@ -669,7 +699,8 @@ def uncordon_node(node_name: str) -> str:
     Args:
         node_name: Name of the node to uncordon.
     """
-    if err := _validate_k8s_name(node_name, "node_name"): return err
+    if err := _validate_k8s_name(node_name, "node_name"):
+        return err
     result = safe(lambda: get_core_client().patch_node(node_name, body={"spec": {"unschedulable": False}}))
     if isinstance(result, ToolError):
         return str(result)
@@ -685,13 +716,18 @@ def delete_pod(namespace: str, pod_name: str, grace_period_seconds: int = 30) ->
         pod_name: Name of the pod to delete.
         grace_period_seconds: Grace period before force killing (1-300).
     """
-    if err := _validate_k8s_namespace(namespace): return err
-    if err := _validate_k8s_name(pod_name, "pod_name"): return err
+    if err := _validate_k8s_namespace(namespace):
+        return err
+    if err := _validate_k8s_name(pod_name, "pod_name"):
+        return err
     grace_period_seconds = min(max(1, grace_period_seconds), 300)
-    result = safe(lambda: get_core_client().delete_namespaced_pod(
-        pod_name, namespace,
-        body=client.V1DeleteOptions(grace_period_seconds=grace_period_seconds),
-    ))
+    result = safe(
+        lambda: get_core_client().delete_namespaced_pod(
+            pod_name,
+            namespace,
+            body=client.V1DeleteOptions(grace_period_seconds=grace_period_seconds),
+        )
+    )
     if isinstance(result, ToolError):
         return str(result)
     return f"Pod {namespace}/{pod_name} deleted."
@@ -721,12 +757,10 @@ def get_configmap(namespace: str, name: str) -> str:
 @beta_tool
 def get_node_metrics() -> str:
     """Get actual CPU and memory usage for all nodes from the metrics API. Requires metrics-server to be installed."""
-    from .units import parse_cpu_millicores, parse_memory_bytes, format_cpu, format_memory
+    from .units import format_cpu, format_memory, parse_cpu_millicores, parse_memory_bytes
 
     try:
-        result = get_custom_client().list_cluster_custom_object(
-            _METRICS_GROUP, _METRICS_VERSION, "nodes"
-        )
+        result = get_custom_client().list_cluster_custom_object(_METRICS_GROUP, _METRICS_VERSION, "nodes")
     except ApiException as e:
         if e.status == 404:
             return "Error: Metrics API not available. Is metrics-server installed?"
@@ -770,13 +804,11 @@ def get_pod_metrics(namespace: str = "default", sort_by: str = "cpu") -> str:
         namespace: Kubernetes namespace. Use 'ALL' for all namespaces.
         sort_by: Sort results by 'cpu' or 'memory'. Shows top consumers first.
     """
-    from .units import parse_cpu_millicores, parse_memory_bytes, format_cpu, format_memory
+    from .units import format_cpu, format_memory, parse_cpu_millicores, parse_memory_bytes
 
     try:
         if namespace.upper() == "ALL":
-            result = get_custom_client().list_cluster_custom_object(
-                _METRICS_GROUP, _METRICS_VERSION, "pods"
-            )
+            result = get_custom_client().list_cluster_custom_object(_METRICS_GROUP, _METRICS_VERSION, "pods")
         else:
             result = get_custom_client().list_namespaced_custom_object(
                 _METRICS_GROUP, _METRICS_VERSION, namespace, "pods"
@@ -797,11 +829,16 @@ def get_pod_metrics(namespace: str = "default", sort_by: str = "cpu") -> str:
             total_cpu_m += parse_cpu_millicores(usage.get("cpu", "0"))
             total_mem_bytes += parse_memory_bytes(usage.get("memory", "0"))
 
-        pods.append({
-            "ns": ns, "name": name,
-            "cpu_m": total_cpu_m, "mem_bytes": total_mem_bytes,
-            "cpu_str": format_cpu(total_cpu_m), "mem_str": format_memory(total_mem_bytes),
-        })
+        pods.append(
+            {
+                "ns": ns,
+                "name": name,
+                "cpu_m": total_cpu_m,
+                "mem_bytes": total_mem_bytes,
+                "cpu_str": format_cpu(total_cpu_m),
+                "mem_str": format_memory(total_mem_bytes),
+            }
+        )
 
     if sort_by == "memory":
         pods.sort(key=lambda p: p["mem_bytes"], reverse=True)
@@ -972,8 +1009,12 @@ def list_ingresses(namespace: str = "default") -> str:
         for rule in ing.spec.rules or []:
             host = rule.host or "*"
             paths = []
-            for p in (rule.http.paths if rule.http else []):
-                backend = f"{p.backend.service.name}:{p.backend.service.port.number or p.backend.service.port.name}" if p.backend.service else "?"
+            for p in rule.http.paths if rule.http else []:
+                backend = (
+                    f"{p.backend.service.name}:{p.backend.service.port.number or p.backend.service.port.name}"
+                    if p.backend.service
+                    else "?"
+                )
                 paths.append(f"{p.path or '/'}→{backend}")
             hosts.append(f"{host} [{', '.join(paths)}]")
 
@@ -997,13 +1038,9 @@ def list_routes(namespace: str = "default") -> str:
     """
     try:
         if namespace.upper() == "ALL":
-            result = get_custom_client().list_cluster_custom_object(
-                "route.openshift.io", "v1", "routes"
-            )
+            result = get_custom_client().list_cluster_custom_object("route.openshift.io", "v1", "routes")
         else:
-            result = get_custom_client().list_namespaced_custom_object(
-                "route.openshift.io", "v1", namespace, "routes"
-            )
+            result = get_custom_client().list_namespaced_custom_object("route.openshift.io", "v1", namespace, "routes")
     except ApiException as e:
         return f"Error ({e.status}): {e.reason}. Is this an OpenShift cluster?"
 
@@ -1081,9 +1118,7 @@ def list_operator_subscriptions(namespace: str = "ALL") -> str:
     """
     try:
         if namespace.upper() == "ALL":
-            result = get_custom_client().list_cluster_custom_object(
-                "operators.coreos.com", "v1alpha1", "subscriptions"
-            )
+            result = get_custom_client().list_cluster_custom_object("operators.coreos.com", "v1alpha1", "subscriptions")
         else:
             result = get_custom_client().list_namespaced_custom_object(
                 "operators.coreos.com", "v1alpha1", namespace, "subscriptions"
@@ -1120,14 +1155,11 @@ def list_operator_subscriptions(namespace: str = "ALL") -> str:
 @beta_tool
 def get_firing_alerts() -> str:
     """Get all currently firing alerts from Alertmanager. Returns alert name, severity, namespace, summary, and duration."""
-    import urllib.request
-    import urllib.error
 
     # Try OpenShift alertmanager proxy first
-    urls = [
-        "https://localhost:9093/api/v2/alerts",
-        "http://alertmanager-main.openshift-monitoring.svc:9093/api/v2/alerts",
-    ]
+    # Alertmanager URLs to try
+    # "https://localhost:9093/api/v2/alerts"
+    # "http://alertmanager-main.openshift-monitoring.svc:9093/api/v2/alerts"
 
     core = get_core_client()
     # Try to use the service proxy
@@ -1166,10 +1198,7 @@ def get_firing_alerts() -> str:
         summary = annotations.get("summary", annotations.get("message", annotations.get("description", "")))[:200]
         starts = alert.get("startsAt", "?")[:19]
 
-        lines.append(
-            f"[{severity.upper()}] {name}  namespace={ns}  since={starts}\n"
-            f"  {summary}"
-        )
+        lines.append(f"[{severity.upper()}] {name}  namespace={ns}  since={starts}\n  {summary}")
 
     return f"Firing alerts ({len(firing)}):\n\n" + "\n\n".join(lines)
 
@@ -1183,12 +1212,12 @@ def get_prometheus_query(query: str, time_range: str = "") -> str:
         time_range: Optional time range for range queries (e.g. '5m', '1h', '24h'). If empty, does an instant query.
     """
     import os
-    import urllib.request
     import urllib.error
     import urllib.parse
+    import urllib.request
 
     # Sanitize query
-    if any(c in query for c in [';', '\\', '\n', '\r']):
+    if any(c in query for c in [";", "\\", "\n", "\r"]):
         return "Error: Invalid characters in query."
 
     base_url = os.environ.get("THANOS_URL", "")
@@ -1198,16 +1227,16 @@ def get_prometheus_query(query: str, time_range: str = "") -> str:
 
     if time_range:
         # Range query
-        endpoint = f"{base_url}/api/v1/query_range"
-        params = urllib.parse.urlencode({
-            "query": query,
-            "start": f"now-{time_range}",
-            "end": "now",
-            "step": "60",
-        })
+        params = urllib.parse.urlencode(
+            {
+                "query": query,
+                "start": f"now-{time_range}",
+                "end": "now",
+                "step": "60",
+            }
+        )
     else:
         # Instant query
-        endpoint = f"{base_url}/api/v1/query"
         params = urllib.parse.urlencode({"query": query})
 
     # Try service proxy first (in-cluster)
@@ -1222,7 +1251,7 @@ def get_prometheus_query(query: str, time_range: str = "") -> str:
         )
         data = json.loads(result.data)
     except Exception:
-        return f"Cannot reach Prometheus/Thanos. Set THANOS_URL environment variable."
+        return "Cannot reach Prometheus/Thanos. Set THANOS_URL environment variable."
 
     if data.get("status") != "success":
         return f"Query error: {data.get('error', 'unknown')}"
@@ -1240,7 +1269,7 @@ def get_prometheus_query(query: str, time_range: str = "") -> str:
         name = metric.get("__name__", query)
 
         if result_type == "vector":
-            ts, val = r.get("value", [0, "?"])
+            _ts, val = r.get("value", [0, "?"])
             lines.append(f"{name}{{{label_str}}} = {val}")
         elif result_type == "matrix":
             values = r.get("values", [])
@@ -1279,7 +1308,13 @@ def describe_service(namespace: str, name: str) -> str:
         "clusterIP": svc.spec.cluster_ip,
         "selector": svc.spec.selector or {},
         "ports": [
-            {"name": p.name, "port": p.port, "targetPort": str(p.target_port), "protocol": p.protocol, "nodePort": p.node_port}
+            {
+                "name": p.name,
+                "port": p.port,
+                "targetPort": str(p.target_port),
+                "protocol": p.protocol,
+                "nodePort": p.node_port,
+            }
             for p in (svc.spec.ports or [])
         ],
         "externalIPs": svc.spec.external_i_ps or [],
@@ -1292,7 +1327,9 @@ def describe_service(namespace: str, name: str) -> str:
         endpoints = []
         for subset in ep_result.subsets or []:
             addrs = [a.ip + (f" ({a.target_ref.name})" if a.target_ref else "") for a in (subset.addresses or [])]
-            not_ready = [a.ip + (f" ({a.target_ref.name})" if a.target_ref else "") for a in (subset.not_ready_addresses or [])]
+            not_ready = [
+                a.ip + (f" ({a.target_ref.name})" if a.target_ref else "") for a in (subset.not_ready_addresses or [])
+            ]
             ports = [f"{p.port}/{p.protocol}" for p in (subset.ports or [])]
             endpoints.append({"ready": addrs, "notReady": not_ready, "ports": ports})
         info["endpoints"] = endpoints
@@ -1318,7 +1355,10 @@ def get_endpoint_slices(namespace: str, service_name: str) -> str:
     """
     try:
         result = get_custom_client().list_namespaced_custom_object(
-            "discovery.k8s.io", "v1", namespace, "endpointslices",
+            "discovery.k8s.io",
+            "v1",
+            namespace,
+            "endpointslices",
             label_selector=f"kubernetes.io/service-name={service_name}",
         )
     except ApiException as e:
@@ -1362,10 +1402,10 @@ def list_replicasets(namespace: str, deployment_name: str = "") -> str:
     rsets = result.items
     if deployment_name:
         rsets = [
-            rs for rs in rsets
+            rs
+            for rs in rsets
             if any(
-                ref.kind == "Deployment" and ref.name == deployment_name
-                for ref in (rs.metadata.owner_references or [])
+                ref.kind == "Deployment" and ref.name == deployment_name for ref in (rs.metadata.owner_references or [])
             )
         ]
 
@@ -1373,7 +1413,7 @@ def list_replicasets(namespace: str, deployment_name: str = "") -> str:
         return f"No ReplicaSets found{' for deployment ' + deployment_name if deployment_name else ''}."
 
     # Sort by creation (newest first) for rollout history
-    rsets.sort(key=lambda rs: rs.metadata.creation_timestamp or datetime.min.replace(tzinfo=timezone.utc), reverse=True)
+    rsets.sort(key=lambda rs: rs.metadata.creation_timestamp or datetime.min.replace(tzinfo=UTC), reverse=True)
 
     lines = []
     for rs in rsets[:20]:
@@ -1398,11 +1438,13 @@ def get_pod_disruption_budgets(namespace: str = "ALL") -> str:
     """
     try:
         from kubernetes.client import PolicyV1Api
+
         policy = PolicyV1Api()
     except ImportError:
         return "Error: PolicyV1Api not available in this kubernetes client version."
 
     from .k8s_client import _load_k8s
+
     _load_k8s()
 
     if namespace.upper() == "ALL":
@@ -1500,26 +1542,32 @@ def top_pods_by_restarts(namespace: str = "ALL", limit: int = 20) -> str:
             f"Restarts={restarts}  {pod.metadata.namespace}/{pod.metadata.name}  "
             f"Status={pod.status.phase}  Age={age(pod.metadata.creation_timestamp)}"
         )
-        rows.append({
-            "restarts": restarts,
-            "namespace": pod.metadata.namespace,
-            "name": pod.metadata.name,
-            "status": pod.status.phase or "Unknown",
-            "age": age(pod.metadata.creation_timestamp),
-        })
+        rows.append(
+            {
+                "restarts": restarts,
+                "namespace": pod.metadata.namespace,
+                "name": pod.metadata.name,
+                "status": pod.status.phase or "Unknown",
+                "age": age(pod.metadata.creation_timestamp),
+            }
+        )
     text = "\n".join(lines)
-    component = {
-        "kind": "data_table",
-        "title": f"Top Pods by Restarts ({len(rows)})",
-        "columns": [
-            {"id": "restarts", "header": "Restarts"},
-            {"id": "namespace", "header": "Namespace"},
-            {"id": "name", "header": "Name"},
-            {"id": "status", "header": "Status"},
-            {"id": "age", "header": "Age"},
-        ],
-        "rows": rows,
-    } if rows else None
+    component = (
+        {
+            "kind": "data_table",
+            "title": f"Top Pods by Restarts ({len(rows)})",
+            "columns": [
+                {"id": "restarts", "header": "Restarts"},
+                {"id": "namespace", "header": "Namespace"},
+                {"id": "name", "header": "Name"},
+                {"id": "status", "header": "Status"},
+                {"id": "age", "header": "Age"},
+            ],
+            "rows": rows,
+        }
+        if rows
+        else None
+    )
     return (text, component)
 
 
@@ -1535,8 +1583,9 @@ def get_recent_changes(namespace: str = "ALL", minutes: int = 60) -> str:
     core = get_core_client()
     apps = get_apps_client()
 
-    cutoff = datetime.now(timezone.utc).replace(microsecond=0)
-    cutoff_str = (cutoff - __import__('datetime').timedelta(minutes=minutes)).isoformat() + "Z"
+    cutoff = datetime.now(UTC).replace(microsecond=0)
+    # cutoff_str used for event time comparison below
+    _ = (cutoff - __import__("datetime").timedelta(minutes=minutes)).isoformat() + "Z"
 
     lines = []
 
@@ -1548,8 +1597,10 @@ def get_recent_changes(namespace: str = "ALL", minutes: int = 60) -> str:
 
     if not isinstance(events_result, ToolError):
         recent_events = [
-            e for e in events_result.items
-            if e.last_timestamp and e.last_timestamp.replace(tzinfo=timezone.utc) >= cutoff - __import__('datetime').timedelta(minutes=minutes)
+            e
+            for e in events_result.items
+            if e.last_timestamp
+            and e.last_timestamp.replace(tzinfo=UTC) >= cutoff - __import__("datetime").timedelta(minutes=minutes)
         ]
         # Group by reason
         reasons: dict[str, int] = {}
@@ -1582,7 +1633,9 @@ def get_recent_changes(namespace: str = "ALL", minutes: int = 60) -> str:
         for dep in deps_result.items:
             for cond in dep.status.conditions or []:
                 if cond.type == "Progressing" and cond.last_update_time:
-                    if cond.last_update_time.replace(tzinfo=timezone.utc) >= cutoff - __import__('datetime').timedelta(minutes=minutes):
+                    if cond.last_update_time.replace(tzinfo=UTC) >= cutoff - __import__("datetime").timedelta(
+                        minutes=minutes
+                    ):
                         recently_updated.append(dep)
                         break
 
@@ -1591,8 +1644,7 @@ def get_recent_changes(namespace: str = "ALL", minutes: int = 60) -> str:
             for dep in recently_updated[:10]:
                 s = dep.status
                 lines.append(
-                    f"  {dep.metadata.namespace}/{dep.metadata.name}  "
-                    f"Ready={s.ready_replicas or 0}/{s.replicas or 0}"
+                    f"  {dep.metadata.namespace}/{dep.metadata.name}  Ready={s.ready_replicas or 0}/{s.replicas or 0}"
                 )
 
     if not lines:
@@ -1609,24 +1661,32 @@ def get_tls_certificates(namespace: str = "ALL") -> str:
         namespace: Kubernetes namespace. Use 'ALL' for all namespaces.
     """
     import base64
+
     from cryptography import x509
 
     core = get_core_client()
     if namespace.upper() == "ALL":
-        result = safe(lambda: core.list_secret_for_all_namespaces(
-            field_selector="type=kubernetes.io/tls", limit=MAX_RESULTS,
-        ))
+        result = safe(
+            lambda: core.list_secret_for_all_namespaces(
+                field_selector="type=kubernetes.io/tls",
+                limit=MAX_RESULTS,
+            )
+        )
     else:
-        result = safe(lambda: core.list_namespaced_secret(
-            namespace, field_selector="type=kubernetes.io/tls", limit=MAX_RESULTS,
-        ))
+        result = safe(
+            lambda: core.list_namespaced_secret(
+                namespace,
+                field_selector="type=kubernetes.io/tls",
+                limit=MAX_RESULTS,
+            )
+        )
     if isinstance(result, ToolError):
         return str(result)
 
     if not result.items:
         return "No TLS secrets found."
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     certs = []
 
     for secret in result.items:
@@ -1650,23 +1710,27 @@ def get_tls_certificates(namespace: str = "ALL") -> str:
                 pass
 
             status = "OK" if days_left > 30 else "EXPIRING" if days_left > 0 else "EXPIRED"
-            certs.append({
-                "namespace": secret.metadata.namespace,
-                "name": secret.metadata.name,
-                "cn": cn,
-                "expires": not_after.strftime("%Y-%m-%d"),
-                "days_left": days_left,
-                "status": status,
-            })
+            certs.append(
+                {
+                    "namespace": secret.metadata.namespace,
+                    "name": secret.metadata.name,
+                    "cn": cn,
+                    "expires": not_after.strftime("%Y-%m-%d"),
+                    "days_left": days_left,
+                    "status": status,
+                }
+            )
         except Exception:
-            certs.append({
-                "namespace": secret.metadata.namespace,
-                "name": secret.metadata.name,
-                "cn": "parse-error",
-                "expires": "unknown",
-                "days_left": -1,
-                "status": "UNKNOWN",
-            })
+            certs.append(
+                {
+                    "namespace": secret.metadata.namespace,
+                    "name": secret.metadata.name,
+                    "cn": "parse-error",
+                    "expires": "unknown",
+                    "days_left": -1,
+                    "status": "UNKNOWN",
+                }
+            )
 
     # Sort by days_left (most urgent first)
     certs.sort(key=lambda c: c["days_left"])
@@ -1700,8 +1764,10 @@ def rollback_deployment(namespace: str, name: str, revision: int = 0) -> str:
         name: Name of the deployment to rollback.
         revision: Target revision number (0 = previous revision).
     """
-    if err := _validate_k8s_namespace(namespace): return err
-    if err := _validate_k8s_name(name): return err
+    if err := _validate_k8s_namespace(namespace):
+        return err
+    if err := _validate_k8s_name(name):
+        return err
     # Get current ReplicaSets to find the target revision
     apps = get_apps_client()
     rs_result = safe(lambda: apps.list_namespaced_replica_set(namespace))
@@ -1710,7 +1776,8 @@ def rollback_deployment(namespace: str, name: str, revision: int = 0) -> str:
 
     # Find ReplicaSets owned by this deployment
     owned = [
-        rs for rs in rs_result.items
+        rs
+        for rs in rs_result.items
         if any(ref.kind == "Deployment" and ref.name == name for ref in (rs.metadata.owner_references or []))
     ]
 
@@ -1730,14 +1797,15 @@ def rollback_deployment(namespace: str, name: str, revision: int = 0) -> str:
         target = owned[1]
     else:
         target = next(
-            (rs for rs in owned if (rs.metadata.annotations or {}).get("deployment.kubernetes.io/revision") == str(revision)),
+            (
+                rs
+                for rs in owned
+                if (rs.metadata.annotations or {}).get("deployment.kubernetes.io/revision") == str(revision)
+            ),
             None,
         )
         if not target:
-            available = [
-                (rs.metadata.annotations or {}).get("deployment.kubernetes.io/revision", "?")
-                for rs in owned
-            ]
+            available = [(rs.metadata.annotations or {}).get("deployment.kubernetes.io/revision", "?") for rs in owned]
             return f"Revision {revision} not found. Available: {', '.join(available)}"
 
     # Get the target's pod template and patch the deployment
@@ -1763,7 +1831,8 @@ def drain_node(node_name: str) -> str:
     Args:
         node_name: Name of the node to drain.
     """
-    if err := _validate_k8s_name(node_name, "node_name"): return err
+    if err := _validate_k8s_name(node_name, "node_name"):
+        return err
     core = get_core_client()
 
     # Step 1: Cordon
@@ -1848,16 +1917,26 @@ def apply_yaml(yaml_content: str, namespace: str = "", dry_run: bool = True) -> 
     if not name:
         return "Error: Resource must have metadata.name."
 
-    if err := _validate_k8s_name(name): return err
-    if err := _validate_k8s_namespace(ns): return err
+    if err := _validate_k8s_name(name):
+        return err
+    if err := _validate_k8s_namespace(ns):
+        return err
 
     # Allowlist — only these resource types can be created/modified via apply_yaml.
     # Everything else is blocked to prevent privilege escalation.
     _ALLOWED_KINDS = {
-        "Deployment", "StatefulSet", "DaemonSet", "Job", "CronJob",
-        "Service", "ConfigMap", "Ingress",
-        "NetworkPolicy", "HorizontalPodAutoscaler",
-        "LimitRange", "ResourceQuota",
+        "Deployment",
+        "StatefulSet",
+        "DaemonSet",
+        "Job",
+        "CronJob",
+        "Service",
+        "ConfigMap",
+        "Ingress",
+        "NetworkPolicy",
+        "HorizontalPodAutoscaler",
+        "LimitRange",
+        "ResourceQuota",
         "PersistentVolumeClaim",
     }
     if kind not in _ALLOWED_KINDS:
@@ -1868,35 +1947,49 @@ def apply_yaml(yaml_content: str, namespace: str = "", dry_run: bool = True) -> 
 
     # Check ArgoCD auto-sync — warn if changes will be reverted
     from .gitops_tools import check_argo_auto_sync
+
     argo_warning = check_argo_auto_sync(ns, kind, name)
     if argo_warning and not dry_run:
         return argo_warning
 
     # Build API path
     if "/" in api_version:
-        group, version = api_version.split("/", 1)
+        _group, _version = api_version.split("/", 1)
         base = f"/apis/{api_version}"
     else:
         base = f"/api/{api_version}"
 
     # Simple kind→plural (covers common cases)
     plural_map = {
-        "Deployment": "deployments", "Service": "services", "ConfigMap": "configmaps",
-        "Secret": "secrets", "Namespace": "namespaces", "Pod": "pods",
-        "ServiceAccount": "serviceaccounts", "Role": "roles", "RoleBinding": "rolebindings",
-        "ClusterRole": "clusterroles", "ClusterRoleBinding": "clusterrolebindings",
-        "NetworkPolicy": "networkpolicies", "Ingress": "ingresses", "Job": "jobs",
-        "CronJob": "cronjobs", "StatefulSet": "statefulsets", "DaemonSet": "daemonsets",
-        "PersistentVolumeClaim": "persistentvolumeclaims", "HorizontalPodAutoscaler": "horizontalpodautoscalers",
-        "LimitRange": "limitranges", "ResourceQuota": "resourcequotas",
+        "Deployment": "deployments",
+        "Service": "services",
+        "ConfigMap": "configmaps",
+        "Secret": "secrets",
+        "Namespace": "namespaces",
+        "Pod": "pods",
+        "ServiceAccount": "serviceaccounts",
+        "Role": "roles",
+        "RoleBinding": "rolebindings",
+        "ClusterRole": "clusterroles",
+        "ClusterRoleBinding": "clusterrolebindings",
+        "NetworkPolicy": "networkpolicies",
+        "Ingress": "ingresses",
+        "Job": "jobs",
+        "CronJob": "cronjobs",
+        "StatefulSet": "statefulsets",
+        "DaemonSet": "daemonsets",
+        "PersistentVolumeClaim": "persistentvolumeclaims",
+        "HorizontalPodAutoscaler": "horizontalpodautoscalers",
+        "LimitRange": "limitranges",
+        "ResourceQuota": "resourcequotas",
     }
     plural = plural_map.get(kind, kind.lower() + "s")
 
     # Use server-side apply
     from kubernetes import client as k8s_client
+
     api = k8s_client.ApiClient()
 
-    dry_run_param = "All" if dry_run else None
     try:
         # Try server-side apply (PATCH with application/apply-patch+yaml)
         path = f"{base}/namespaces/{ns}/{plural}/{name}" if ns and kind != "Namespace" else f"{base}/{plural}/{name}"
@@ -1908,11 +2001,10 @@ def apply_yaml(yaml_content: str, namespace: str = "", dry_run: bool = True) -> 
                 "Content-Type": "application/apply-patch+yaml",
                 "Accept": "application/json",
             },
-            query_params=[("fieldManager", "pulse-agent")]
-            + ([("dryRun", "All")] if dry_run else []),
+            query_params=[("fieldManager", "pulse-agent")] + ([("dryRun", "All")] if dry_run else []),
             _preload_content=False,
         )
-        result = json.loads(resp[0].data)
+        json.loads(resp[0].data)  # validate response is valid JSON
         action = "Dry-run validated" if dry_run else "Applied"
         return f"{action} {kind}/{name} in namespace {ns} successfully."
     except ApiException as e:
@@ -1951,9 +2043,7 @@ def create_network_policy(
     }
 
     # Dry-run first to validate
-    dry_result = safe(lambda: get_networking_client().create_namespaced_network_policy(
-        namespace, body, dry_run="All"
-    ))
+    dry_result = safe(lambda: get_networking_client().create_namespaced_network_policy(namespace, body, dry_run="All"))
     if isinstance(dry_result, ToolError):
         return f"Dry-run failed: {dry_result}"
 
@@ -1978,7 +2068,7 @@ def record_audit_entry(action: str, details: str, namespace: str = "pulse-agent"
         details: Description of what was done and the outcome.
         namespace: Namespace for the audit ConfigMap (default: pulse-agent).
     """
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     entry_key = f"{now.strftime('%Y%m%d-%H%M%S-%f')}-{action}"
     # Truncate details to prevent exceeding ConfigMap 1MB limit
     truncated = details[:1000] if len(details) > 1000 else details
@@ -2081,5 +2171,6 @@ ALL_TOOLS = [
 
 # Register all tools in the central registry
 from .tool_registry import register_tool
+
 for _tool in ALL_TOOLS:
     register_tool(_tool, is_write=(_tool.name in WRITE_TOOLS))

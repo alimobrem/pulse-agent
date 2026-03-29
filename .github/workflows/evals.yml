@@ -26,6 +26,12 @@ jobs:
           python -m pip install --upgrade pip
           pip install -e ".[test]"
 
+      - name: Lint
+        run: ruff check sre_agent/ tests/
+
+      - name: Format check
+        run: ruff format --check sre_agent/ tests/
+
       - name: Run unit tests
         run: python -m pytest tests/ -q
 

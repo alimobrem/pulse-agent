@@ -76,9 +76,7 @@ class Database:
     def _translate_schema(self, schema: str) -> str:
         """Translate SQLite schema DDL to PostgreSQL."""
         if self.is_postgres:
-            schema = schema.replace(
-                "INTEGER PRIMARY KEY AUTOINCREMENT", "SERIAL PRIMARY KEY"
-            )
+            schema = schema.replace("INTEGER PRIMARY KEY AUTOINCREMENT", "SERIAL PRIMARY KEY")
             schema = schema.replace("INSERT OR REPLACE", "INSERT")
             schema = re.sub(r"PRAGMA\s+\w+\s*=\s*\w+\s*;?", "", schema)
         return schema
@@ -188,9 +186,7 @@ def get_database() -> Database:
     with _db_lock:
         if _db is not None and _db.health_check():
             return _db
-        url = os.environ.get(
-            "PULSE_AGENT_DATABASE_URL", "sqlite:///tmp/pulse_agent/pulse.db"
-        )
+        url = os.environ.get("PULSE_AGENT_DATABASE_URL", "sqlite:///tmp/pulse_agent/pulse.db")
         _db = Database(url)
         return _db
 

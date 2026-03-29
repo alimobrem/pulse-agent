@@ -1,15 +1,14 @@
 """Tests for ArgoCD Shadow tools."""
 
-from types import SimpleNamespace
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 from kubernetes.client.rest import ApiException
 
 from sre_agent.gitops_tools import (
-    get_argo_applications,
-    get_argo_app_detail,
     detect_gitops_drift,
+    get_argo_app_detail,
+    get_argo_applications,
     get_argo_sync_diff,
 )
 
@@ -20,9 +19,15 @@ def mock_custom():
         yield mock.return_value
 
 
-def _make_argo_app(name="my-app", namespace="openshift-gitops",
-                   sync="Synced", health="Healthy", repo="https://github.com/org/repo.git",
-                   path="apps/nginx", resources=None):
+def _make_argo_app(
+    name="my-app",
+    namespace="openshift-gitops",
+    sync="Synced",
+    health="Healthy",
+    repo="https://github.com/org/repo.git",
+    path="apps/nginx",
+    resources=None,
+):
     return {
         "metadata": {"name": name, "namespace": namespace},
         "spec": {
@@ -50,9 +55,7 @@ class TestGetArgoApplications:
         assert "Synced" in result
 
     def test_drift_detected_badge(self, mock_custom):
-        mock_custom.list_cluster_custom_object.return_value = {
-            "items": [_make_argo_app("drifted", sync="OutOfSync")]
-        }
+        mock_custom.list_cluster_custom_object.return_value = {"items": [_make_argo_app("drifted", sync="OutOfSync")]}
         result = get_argo_applications.call({"namespace": "ALL"})
         assert "DRIFT DETECTED" in result
 
@@ -69,10 +72,18 @@ class TestGetArgoApplications:
 
 class TestGetArgoAppDetail:
     def test_returns_detail(self, mock_custom):
-        app = _make_argo_app("frontend", resources=[
-            {"kind": "Deployment", "name": "frontend", "namespace": "default",
-             "status": "Synced", "health": {"status": "Healthy"}},
-        ])
+        app = _make_argo_app(
+            "frontend",
+            resources=[
+                {
+                    "kind": "Deployment",
+                    "name": "frontend",
+                    "namespace": "default",
+                    "status": "Synced",
+                    "health": {"status": "Healthy"},
+                },
+            ],
+        )
         mock_custom.get_namespaced_custom_object.return_value = app
         result = get_argo_app_detail.call({"name": "frontend"})
         assert "frontend" in result
@@ -89,9 +100,13 @@ class TestDetectGitopsDrift:
         mock_custom.list_cluster_custom_object.return_value = {
             "items": [
                 _make_argo_app("synced", sync="Synced"),
-                _make_argo_app("drifted", sync="OutOfSync", resources=[
-                    {"kind": "Deployment", "name": "web", "namespace": "default", "status": "OutOfSync"},
-                ]),
+                _make_argo_app(
+                    "drifted",
+                    sync="OutOfSync",
+                    resources=[
+                        {"kind": "Deployment", "name": "web", "namespace": "default", "status": "OutOfSync"},
+                    ],
+                ),
             ]
         }
         result = detect_gitops_drift.call({"namespace": "ALL"})
@@ -100,9 +115,7 @@ class TestDetectGitopsDrift:
         assert "Deployment/web" in result
 
     def test_no_drift(self, mock_custom):
-        mock_custom.list_cluster_custom_object.return_value = {
-            "items": [_make_argo_app("synced", sync="Synced")]
-        }
+        mock_custom.list_cluster_custom_object.return_value = {"items": [_make_argo_app("synced", sync="Synced")]}
         result = detect_gitops_drift.call({"namespace": "ALL"})
         assert "in sync" in result.lower()
 
@@ -119,10 +132,19 @@ class TestGetArgoSyncDiff:
         assert "in sync" in result.lower()
 
     def test_out_of_sync_with_resources(self, mock_custom):
-        app = _make_argo_app("app", sync="OutOfSync", resources=[
-            {"kind": "Deployment", "name": "web", "namespace": "default",
-             "status": "OutOfSync", "diff": "- replicas: 3\n+ replicas: 5"},
-        ])
+        app = _make_argo_app(
+            "app",
+            sync="OutOfSync",
+            resources=[
+                {
+                    "kind": "Deployment",
+                    "name": "web",
+                    "namespace": "default",
+                    "status": "OutOfSync",
+                    "diff": "- replicas: 3\n+ replicas: 5",
+                },
+            ],
+        )
         mock_custom.get_namespaced_custom_object.return_value = app
         result = get_argo_sync_diff.call({"name": "app"})
         assert "Deployment/web" in result

@@ -1,10 +1,9 @@
 """Tests for sre_agent.error_tracker — ring buffer error tracking."""
 
 import threading
-import pytest
 
-from sre_agent.errors import ToolError
 from sre_agent.error_tracker import ErrorTracker, get_tracker
+from sre_agent.errors import ToolError
 
 
 def _make_error(category: str = "server", operation: str = "test_tool") -> ToolError:
@@ -57,7 +56,6 @@ class TestErrorTracker:
 
     def test_thread_safety(self):
         tracker = ErrorTracker(max_entries=1000)
-        errors = []
 
         def writer():
             for _ in range(100):
@@ -79,7 +77,7 @@ class TestErrorTracker:
 
     def test_limit_on_get_recent(self):
         tracker = ErrorTracker()
-        for i in range(10):
+        for _i in range(10):
             tracker.record(_make_error())
         recent = tracker.get_recent(limit=3)
         assert len(recent) == 3

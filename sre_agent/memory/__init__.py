@@ -19,20 +19,20 @@ logger = logging.getLogger("pulse_agent")
 __all__ = [
     "MemoryManager",
     "get_manager",
-    "set_manager",
     "is_memory_enabled",
+    "set_manager",
 ]
 
 # Module-level singleton so monitor.py can access memory without plumbing
-_manager_instance: "MemoryManager | None" = None
+_manager_instance: MemoryManager | None = None
 
 
-def get_manager() -> "MemoryManager | None":
+def get_manager() -> MemoryManager | None:
     """Return the global MemoryManager singleton, or None if memory is disabled."""
     return _manager_instance
 
 
-def set_manager(manager: "MemoryManager | None") -> None:
+def set_manager(manager: MemoryManager | None) -> None:
     """Set the global MemoryManager singleton."""
     global _manager_instance
     _manager_instance = manager
@@ -111,15 +111,16 @@ class MemoryManager:
         self._rejected_count = 0
 
     def record_tool_call(self, name: str, input_data: dict, was_rejected: bool = False):
-        self._tool_calls.append({
-            "name": name,
-            "input_summary": {k: str(v)[:50] for k, v in input_data.items()},
-        })
+        self._tool_calls.append(
+            {
+                "name": name,
+                "input_summary": {k: str(v)[:50] for k, v in input_data.items()},
+            }
+        )
         if was_rejected:
             self._rejected_count += 1
 
-    def finish_turn(self, user_query: str, final_response: str,
-                    user_confirmed: bool | None = None) -> dict:
+    def finish_turn(self, user_query: str, final_response: str, user_confirmed: bool | None = None) -> dict:
         duration = time.time() - self._turn_start
 
         eval_result = evaluate_interaction(
@@ -190,7 +191,9 @@ class MemoryManager:
             duration_seconds=duration,
             final_response="",
         )
-        self.store.update_incident_outcome(self._last_incident_id, "resolved" if resolved else "unresolved", eval_result.score)
+        self.store.update_incident_outcome(
+            self._last_incident_id, "resolved" if resolved else "unresolved", eval_result.score
+        )
 
         runbook_id = None
         if resolved and len(tool_calls) >= 2:
@@ -206,9 +209,9 @@ class MemoryManager:
 def _extract_namespace(text: str) -> str:
     """Extract namespace from query text."""
     patterns = [
-        r'namespace[s]?\s+([a-zA-Z0-9][\w.-]*)',
-        r'in\s+([a-zA-Z0-9][\w.-]*)\s+namespace',
-        r'ns[/:]([a-zA-Z0-9][\w.-]*)',
+        r"namespace[s]?\s+([a-zA-Z0-9][\w.-]*)",
+        r"in\s+([a-zA-Z0-9][\w.-]*)\s+namespace",
+        r"ns[/:]([a-zA-Z0-9][\w.-]*)",
     ]
     for p in patterns:
         m = re.search(p, text, re.IGNORECASE)
@@ -219,13 +222,20 @@ def _extract_namespace(text: str) -> str:
 
 def _extract_resource_type(text: str) -> str:
     resource_keywords = {
-        "pod": "pod", "pods": "pod",
-        "deployment": "deployment", "deploy": "deployment",
-        "node": "node", "nodes": "node",
-        "service": "service", "svc": "service",
-        "pvc": "pvc", "volume": "pvc",
-        "secret": "secret", "configmap": "configmap",
-        "statefulset": "statefulset", "daemonset": "daemonset",
+        "pod": "pod",
+        "pods": "pod",
+        "deployment": "deployment",
+        "deploy": "deployment",
+        "node": "node",
+        "nodes": "node",
+        "service": "service",
+        "svc": "service",
+        "pvc": "pvc",
+        "volume": "pvc",
+        "secret": "secret",
+        "configmap": "configmap",
+        "statefulset": "statefulset",
+        "daemonset": "daemonset",
     }
     for word in text.lower().split():
         word = word.strip(".,?!")
@@ -236,10 +246,17 @@ def _extract_resource_type(text: str) -> str:
 
 def _extract_error_type(text: str) -> str:
     error_patterns = [
-        "CrashLoopBackOff", "OOMKilled", "ImagePullBackOff",
-        "ErrImagePull", "CreateContainerConfigError",
-        "Pending", "Evicted", "NodeNotReady",
-        "FailedScheduling", "BackOff", "Unhealthy",
+        "CrashLoopBackOff",
+        "OOMKilled",
+        "ImagePullBackOff",
+        "ErrImagePull",
+        "CreateContainerConfigError",
+        "Pending",
+        "Evicted",
+        "NodeNotReady",
+        "FailedScheduling",
+        "BackOff",
+        "Unhealthy",
     ]
     text_lower = text.lower()
     for ep in error_patterns:

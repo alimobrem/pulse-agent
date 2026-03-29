@@ -5,7 +5,6 @@ These tests mock the Claude API so no real API key is needed.
 
 from __future__ import annotations
 
-import json
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
@@ -17,7 +16,6 @@ from sre_agent.evals.replay import (
     load_fixture,
     score_replay,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -56,9 +54,7 @@ def _make_mock_client(tool_names_to_call: list[str] | None = None, final_text: s
             )
             for name in tool_names_to_call
         ]
-        responses.append(
-            SimpleNamespace(stop_reason="tool_use", content=tool_blocks)
-        )
+        responses.append(SimpleNamespace(stop_reason="tool_use", content=tool_blocks))
         event_lists.append(tool_events)
 
     # Events for the final text response
@@ -148,10 +144,12 @@ class TestReplayHarness:
             tool_names_to_call=["describe_pod", "get_pod_logs"],
             final_text="The database connection is refused.",
         )
-        harness = ReplayHarness({
-            "describe_pod": "CrashLoopBackOff",
-            "get_pod_logs": "connection refused to db-service:5432",
-        })
+        harness = ReplayHarness(
+            {
+                "describe_pod": "CrashLoopBackOff",
+                "get_pod_logs": "connection refused to db-service:5432",
+            }
+        )
         result = harness.run(client=client, prompt="Pod is crash-looping.")
 
         tool_names = [tc["name"] for tc in result["tool_calls"]]
@@ -284,8 +282,7 @@ class TestFixtureScoring:
 
         # Simulate a good response
         result = {
-            "response": "The root cause is a database connection failure. "
-            "The pod cannot connect to db-service:5432.",
+            "response": "The root cause is a database connection failure. The pod cannot connect to db-service:5432.",
             "tool_calls": [
                 {"name": "describe_pod", "timestamp": 0},
                 {"name": "get_pod_logs", "timestamp": 1},
@@ -338,7 +335,8 @@ class TestFixtureScoring:
 
 class TestJudgeModule:
     def test_import(self):
-        from sre_agent.evals.judge import judge_response, JUDGE_PROMPT_TEMPLATE
+        from sre_agent.evals.judge import JUDGE_PROMPT_TEMPLATE, judge_response
+
         assert callable(judge_response)
         assert "Correctness" in JUDGE_PROMPT_TEMPLATE
 

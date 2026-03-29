@@ -7,11 +7,10 @@ import logging
 import sys
 
 from rich.console import Console
-from rich.markdown import Markdown
 from rich.panel import Panel
 
-from .agent import create_client, run_agent_turn_streaming, SYSTEM_PROMPT
-from .security_agent import run_security_scan_streaming, SECURITY_SYSTEM_PROMPT
+from .agent import SYSTEM_PROMPT, create_client, run_agent_turn_streaming
+from .security_agent import SECURITY_SYSTEM_PROMPT, run_security_scan_streaming
 
 console = Console()
 
@@ -26,20 +25,14 @@ logging.getLogger("urllib3").setLevel(logging.WARNING)
 
 MODES = {
     "sre": {
-        "banner": (
-            "[bold]OpenShift SRE Agent[/bold]\n"
-            "AI-powered cluster diagnostics, triage, and operations"
-        ),
+        "banner": ("[bold]OpenShift SRE Agent[/bold]\nAI-powered cluster diagnostics, triage, and operations"),
         "color": "blue",
         "prompt": "sre",
         "runner": run_agent_turn_streaming,
         "base_prompt": SYSTEM_PROMPT,
     },
     "security": {
-        "banner": (
-            "[bold]OpenShift Security Scanner[/bold]\n"
-            "AI-powered cluster security posture assessment"
-        ),
+        "banner": ("[bold]OpenShift Security Scanner[/bold]\nAI-powered cluster security posture assessment"),
         "color": "red",
         "prompt": "sec",
         "runner": run_security_scan_streaming,
@@ -75,8 +68,7 @@ def _confirm_action(tool_name: str, tool_input: dict) -> bool:
     console.print()
     console.print(
         Panel(
-            f"[bold yellow]CONFIRM:[/bold yellow] {tool_name}\n"
-            f"[dim]{json.dumps(tool_input, indent=2)}[/dim]",
+            f"[bold yellow]CONFIRM:[/bold yellow] {tool_name}\n[dim]{json.dumps(tool_input, indent=2)}[/dim]",
             border_style="yellow",
             title="Write Operation",
         )
@@ -93,8 +85,7 @@ def print_banner(mode: str, memory_active: bool):
     memory_tag = " [dim][memory active][/dim]" if memory_active else ""
     console.print(
         Panel(
-            cfg["banner"] + memory_tag + "\n\n"
-            "[dim]Commands: help, clear, mode, feedback, quit[/dim]",
+            cfg["banner"] + memory_tag + "\n\n[dim]Commands: help, clear, mode, feedback, quit[/dim]",
             border_style=cfg["color"],
         )
     )
@@ -104,7 +95,8 @@ def run_repl(mode: str):
     cfg = MODES[mode]
 
     # Initialize memory system if enabled
-    from .memory import is_memory_enabled, MemoryManager
+    from .memory import MemoryManager, is_memory_enabled
+
     memory_mgr: MemoryManager | None = None
     if is_memory_enabled():
         memory_mgr = MemoryManager()
@@ -120,6 +112,7 @@ def run_repl(mode: str):
 
     try:
         from .k8s_client import get_core_client
+
         get_core_client().list_namespace(limit=1)
         console.print("[green]Connected to cluster.[/green]")
     except Exception:
@@ -164,7 +157,7 @@ def run_repl(mode: str):
                     if result:
                         console.print(f"[green]Recorded as resolved (score: {result['score']:.2f})[/green]")
                         if result.get("runbook_id"):
-                            console.print(f"[green]Runbook extracted![/green]")
+                            console.print("[green]Runbook extracted![/green]")
                 elif answer in ("n", "no"):
                     result = memory_mgr.update_last_outcome(False)
                     if result:

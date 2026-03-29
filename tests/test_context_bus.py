@@ -5,9 +5,9 @@ import time
 
 import pytest
 
-from sre_agent.db import Database, set_database, reset_database
-from sre_agent.context_bus import ContextBus, ContextEntry, get_context_bus
 import sre_agent.context_bus as _cb
+from sre_agent.context_bus import ContextBus, ContextEntry, get_context_bus
+from sre_agent.db import Database, reset_database, set_database
 
 
 @pytest.fixture(autouse=True)
@@ -41,13 +41,15 @@ class TestContextBusPublishAndRetrieve:
     def test_multiple_entries_returned_newest_first(self):
         bus = ContextBus()
         for i in range(3):
-            bus.publish(ContextEntry(
-                source="monitor",
-                category="finding",
-                summary=f"Finding {i}",
-                details={},
-                timestamp=time.time() + i,
-            ))
+            bus.publish(
+                ContextEntry(
+                    source="monitor",
+                    category="finding",
+                    summary=f"Finding {i}",
+                    details={},
+                    timestamp=time.time() + i,
+                )
+            )
         results = bus.get_context_for(limit=10)
         assert len(results) == 3
         # Newest first
@@ -58,32 +60,38 @@ class TestContextBusPublishAndRetrieve:
 class TestContextBusTTL:
     def test_expired_entries_excluded(self):
         bus = ContextBus(ttl_seconds=1)
-        bus.publish(ContextEntry(
-            source="monitor",
-            category="finding",
-            summary="Old finding",
-            details={},
-            timestamp=time.time() - 10,  # 10 seconds ago, TTL is 1s
-        ))
-        bus.publish(ContextEntry(
-            source="sre_agent",
-            category="diagnosis",
-            summary="Fresh finding",
-            details={},
-        ))
+        bus.publish(
+            ContextEntry(
+                source="monitor",
+                category="finding",
+                summary="Old finding",
+                details={},
+                timestamp=time.time() - 10,  # 10 seconds ago, TTL is 1s
+            )
+        )
+        bus.publish(
+            ContextEntry(
+                source="sre_agent",
+                category="diagnosis",
+                summary="Fresh finding",
+                details={},
+            )
+        )
         results = bus.get_context_for()
         assert len(results) == 1
         assert results[0].summary == "Fresh finding"
 
     def test_all_expired_returns_empty(self):
         bus = ContextBus(ttl_seconds=1)
-        bus.publish(ContextEntry(
-            source="monitor",
-            category="finding",
-            summary="Expired",
-            details={},
-            timestamp=time.time() - 5,
-        ))
+        bus.publish(
+            ContextEntry(
+                source="monitor",
+                category="finding",
+                summary="Expired",
+                details={},
+                timestamp=time.time() - 5,
+            )
+        )
         results = bus.get_context_for()
         assert len(results) == 0
 
@@ -91,18 +99,33 @@ class TestContextBusTTL:
 class TestContextBusNamespaceFiltering:
     def test_filter_by_namespace(self):
         bus = ContextBus()
-        bus.publish(ContextEntry(
-            source="monitor", category="finding", summary="In prod",
-            details={}, namespace="production",
-        ))
-        bus.publish(ContextEntry(
-            source="monitor", category="finding", summary="In staging",
-            details={}, namespace="staging",
-        ))
-        bus.publish(ContextEntry(
-            source="monitor", category="finding", summary="Cluster-wide",
-            details={}, namespace="",
-        ))
+        bus.publish(
+            ContextEntry(
+                source="monitor",
+                category="finding",
+                summary="In prod",
+                details={},
+                namespace="production",
+            )
+        )
+        bus.publish(
+            ContextEntry(
+                source="monitor",
+                category="finding",
+                summary="In staging",
+                details={},
+                namespace="staging",
+            )
+        )
+        bus.publish(
+            ContextEntry(
+                source="monitor",
+                category="finding",
+                summary="Cluster-wide",
+                details={},
+                namespace="",
+            )
+        )
         results = bus.get_context_for(namespace="production")
         # Should include "production" entries and cluster-wide (empty namespace)
         summaries = {r.summary for r in results}
@@ -112,14 +135,22 @@ class TestContextBusNamespaceFiltering:
 
     def test_filter_by_category(self):
         bus = ContextBus()
-        bus.publish(ContextEntry(
-            source="monitor", category="finding", summary="A finding",
-            details={},
-        ))
-        bus.publish(ContextEntry(
-            source="monitor", category="fix", summary="A fix",
-            details={},
-        ))
+        bus.publish(
+            ContextEntry(
+                source="monitor",
+                category="finding",
+                summary="A finding",
+                details={},
+            )
+        )
+        bus.publish(
+            ContextEntry(
+                source="monitor",
+                category="fix",
+                summary="A fix",
+                details={},
+            )
+        )
         results = bus.get_context_for(category="fix")
         assert len(results) == 1
         assert results[0].summary == "A fix"
@@ -129,10 +160,14 @@ class TestContextBusMaxEntries:
     def test_max_entries_cap(self):
         bus = ContextBus(max_entries=5)
         for i in range(10):
-            bus.publish(ContextEntry(
-                source="monitor", category="finding", summary=f"Finding {i}",
-                details={},
-            ))
+            bus.publish(
+                ContextEntry(
+                    source="monitor",
+                    category="finding",
+                    summary=f"Finding {i}",
+                    details={},
+                )
+            )
         results = bus.get_context_for(limit=100)
         assert len(results) == 5
         # Should have the last 5 entries (5-9)
@@ -143,10 +178,14 @@ class TestContextBusMaxEntries:
     def test_limit_parameter(self):
         bus = ContextBus()
         for i in range(10):
-            bus.publish(ContextEntry(
-                source="monitor", category="finding", summary=f"Finding {i}",
-                details={},
-            ))
+            bus.publish(
+                ContextEntry(
+                    source="monitor",
+                    category="finding",
+                    summary=f"Finding {i}",
+                    details={},
+                )
+            )
         results = bus.get_context_for(limit=3)
         assert len(results) == 3
 
@@ -159,12 +198,14 @@ class TestContextBusThreadSafety:
         def publish_batch(start: int):
             try:
                 for i in range(50):
-                    bus.publish(ContextEntry(
-                        source="monitor",
-                        category="finding",
-                        summary=f"Thread {start} finding {i}",
-                        details={},
-                    ))
+                    bus.publish(
+                        ContextEntry(
+                            source="monitor",
+                            category="finding",
+                            summary=f"Thread {start} finding {i}",
+                            details={},
+                        )
+                    )
             except Exception as e:
                 errors.append(e)
 
@@ -186,10 +227,14 @@ class TestContextBusThreadSafety:
         def publisher():
             try:
                 for i in range(100):
-                    bus.publish(ContextEntry(
-                        source="monitor", category="finding",
-                        summary=f"Finding {i}", details={},
-                    ))
+                    bus.publish(
+                        ContextEntry(
+                            source="monitor",
+                            category="finding",
+                            summary=f"Finding {i}",
+                            details={},
+                        )
+                    )
             except Exception as e:
                 errors.append(e)
 
@@ -218,23 +263,30 @@ class TestBuildContextPrompt:
 
     def test_prompt_contains_header(self):
         bus = ContextBus()
-        bus.publish(ContextEntry(
-            source="monitor", category="finding", summary="Test",
-            details={},
-        ))
+        bus.publish(
+            ContextEntry(
+                source="monitor",
+                category="finding",
+                summary="Test",
+                details={},
+            )
+        )
         prompt = bus.build_context_prompt()
         assert "## Recent Agent Activity (shared context)" in prompt
 
     def test_prompt_contains_entry_details(self):
         bus = ContextBus()
-        bus.publish(ContextEntry(
-            source="sre_agent", category="investigation",
-            summary="Investigated crashloop",
-            details={
-                "suspected_cause": "OOM in container",
-                "fix_applied": "restart_deployment",
-            },
-        ))
+        bus.publish(
+            ContextEntry(
+                source="sre_agent",
+                category="investigation",
+                summary="Investigated crashloop",
+                details={
+                    "suspected_cause": "OOM in container",
+                    "fix_applied": "restart_deployment",
+                },
+            )
+        )
         prompt = bus.build_context_prompt()
         assert "[sre_agent]" in prompt
         assert "Investigated crashloop" in prompt
@@ -243,32 +295,52 @@ class TestBuildContextPrompt:
 
     def test_prompt_age_seconds(self):
         bus = ContextBus()
-        bus.publish(ContextEntry(
-            source="monitor", category="finding", summary="Recent",
-            details={}, timestamp=time.time() - 30,
-        ))
+        bus.publish(
+            ContextEntry(
+                source="monitor",
+                category="finding",
+                summary="Recent",
+                details={},
+                timestamp=time.time() - 30,
+            )
+        )
         prompt = bus.build_context_prompt()
         assert "30s ago" in prompt
 
     def test_prompt_age_minutes(self):
         bus = ContextBus()
-        bus.publish(ContextEntry(
-            source="monitor", category="finding", summary="Older",
-            details={}, timestamp=time.time() - 120,
-        ))
+        bus.publish(
+            ContextEntry(
+                source="monitor",
+                category="finding",
+                summary="Older",
+                details={},
+                timestamp=time.time() - 120,
+            )
+        )
         prompt = bus.build_context_prompt()
         assert "2m ago" in prompt
 
     def test_prompt_respects_namespace_filter(self):
         bus = ContextBus()
-        bus.publish(ContextEntry(
-            source="monitor", category="finding", summary="In prod",
-            details={}, namespace="production",
-        ))
-        bus.publish(ContextEntry(
-            source="monitor", category="finding", summary="In staging",
-            details={}, namespace="staging",
-        ))
+        bus.publish(
+            ContextEntry(
+                source="monitor",
+                category="finding",
+                summary="In prod",
+                details={},
+                namespace="production",
+            )
+        )
+        bus.publish(
+            ContextEntry(
+                source="monitor",
+                category="finding",
+                summary="In staging",
+                details={},
+                namespace="staging",
+            )
+        )
         prompt = bus.build_context_prompt(namespace="production")
         assert "In prod" in prompt
         assert "In staging" not in prompt

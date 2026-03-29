@@ -1,8 +1,9 @@
 """Tests for runbook extraction."""
 
 import pytest
-from sre_agent.memory.store import IncidentStore
+
 from sre_agent.memory.runbooks import extract_runbook, is_duplicate_runbook
+from sre_agent.memory.store import IncidentStore
 
 
 @pytest.fixture
@@ -31,24 +32,30 @@ class TestExtractRunbook:
 
     def test_skips_unresolved(self, store):
         iid = store.record_incident(
-            query="test", tool_sequence=[{"name": "a"}, {"name": "b"}],
-            resolution="r", outcome="unknown",
+            query="test",
+            tool_sequence=[{"name": "a"}, {"name": "b"}],
+            resolution="r",
+            outcome="unknown",
         )
         assert extract_runbook(store, iid) is None
 
     def test_skips_single_tool(self, store):
         iid = store.record_incident(
-            query="test", tool_sequence=[{"name": "a"}],
-            resolution="r", outcome="resolved",
+            query="test",
+            tool_sequence=[{"name": "a"}],
+            resolution="r",
+            outcome="resolved",
         )
         assert extract_runbook(store, iid) is None
 
     def test_custom_name(self, store):
         iid = store.record_incident(
-            query="test", tool_sequence=[{"name": "a"}, {"name": "b"}],
-            resolution="r", outcome="resolved",
+            query="test",
+            tool_sequence=[{"name": "a"}, {"name": "b"}],
+            resolution="r",
+            outcome="resolved",
         )
-        rid = extract_runbook(store, iid, name="my-custom-runbook")
+        extract_runbook(store, iid, name="my-custom-runbook")
         runbooks = store.list_runbooks()
         assert runbooks[0]["name"] == "my-custom-runbook"
 
@@ -59,14 +66,18 @@ class TestExtractRunbook:
 class TestIsDuplicateRunbook:
     def test_detects_duplicate(self, store):
         store.save_runbook(
-            name="rb", description="d", trigger_keywords="kw",
+            name="rb",
+            description="d",
+            trigger_keywords="kw",
             tool_sequence=[{"name": "list_pods"}, {"name": "get_pod_logs"}],
         )
         assert is_duplicate_runbook(store, [{"name": "list_pods"}, {"name": "get_pod_logs"}]) is True
 
     def test_different_sequence(self, store):
         store.save_runbook(
-            name="rb", description="d", trigger_keywords="kw",
+            name="rb",
+            description="d",
+            trigger_keywords="kw",
             tool_sequence=[{"name": "list_pods"}, {"name": "get_pod_logs"}],
         )
         assert is_duplicate_runbook(store, [{"name": "list_pods"}, {"name": "describe_pod"}]) is False

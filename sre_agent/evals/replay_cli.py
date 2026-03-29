@@ -59,14 +59,16 @@ def _make_parser() -> argparse.ArgumentParser:
     return p
 
 
-def _make_mock_client(tool_names: list[str], final_text: str = "Based on my investigation, the issue is likely caused by a dependency failure. I recommend checking the logs and restarting the affected deployment because the root cause appears to be a transient error."):
+def _make_mock_client(
+    tool_names: list[str],
+    final_text: str = "Based on my investigation, the issue is likely caused by a dependency failure. I recommend checking the logs and restarting the affected deployment because the root cause appears to be a transient error.",
+):
     """Build a mock client that calls the given tools then responds with text."""
     from types import SimpleNamespace
     from unittest.mock import MagicMock
 
     tool_blocks = [
-        SimpleNamespace(type="tool_use", id=f"t{i}", name=name, input={})
-        for i, name in enumerate(tool_names)
+        SimpleNamespace(type="tool_use", id=f"t{i}", name=name, input={}) for i, name in enumerate(tool_names)
     ]
     text_block = SimpleNamespace(type="text", text=final_text)
 
@@ -75,7 +77,8 @@ def _make_mock_client(tool_names: list[str], final_text: str = "Based on my inve
     for block in tool_blocks:
         tool_events.append(SimpleNamespace(type="content_block_start", content_block=block))
     tool_msg = SimpleNamespace(
-        content=tool_blocks, stop_reason="tool_use",
+        content=tool_blocks,
+        stop_reason="tool_use",
     )
     tool_stream = MagicMock()
     tool_stream.__enter__ = MagicMock(return_value=tool_stream)
@@ -88,7 +91,8 @@ def _make_mock_client(tool_names: list[str], final_text: str = "Based on my inve
         SimpleNamespace(type="content_block_delta", delta=SimpleNamespace(type="text_delta", text=final_text)),
     ]
     text_msg = SimpleNamespace(
-        content=[text_block], stop_reason="end_turn",
+        content=[text_block],
+        stop_reason="end_turn",
     )
     text_stream = MagicMock()
     text_stream.__enter__ = MagicMock(return_value=text_stream)
@@ -101,12 +105,15 @@ def _make_mock_client(tool_names: list[str], final_text: str = "Based on my inve
     return client
 
 
-def _run_fixture(name: str, use_judge: bool = False, model: str = "claude-sonnet-4-20250514", dry_run: bool = False) -> dict:
+def _run_fixture(
+    name: str, use_judge: bool = False, model: str = "claude-sonnet-4-20250514", dry_run: bool = False
+) -> dict:
     """Run a single fixture and return the scored result."""
     fixture = load_fixture(name)
     harness = ReplayHarness(fixture["recorded_responses"])
 
     import os
+
     os.environ["PULSE_AGENT_HARNESS"] = "0"  # Disable harness for replay
 
     if dry_run:
@@ -115,6 +122,7 @@ def _run_fixture(name: str, use_judge: bool = False, model: str = "claude-sonnet
         client = _make_mock_client(expected_tools)
     else:
         from ..agent import create_client
+
         os.environ.setdefault("PULSE_AGENT_MODEL", model)
         client = create_client()
     result = harness.run(client=client, prompt=fixture["prompt"])
@@ -130,6 +138,7 @@ def _run_fixture(name: str, use_judge: bool = False, model: str = "claude-sonnet
 
     if use_judge:
         from .judge import judge_response
+
         judge_result = judge_response(
             prompt=fixture["prompt"],
             response=result["response"],
@@ -146,7 +155,7 @@ def _format_text(results: list[dict]) -> str:
     for r in results:
         score = r["score"]
         status = "PASS" if score["passed"] else "FAIL"
-        lines.append(f"\n{'='*60}")
+        lines.append(f"\n{'=' * 60}")
         lines.append(f"Fixture: {r['fixture']}  [{status}]  Score: {score['score']}/100")
         lines.append(f"Duration: {r['duration_ms']:.0f}ms")
         lines.append(f"Tools called: {', '.join(score['tool_calls']) or '(none)'}")
@@ -162,7 +171,7 @@ def _format_text(results: list[dict]) -> str:
     # Summary
     total = len(results)
     passed = sum(1 for r in results if r["score"]["passed"])
-    lines.append(f"\n{'='*60}")
+    lines.append(f"\n{'=' * 60}")
     lines.append(f"Summary: {passed}/{total} fixtures passed")
     return "\n".join(lines)
 
@@ -182,13 +191,15 @@ def main() -> None:
             result = _run_fixture(name, use_judge=args.judge, model=args.model, dry_run=args.dry_run)
             results.append(result)
         except Exception as e:
-            results.append({
-                "fixture": name,
-                "error": str(e),
-                "score": {"passed": False, "score": 0, "checks": [], "tool_calls": []},
-                "response_preview": "",
-                "duration_ms": 0,
-            })
+            results.append(
+                {
+                    "fixture": name,
+                    "error": str(e),
+                    "score": {"passed": False, "score": 0, "checks": [], "tool_calls": []},
+                    "response_preview": "",
+                    "duration_ms": 0,
+                }
+            )
 
     if args.format == "json":
         print(json.dumps(results, indent=2, default=str))

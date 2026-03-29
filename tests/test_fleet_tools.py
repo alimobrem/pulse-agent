@@ -7,9 +7,8 @@ import pytest
 
 @pytest.fixture(autouse=True)
 def mock_k8s_config():
-    with patch("sre_agent.k8s_client.config"):
-        with patch("sre_agent.k8s_client._initialized", True):
-            yield
+    with patch("sre_agent.k8s_client.config"), patch("sre_agent.k8s_client._initialized", True):
+        yield
 
 
 def _mock_managed_clusters():
@@ -24,6 +23,7 @@ class TestFleetListClusters:
     @patch("sre_agent.fleet_tools._get_managed_clusters", return_value=_mock_managed_clusters())
     def test_lists_clusters(self, mock_clusters):
         from sre_agent.fleet_tools import fleet_list_clusters
+
         result = fleet_list_clusters()
         text, component = result
         assert "prod-east" in text
@@ -35,6 +35,7 @@ class TestFleetListClusters:
     @patch("sre_agent.fleet_tools._get_managed_clusters", return_value=[])
     def test_no_clusters(self, mock_clusters):
         from sre_agent.fleet_tools import fleet_list_clusters
+
         result = fleet_list_clusters()
         assert "No managed clusters" in result
 
@@ -43,6 +44,7 @@ class TestFleetListPods:
     @patch("sre_agent.fleet_tools._get_managed_clusters", return_value=[])
     def test_no_clusters(self, mock_clusters):
         from sre_agent.fleet_tools import fleet_list_pods
+
         result = fleet_list_pods()
         assert "No managed clusters" in result
 
@@ -91,6 +93,7 @@ class TestFleetCompareResource:
     @patch("sre_agent.fleet_tools._get_managed_clusters", return_value=[])
     def test_no_clusters(self, mock_clusters):
         from sre_agent.fleet_tools import fleet_compare_resource
+
         result = fleet_compare_resource(kind="Deployment", name="web", namespace="default")
         assert "No managed clusters" in result
 

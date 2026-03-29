@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from collections import Counter, defaultdict
 from datetime import datetime, timedelta
 
@@ -14,9 +13,7 @@ def detect_patterns(store: IncidentStore) -> list[dict]:
 
     Returns list of newly detected patterns.
     """
-    incidents = store.db.fetchall(
-        "SELECT * FROM incidents ORDER BY timestamp DESC LIMIT 200"
-    )
+    incidents = store.db.fetchall("SELECT * FROM incidents ORDER BY timestamp DESC LIMIT 200")
 
     if len(incidents) < 3:
         return []
@@ -33,14 +30,10 @@ def detect_patterns(store: IncidentStore) -> list[dict]:
 
     for (kw1, kw2), count in keyword_groups.most_common(10):
         if count >= 3:
-            matching = [
-                inc["id"] for inc in incidents
-                if kw1 in inc["query_keywords"] and kw2 in inc["query_keywords"]
-            ]
+            matching = [inc["id"] for inc in incidents if kw1 in inc["query_keywords"] and kw2 in inc["query_keywords"]]
             if len(matching) >= 3:
                 existing = store.db.fetchall(
-                    "SELECT id FROM patterns WHERE keywords LIKE ? AND keywords LIKE ?",
-                    (f"%{kw1}%", f"%{kw2}%")
+                    "SELECT id FROM patterns WHERE keywords LIKE ? AND keywords LIKE ?", (f"%{kw1}%", f"%{kw2}%")
                 )
                 if not existing:
                     pid = store.record_pattern(
@@ -64,7 +57,8 @@ def detect_patterns(store: IncidentStore) -> list[dict]:
             continue
 
         same_time = [
-            i for i in incidents
+            i
+            for i in incidents
             if i["error_type"] == inc["error_type"]
             and i["id"] != inc["id"]
             and abs(datetime.fromisoformat(i["timestamp"]).hour - hour) <= 1
@@ -75,7 +69,7 @@ def detect_patterns(store: IncidentStore) -> list[dict]:
             ids = [inc["id"]] + [i["id"] for i in same_time]
             existing = store.db.fetchall(
                 "SELECT id FROM patterns WHERE pattern_type = 'time_based' AND keywords LIKE ?",
-                (f"%{inc['error_type'].lower()}%",)
+                (f"%{inc['error_type'].lower()}%",),
             )
             if not existing:
                 pid = store.record_pattern(
@@ -121,7 +115,7 @@ def detect_patterns(store: IncidentStore) -> list[dict]:
             ids = sorted(set(correlation_ids[(cat_a, cat_b)]))[:20]
             existing = store.db.fetchall(
                 "SELECT id FROM patterns WHERE pattern_type = 'correlation' AND keywords LIKE ? AND keywords LIKE ?",
-                (f"%{cat_a.lower()}%", f"%{cat_b.lower()}%")
+                (f"%{cat_a.lower()}%", f"%{cat_b.lower()}%"),
             )
             if not existing:
                 pid = store.record_pattern(

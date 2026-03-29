@@ -7,10 +7,10 @@ import tempfile
 
 from sre_agent.db import Database, get_database, reset_database, set_database
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _make_sqlite_db(tmp_path: str) -> Database:
     path = os.path.join(tmp_path, "test.db")
@@ -21,12 +21,11 @@ def _make_sqlite_db(tmp_path: str) -> Database:
 # Database with SQLite URL
 # ---------------------------------------------------------------------------
 
+
 class TestDatabaseSQLite:
     def test_create_table_and_insert(self, tmp_path):
         db = _make_sqlite_db(str(tmp_path))
-        db.execute(
-            "CREATE TABLE IF NOT EXISTS t (id TEXT PRIMARY KEY, val INTEGER)"
-        )
+        db.execute("CREATE TABLE IF NOT EXISTS t (id TEXT PRIMARY KEY, val INTEGER)")
         db.execute("INSERT INTO t (id, val) VALUES (?, ?)", ("a", 1))
         db.commit()
         row = db.fetchone("SELECT * FROM t WHERE id = ?", ("a",))
@@ -89,6 +88,7 @@ class TestDatabaseSQLite:
 # Query translation
 # ---------------------------------------------------------------------------
 
+
 class TestQueryTranslation:
     def test_sqlite_keeps_question_marks(self):
         db = Database(":memory:")
@@ -108,13 +108,12 @@ class TestQueryTranslation:
 # Schema translation
 # ---------------------------------------------------------------------------
 
+
 class TestSchemaTranslation:
     def test_autoincrement_to_serial(self):
         db = Database(":memory:")
         db.is_postgres = True
-        result = db._translate_schema(
-            "CREATE TABLE t (id INTEGER PRIMARY KEY AUTOINCREMENT, v TEXT)"
-        )
+        result = db._translate_schema("CREATE TABLE t (id INTEGER PRIMARY KEY AUTOINCREMENT, v TEXT)")
         assert "SERIAL PRIMARY KEY" in result
         assert "AUTOINCREMENT" not in result
         db.close()
@@ -144,6 +143,7 @@ class TestSchemaTranslation:
 # ---------------------------------------------------------------------------
 # Singleton management
 # ---------------------------------------------------------------------------
+
 
 class TestSingleton:
     def setup_method(self):
@@ -179,6 +179,7 @@ class TestSingleton:
 # ---------------------------------------------------------------------------
 # Health check
 # ---------------------------------------------------------------------------
+
 
 class TestHealthCheck:
     def test_healthy_connection(self):

@@ -1,6 +1,5 @@
 """Tests for self-evaluation scoring."""
 
-import pytest
 from sre_agent.memory.evaluation import evaluate_interaction
 
 
@@ -40,49 +39,61 @@ class TestEvaluation:
 
     def test_short_response_lower_score(self):
         result = evaluate_interaction(
-            tool_calls=[], rejected_count=0,
+            tool_calls=[],
+            rejected_count=0,
             user_confirmed_resolution=None,
-            duration_seconds=10, final_response="ok",
+            duration_seconds=10,
+            final_response="ok",
         )
         assert result.breakdown["resolution"] == 0.3
 
     def test_efficiency_optimal(self):
         result = evaluate_interaction(
             tool_calls=[{"name": f"t{i}"} for i in range(3)],
-            rejected_count=0, user_confirmed_resolution=True,
-            duration_seconds=30, final_response="done",
+            rejected_count=0,
+            user_confirmed_resolution=True,
+            duration_seconds=30,
+            final_response="done",
         )
         assert result.breakdown["efficiency"] == 1.0
 
     def test_efficiency_many_tools(self):
         result = evaluate_interaction(
             tool_calls=[{"name": f"t{i}"} for i in range(18)],
-            rejected_count=0, user_confirmed_resolution=True,
-            duration_seconds=30, final_response="done",
+            rejected_count=0,
+            user_confirmed_resolution=True,
+            duration_seconds=30,
+            final_response="done",
         )
         assert result.breakdown["efficiency"] == 0.2
 
     def test_safety_rejections(self):
         result = evaluate_interaction(
-            tool_calls=[], rejected_count=2,
+            tool_calls=[],
+            rejected_count=2,
             user_confirmed_resolution=True,
-            duration_seconds=30, final_response="done",
+            duration_seconds=30,
+            final_response="done",
         )
         assert result.breakdown["safety"] == 0.4
 
     def test_speed_slow(self):
         result = evaluate_interaction(
-            tool_calls=[], rejected_count=0,
+            tool_calls=[],
+            rejected_count=0,
             user_confirmed_resolution=True,
-            duration_seconds=400, final_response="done",
+            duration_seconds=400,
+            final_response="done",
         )
         assert result.breakdown["speed"] == 0.0
 
     def test_speed_medium(self):
         result = evaluate_interaction(
-            tool_calls=[], rejected_count=0,
+            tool_calls=[],
+            rejected_count=0,
             user_confirmed_resolution=True,
-            duration_seconds=180, final_response="done",
+            duration_seconds=180,
+            final_response="done",
         )
         assert 0.0 < result.breakdown["speed"] < 1.0
 

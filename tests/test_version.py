@@ -1,7 +1,8 @@
 """Verify all version references agree."""
 
-import pytest
 from importlib.metadata import version
+
+import pytest
 
 
 def test_api_version_matches_package():

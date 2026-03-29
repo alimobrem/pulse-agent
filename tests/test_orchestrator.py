@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-import pytest
-
-from sre_agent.orchestrator import classify_intent, build_orchestrated_config
+from sre_agent.orchestrator import build_orchestrated_config, classify_intent
 
 
 class TestClassifyIntent:

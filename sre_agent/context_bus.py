@@ -16,8 +16,8 @@ import threading
 import time
 from dataclasses import dataclass, field
 
-from .db import get_database
 from . import db_schema
+from .db import get_database
 
 logger = logging.getLogger("pulse_agent.context_bus")
 
@@ -132,15 +132,17 @@ class ContextBus:
                             resources = json.loads(resources)
                         except Exception:
                             resources = []
-                    entries.append(ContextEntry(
-                        source=r["source"],
-                        category=r["category"],
-                        summary=r["summary"],
-                        details=details,
-                        timestamp=r["timestamp"] / 1000.0,  # convert ms back to seconds
-                        namespace=r["namespace"],
-                        resources=resources,
-                    ))
+                    entries.append(
+                        ContextEntry(
+                            source=r["source"],
+                            category=r["category"],
+                            summary=r["summary"],
+                            details=details,
+                            timestamp=r["timestamp"] / 1000.0,  # convert ms back to seconds
+                            namespace=r["namespace"],
+                            resources=resources,
+                        )
+                    )
                 return entries
             except Exception as e:
                 logger.warning("Failed to get context entries: %s", e)

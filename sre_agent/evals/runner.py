@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from .rubric import DEFAULT_RUBRIC, EvalRubric, validate_rubric
-from .types import EvalSuiteResult, EvalScenario, ScenarioScore
+from .types import EvalScenario, EvalSuiteResult, ScenarioScore
 
 
 def _clamp(v: float, lo: float = 0.0, hi: float = 1.0) -> float:
@@ -42,9 +42,7 @@ def _operational_quality(s: EvalScenario) -> float:
     verification_quality = 1.0 if s.verification_passed is not None else 0.4
     rollback_quality = 1.0 if s.rollback_available else 0.5
     explanation_quality = 1.0 if "because" in s.final_response.lower() else 0.6
-    return _clamp(
-        (response_quality + verification_quality + rollback_quality + explanation_quality) / 4.0
-    )
+    return _clamp((response_quality + verification_quality + rollback_quality + explanation_quality) / 4.0)
 
 
 def _reliability(s: EvalScenario) -> float:

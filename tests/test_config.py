@@ -1,10 +1,11 @@
 """Tests for sre_agent.config — Pydantic v2 Settings validation."""
 
 import os
-import pytest
 from unittest.mock import patch
 
-from sre_agent.config import validate_config, _reset_settings
+import pytest
+
+from sre_agent.config import _reset_settings, validate_config
 
 
 class TestValidateConfig:
@@ -20,7 +21,9 @@ class TestValidateConfig:
             validate_config()  # Should not raise
 
     def test_valid_config_with_vertex(self):
-        with patch.dict(os.environ, {"ANTHROPIC_VERTEX_PROJECT_ID": "my-project", "CLOUD_ML_REGION": "us-east5"}, clear=False):
+        with patch.dict(
+            os.environ, {"ANTHROPIC_VERTEX_PROJECT_ID": "my-project", "CLOUD_ML_REGION": "us-east5"}, clear=False
+        ):
             _reset_settings()
             validate_config()  # Should not raise
 

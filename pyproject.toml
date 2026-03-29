@@ -14,7 +14,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-test = ["pytest>=8.0"]
+test = ["pytest>=8.0", "ruff>=0.4.0", "mypy>=1.0"]
 postgres = ["psycopg2-binary>=2.9.0"]
 
 [project.scripts]
@@ -30,3 +30,51 @@ include = ["sre_agent*"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 120
+
+[tool.ruff.lint]
+select = [
+    "E",      # pycodestyle errors
+    "W",      # pycodestyle warnings
+    "F",      # pyflakes
+    "I",      # isort
+    "N",      # pep8-naming
+    "UP",     # pyupgrade
+    "B",      # flake8-bugbear
+    "SIM",    # flake8-simplify
+    "TCH",    # flake8-type-checking
+    "RUF",    # ruff-specific
+]
+ignore = [
+    "E501",   # line too long (handled by formatter)
+    "E402",   # import not at top (used for circular import workarounds)
+    "B008",   # function call in default arg (used by FastAPI Depends)
+    "B904",   # raise from in except (not always appropriate)
+    "B905",   # zip without strict (Python 3.10+)
+    "SIM102", # nested if (readability preference)
+    "SIM105", # contextlib.suppress (readability preference)
+    "SIM108", # ternary operator (readability preference)
+    "TC001",  # move app imports to TYPE_CHECKING block (too pedantic)
+    "TC003",  # move stdlib imports to TYPE_CHECKING block (too pedantic)
+    "RUF005", # unpacking instead of concatenation (readability preference)
+    "RUF006", # asyncio.create_task without storing reference (intentional fire-and-forget)
+    "B023",   # function definition does not bind loop variable (false positive for closures)
+    "N806",   # variable in function should be lowercase (used for local constants)
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["sre_agent"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+
+[tool.mypy]
+python_version = "3.11"
+warn_return_any = false
+warn_unused_configs = true
+ignore_missing_imports = true
+check_untyped_defs = false

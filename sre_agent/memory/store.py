@@ -6,17 +6,17 @@ import functools
 import json
 import logging
 import os
-from datetime import datetime, timezone
-from pathlib import Path
+from datetime import UTC, datetime
 
-from ..db import Database
 from .. import db_schema
+from ..db import Database
 
 logger = logging.getLogger("pulse_agent")
 
 
 def db_safe(default=None):
     """Decorator that catches database errors and returns a default value."""
+
     def decorator(fn):
         @functools.wraps(fn)
         def wrapper(self, *args, **kwargs):
@@ -27,16 +27,22 @@ def db_safe(default=None):
                 try:
                     from ..error_tracker import get_tracker
                     from ..errors import ToolError
-                    get_tracker().record(ToolError(
-                        message=f"Memory system error: {type(e).__name__}",
-                        category="server",
-                        operation=f"memory.{fn.__name__}",
-                    ))
+
+                    get_tracker().record(
+                        ToolError(
+                            message=f"Memory system error: {type(e).__name__}",
+                            category="server",
+                            operation=f"memory.{fn.__name__}",
+                        )
+                    )
                 except Exception:
                     pass
                 return default
+
         return wrapper
+
     return decorator
+
 
 DEFAULT_DB_PATH = os.environ.get("PULSE_AGENT_DATABASE_URL", "sqlite:///tmp/pulse_agent/pulse.db")
 
@@ -55,13 +61,55 @@ SCHEMA = (
     + _STORE_INDEXES
 )
 
-_STOP_WORDS = frozenset({
-    "the", "a", "an", "is", "are", "was", "were", "in", "on", "at",
-    "to", "for", "of", "with", "by", "from", "it", "this", "that",
-    "what", "why", "how", "can", "do", "does", "my", "me", "i",
-    "all", "and", "or", "not", "no", "be", "been", "being", "have",
-    "has", "had", "will", "would", "could", "should", "may", "might",
-})
+_STOP_WORDS = frozenset(
+    {
+        "the",
+        "a",
+        "an",
+        "is",
+        "are",
+        "was",
+        "were",
+        "in",
+        "on",
+        "at",
+        "to",
+        "for",
+        "of",
+        "with",
+        "by",
+        "from",
+        "it",
+        "this",
+        "that",
+        "what",
+        "why",
+        "how",
+        "can",
+        "do",
+        "does",
+        "my",
+        "me",
+        "i",
+        "all",
+        "and",
+        "or",
+        "not",
+        "no",
+        "be",
+        "been",
+        "being",
+        "have",
+        "has",
+        "had",
+        "will",
+        "would",
+        "could",
+        "should",
+        "may",
+        "might",
+    }
+)
 
 
 def extract_keywords(text: str) -> str:
@@ -89,41 +137,55 @@ class IncidentStore:
         self.db.executescript(SCHEMA)
 
     @db_safe(default=-1)
-    def record_incident(self, query: str, tool_sequence: list[dict],
-                        resolution: str, outcome: str = "unknown",
-                        namespace: str = "", resource_type: str = "",
-                        error_type: str = "", tool_count: int = 0,
-                        rejected_tools: int = 0, duration_seconds: float = 0,
-                        score: float = 0) -> int:
+    def record_incident(
+        self,
+        query: str,
+        tool_sequence: list[dict],
+        resolution: str,
+        outcome: str = "unknown",
+        namespace: str = "",
+        resource_type: str = "",
+        error_type: str = "",
+        tool_count: int = 0,
+        rejected_tools: int = 0,
+        duration_seconds: float = 0,
+        score: float = 0,
+    ) -> int:
         keywords = extract_keywords(query)
         self.db.execute(
             """INSERT INTO incidents (timestamp, query, query_keywords, tool_sequence,
                resolution, outcome, namespace, resource_type, error_type,
                tool_count, rejected_tools, duration_seconds, score)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (datetime.now(timezone.utc).isoformat(), query, keywords,
-             json.dumps(tool_sequence), resolution[:2000], outcome, namespace,
-             resource_type, error_type, tool_count, rejected_tools,
-             duration_seconds, score)
+            (
+                datetime.now(UTC).isoformat(),
+                query,
+                keywords,
+                json.dumps(tool_sequence),
+                resolution[:2000],
+                outcome,
+                namespace,
+                resource_type,
+                error_type,
+                tool_count,
+                rejected_tools,
+                duration_seconds,
+                score,
+            ),
         )
         self.db.commit()
         return self.db.lastrowid
 
     @db_safe(default=None)
     def update_incident_outcome(self, incident_id: int, outcome: str, score: float) -> None:
-        self.db.execute(
-            "UPDATE incidents SET outcome = ?, score = ? WHERE id = ?",
-            (outcome, score, incident_id)
-        )
+        self.db.execute("UPDATE incidents SET outcome = ?, score = ? WHERE id = ?", (outcome, score, incident_id))
         self.db.commit()
 
     @db_safe(default=[])
     def search_incidents(self, query: str, limit: int = 5) -> list[dict]:
         from .retrieval import _tfidf_similarity
 
-        incidents = self.db.fetchall(
-            "SELECT * FROM incidents ORDER BY timestamp DESC LIMIT 200"
-        )
+        incidents = self.db.fetchall("SELECT * FROM incidents ORDER BY timestamp DESC LIMIT 200")
         if not incidents:
             return []
         documents = [f"{inc['query']} {inc['resolution']}" for inc in incidents]
@@ -141,8 +203,7 @@ class IncidentStore:
         from .retrieval import _tfidf_similarity
 
         incidents = self.db.fetchall(
-            "SELECT * FROM incidents WHERE score < ? AND score > 0 "
-            "ORDER BY timestamp DESC LIMIT 200",
+            "SELECT * FROM incidents WHERE score < ? AND score > 0 ORDER BY timestamp DESC LIMIT 200",
             (threshold,),
         )
         if not incidents:
@@ -156,17 +217,21 @@ class IncidentStore:
         )
         return [inc for sim, inc in ranked if sim > 0.1][:limit]
 
-    def save_runbook(self, name: str, description: str, trigger_keywords: str,
-                     tool_sequence: list[dict], source_incident_id: int | None = None) -> int:
-        now = datetime.now(timezone.utc).isoformat()
+    def save_runbook(
+        self,
+        name: str,
+        description: str,
+        trigger_keywords: str,
+        tool_sequence: list[dict],
+        source_incident_id: int | None = None,
+    ) -> int:
+        now = datetime.now(UTC).isoformat()
         # Check for existing runbook with same name — update instead of duplicating
-        existing = self.db.fetchone(
-            "SELECT id, success_count FROM runbooks WHERE name = ?", (name,)
-        )
+        existing = self.db.fetchone("SELECT id, success_count FROM runbooks WHERE name = ?", (name,))
         if existing:
             self.db.execute(
                 "UPDATE runbooks SET tool_sequence = ?, updated_at = ?, success_count = success_count + 1 WHERE id = ?",
-                (json.dumps(tool_sequence), now, existing["id"])
+                (json.dumps(tool_sequence), now, existing["id"]),
             )
             self.db.commit()
             return existing["id"]
@@ -174,8 +239,7 @@ class IncidentStore:
             """INSERT INTO runbooks (name, description, trigger_keywords, tool_sequence,
                created_at, updated_at, source_incident_id)
                VALUES (?, ?, ?, ?, ?, ?, ?)""",
-            (name, description, trigger_keywords, json.dumps(tool_sequence),
-             now, now, source_incident_id)
+            (name, description, trigger_keywords, json.dumps(tool_sequence), now, now, source_incident_id),
         )
         self.db.commit()
         return self.db.lastrowid
@@ -190,32 +254,27 @@ class IncidentStore:
         return self.db.fetchall(
             f"""SELECT * FROM runbooks WHERE ({conditions})
                 ORDER BY success_count DESC LIMIT ?""",
-            tuple(params + [limit])
+            tuple(params + [limit]),
         )
 
     def list_runbooks(self, limit: int = 10) -> list[dict]:
-        return self.db.fetchall(
-            "SELECT * FROM runbooks ORDER BY success_count DESC LIMIT ?", (limit,)
-        )
+        return self.db.fetchall("SELECT * FROM runbooks ORDER BY success_count DESC LIMIT ?", (limit,))
 
-    def record_pattern(self, pattern_type: str, description: str,
-                       keywords: str, incident_ids: list[int],
-                       metadata: dict | None = None) -> int:
-        now = datetime.now(timezone.utc).isoformat()
+    def record_pattern(
+        self, pattern_type: str, description: str, keywords: str, incident_ids: list[int], metadata: dict | None = None
+    ) -> int:
+        now = datetime.now(UTC).isoformat()
         self.db.execute(
             """INSERT INTO patterns (pattern_type, description, keywords,
                incident_ids, last_seen, first_seen, metadata)
                VALUES (?, ?, ?, ?, ?, ?, ?)""",
-            (pattern_type, description, keywords, json.dumps(incident_ids),
-             now, now, json.dumps(metadata or {}))
+            (pattern_type, description, keywords, json.dumps(incident_ids), now, now, json.dumps(metadata or {})),
         )
         self.db.commit()
         return self.db.lastrowid
 
     def list_patterns(self, limit: int = 10) -> list[dict]:
-        return self.db.fetchall(
-            "SELECT * FROM patterns ORDER BY frequency DESC, last_seen DESC LIMIT ?", (limit,)
-        )
+        return self.db.fetchall("SELECT * FROM patterns ORDER BY frequency DESC, last_seen DESC LIMIT ?", (limit,))
 
     def search_patterns(self, query: str, limit: int = 3) -> list[dict]:
         keywords = extract_keywords(query).split()
@@ -224,16 +283,14 @@ class IncidentStore:
         conditions = " OR ".join(["keywords LIKE ?"] * len(keywords))
         params = [f"%{kw}%" for kw in keywords]
         return self.db.fetchall(
-            f"SELECT * FROM patterns WHERE ({conditions}) ORDER BY frequency DESC LIMIT ?",
-            tuple(params + [limit])
+            f"SELECT * FROM patterns WHERE ({conditions}) ORDER BY frequency DESC LIMIT ?", tuple(params + [limit])
         )
 
     @db_safe(default=None)
-    def record_metric(self, metric_name: str, value: float,
-                      window: str = "session") -> None:
+    def record_metric(self, metric_name: str, value: float, window: str = "session") -> None:
         self.db.execute(
             "INSERT INTO metrics (timestamp, metric_name, value, window) VALUES (?, ?, ?, ?)",
-            (datetime.now(timezone.utc).isoformat(), metric_name, value, window)
+            (datetime.now(UTC).isoformat(), metric_name, value, window),
         )
         self.db.commit()
 
@@ -271,12 +328,9 @@ class IncidentStore:
     @db_safe(default=0)
     def import_runbooks(self, runbooks: list[dict]) -> int:
         """Import runbooks from JSON. Skips duplicates by name. Returns count imported."""
-        existing_names = {
-            r["name"]
-            for r in self.db.fetchall("SELECT name FROM runbooks")
-        }
+        existing_names = {r["name"] for r in self.db.fetchall("SELECT name FROM runbooks")}
         imported = 0
-        now = datetime.now(timezone.utc).isoformat()
+        now = datetime.now(UTC).isoformat()
         for rb in runbooks:
             name = rb.get("name", "")
             if not name or name in existing_names:
@@ -326,12 +380,9 @@ class IncidentStore:
     @db_safe(default=0)
     def import_patterns(self, patterns: list[dict]) -> int:
         """Import patterns from JSON. Skips duplicates by description. Returns count imported."""
-        existing_descs = {
-            r["description"]
-            for r in self.db.fetchall("SELECT description FROM patterns")
-        }
+        existing_descs = {r["description"] for r in self.db.fetchall("SELECT description FROM patterns")}
         imported = 0
-        now = datetime.now(timezone.utc).isoformat()
+        now = datetime.now(UTC).isoformat()
         for pat in patterns:
             desc = pat.get("description", "")
             if not desc or desc in existing_descs:
@@ -358,17 +409,14 @@ class IncidentStore:
 
     def cleanup(self, max_age_days: int = 90) -> int:
         """Delete incidents older than max_age_days. Returns number of deleted rows."""
-        cutoff = datetime.now(timezone.utc)
+        cutoff = datetime.now(UTC)
         # SQLite datetime comparison: timestamps stored as ISO strings
         from datetime import timedelta
+
         cutoff_str = (cutoff - timedelta(days=max_age_days)).isoformat()
-        cur = self.db.execute(
-            "DELETE FROM incidents WHERE timestamp < ?", (cutoff_str,)
-        )
+        cur = self.db.execute("DELETE FROM incidents WHERE timestamp < ?", (cutoff_str,))
         # Clean up orphaned metrics too
-        self.db.execute(
-            "DELETE FROM metrics WHERE timestamp < ?", (cutoff_str,)
-        )
+        self.db.execute("DELETE FROM metrics WHERE timestamp < ?", (cutoff_str,))
         self.db.execute("VACUUM")
         self.db.commit()
         return cur.rowcount

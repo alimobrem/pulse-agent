@@ -3,16 +3,14 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
-from unittest.mock import MagicMock, patch, call
-
-import pytest
+from unittest.mock import MagicMock
 
 from sre_agent.agent import (
-    _sanitize_content,
-    _execute_tool,
-    run_agent_streaming,
     MAX_ITERATIONS,
     WRITE_TOOLS,
+    _execute_tool,
+    _sanitize_content,
+    run_agent_streaming,
 )
 
 
@@ -23,10 +21,11 @@ class TestSanitizeContent:
         assert result == [{"type": "text", "text": "hello"}]
 
     def test_tool_use_strips_caller(self):
-        blocks = [SimpleNamespace(
-            type="tool_use", id="t1", name="list_pods",
-            input={"namespace": "default"}, caller="some_caller"
-        )]
+        blocks = [
+            SimpleNamespace(
+                type="tool_use", id="t1", name="list_pods", input={"namespace": "default"}, caller="some_caller"
+            )
+        ]
         result = _sanitize_content(blocks)
         assert result == [{"type": "tool_use", "id": "t1", "name": "list_pods", "input": {"namespace": "default"}}]
         assert "caller" not in result[0]
@@ -112,8 +111,9 @@ class TestConfirmationGate:
         tool_use_response = SimpleNamespace(
             stop_reason="tool_use",
             content=[
-                SimpleNamespace(type="tool_use", id="t1", name="delete_pod",
-                                input={"namespace": "default", "pod_name": "victim"}),
+                SimpleNamespace(
+                    type="tool_use", id="t1", name="delete_pod", input={"namespace": "default", "pod_name": "victim"}
+                ),
             ],
         )
         final_response = SimpleNamespace(
@@ -125,7 +125,7 @@ class TestConfirmationGate:
         mock_tool = MagicMock()
         mock_tool.call.return_value = "deleted"
 
-        result = run_agent_streaming(
+        run_agent_streaming(
             client=client,
             messages=[{"role": "user", "content": "delete pod"}],
             system_prompt="test",
@@ -143,8 +143,12 @@ class TestConfirmationGate:
         tool_use_response = SimpleNamespace(
             stop_reason="tool_use",
             content=[
-                SimpleNamespace(type="tool_use", id="t1", name="scale_deployment",
-                                input={"namespace": "default", "name": "nginx", "replicas": 5}),
+                SimpleNamespace(
+                    type="tool_use",
+                    id="t1",
+                    name="scale_deployment",
+                    input={"namespace": "default", "name": "nginx", "replicas": 5},
+                ),
             ],
         )
         final_response = SimpleNamespace(
@@ -156,7 +160,7 @@ class TestConfirmationGate:
         mock_tool = MagicMock()
         mock_tool.call.return_value = "Scaled default/nginx to 5 replicas."
 
-        result = run_agent_streaming(
+        run_agent_streaming(
             client=client,
             messages=[{"role": "user", "content": "scale nginx to 5"}],
             system_prompt="test",
@@ -237,11 +241,21 @@ class TestIterationGuard:
 
 class TestWriteToolSet:
     def test_all_write_tools_accounted_for(self):
-        expected = {"scale_deployment", "restart_deployment", "cordon_node", "uncordon_node",
-                    "delete_pod", "apply_yaml", "create_network_policy",
-                    "rollback_deployment", "drain_node", "propose_git_change",
-                    "install_gitops_operator", "create_argo_application"}
-        assert WRITE_TOOLS == expected
+        expected = {
+            "scale_deployment",
+            "restart_deployment",
+            "cordon_node",
+            "uncordon_node",
+            "delete_pod",
+            "apply_yaml",
+            "create_network_policy",
+            "rollback_deployment",
+            "drain_node",
+            "propose_git_change",
+            "install_gitops_operator",
+            "create_argo_application",
+        }
+        assert expected == WRITE_TOOLS
 
     def test_read_tools_not_in_write_set(self):
         read_tools = {"list_pods", "list_nodes", "get_events", "describe_pod", "list_namespaces"}

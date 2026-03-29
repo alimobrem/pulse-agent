@@ -7,16 +7,12 @@ import json
 from .store import IncidentStore
 
 
-def extract_runbook(store: IncidentStore, incident_id: int,
-                    name: str | None = None) -> int | None:
+def extract_runbook(store: IncidentStore, incident_id: int, name: str | None = None) -> int | None:
     """Extract a reusable runbook from a resolved incident.
 
     Returns runbook ID or None if not suitable.
     """
-    rows = store.db.fetchall(
-        "SELECT * FROM incidents WHERE id = ? AND outcome = 'resolved'",
-        (incident_id,)
-    )
+    rows = store.db.fetchall("SELECT * FROM incidents WHERE id = ? AND outcome = 'resolved'", (incident_id,))
     if not rows:
         return None
 
@@ -38,7 +34,7 @@ def extract_runbook(store: IncidentStore, incident_id: int,
         parts.append("runbook")
         name = "-".join(parts) or f"runbook-{incident_id}"
 
-    description = f"Learned from: \"{incident['query'][:120]}\""
+    description = f'Learned from: "{incident["query"][:120]}"'
 
     trigger_kws = incident["query_keywords"]
     if incident["error_type"]:

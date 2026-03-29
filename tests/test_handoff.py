@@ -3,13 +3,12 @@
 from __future__ import annotations
 
 import asyncio
-import json
-from unittest.mock import patch, MagicMock, AsyncMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from sre_agent.db import Database, set_database, reset_database
-from sre_agent.context_bus import get_context_bus, ContextEntry
+from sre_agent.context_bus import ContextEntry, get_context_bus
+from sre_agent.db import Database, reset_database, set_database
 from sre_agent.handoff_tools import request_security_scan, request_sre_investigation
 from sre_agent.monitor import MonitorSession
 
@@ -17,8 +16,9 @@ from sre_agent.monitor import MonitorSession
 @pytest.fixture(autouse=True)
 def _use_temp_db(monkeypatch, tmp_path):
     """Use a temp database for each test."""
-    import sre_agent.monitor as _mon
     import sre_agent.context_bus as _cb
+    import sre_agent.monitor as _mon
+
     db_path = str(tmp_path / "test_handoff.db")
     db = Database(f"sqlite:///{db_path}")
     set_database(db)
@@ -102,15 +102,19 @@ class TestProcessHandoffs:
     def test_processes_security_handoff(self, session):
         # Publish a security handoff request
         bus = get_context_bus()
-        bus.publish(ContextEntry(
-            source="sre_agent",
-            category="handoff_request",
-            summary="SRE agent requests security scan",
-            details={"target": "security_agent", "namespace": "prod", "context": "suspicious config"},
-            namespace="prod",
-        ))
+        bus.publish(
+            ContextEntry(
+                source="sre_agent",
+                category="handoff_request",
+                summary="SRE agent requests security scan",
+                details={"target": "security_agent", "namespace": "prod", "context": "suspicious config"},
+                namespace="prod",
+            )
+        )
 
-        with patch("sre_agent.monitor._run_security_followup_sync", return_value={"security_issues": [], "risk_level": "low"}) as mock_sec:
+        with patch(
+            "sre_agent.monitor._run_security_followup_sync", return_value={"security_issues": [], "risk_level": "low"}
+        ) as mock_sec:
             asyncio.get_event_loop().run_until_complete(session.process_handoffs())
             mock_sec.assert_called_once()
             finding_arg = mock_sec.call_args[0][0]
@@ -119,15 +123,25 @@ class TestProcessHandoffs:
 
     def test_processes_sre_handoff(self, session):
         bus = get_context_bus()
-        bus.publish(ContextEntry(
-            source="security_agent",
-            category="handoff_request",
-            summary="Security agent requests SRE investigation",
-            details={"target": "sre_agent", "namespace": "staging", "kind": "Pod", "name": "web-1", "context": "running as root"},
-            namespace="staging",
-        ))
+        bus.publish(
+            ContextEntry(
+                source="security_agent",
+                category="handoff_request",
+                summary="Security agent requests SRE investigation",
+                details={
+                    "target": "sre_agent",
+                    "namespace": "staging",
+                    "kind": "Pod",
+                    "name": "web-1",
+                    "context": "running as root",
+                },
+                namespace="staging",
+            )
+        )
 
-        with patch("sre_agent.monitor._run_proactive_investigation_sync", return_value={"summary": "ok", "confidence": 0.5}) as mock_sre:
+        with patch(
+            "sre_agent.monitor._run_proactive_investigation_sync", return_value={"summary": "ok", "confidence": 0.5}
+        ) as mock_sre:
             asyncio.get_event_loop().run_until_complete(session.process_handoffs())
             mock_sre.assert_called_once()
             finding_arg = mock_sre.call_args[0][0]
@@ -136,14 +150,17 @@ class TestProcessHandoffs:
 
     def test_cleans_up_processed_requests(self, session):
         from sre_agent.db import get_database
+
         bus = get_context_bus()
-        bus.publish(ContextEntry(
-            source="sre_agent",
-            category="handoff_request",
-            summary="test",
-            details={"target": "security_agent", "namespace": "ns1", "context": ""},
-            namespace="ns1",
-        ))
+        bus.publish(
+            ContextEntry(
+                source="sre_agent",
+                category="handoff_request",
+                summary="test",
+                details={"target": "security_agent", "namespace": "ns1", "context": ""},
+                namespace="ns1",
+            )
+        )
 
         with patch("sre_agent.monitor._run_security_followup_sync", return_value={}):
             asyncio.get_event_loop().run_until_complete(session.process_handoffs())
@@ -151,6 +168,7 @@ class TestProcessHandoffs:
         # Verify cleanup
         db = get_database()
         import time
+
         cutoff = int(time.time() * 1000) - 300_000
         rows = db.fetchall(
             "SELECT * FROM context_entries WHERE category = ? AND timestamp > ?",
@@ -164,17 +182,21 @@ class TestProcessHandoffs:
 
     def test_ignores_unknown_target(self, session):
         bus = get_context_bus()
-        bus.publish(ContextEntry(
-            source="unknown",
-            category="handoff_request",
-            summary="test",
-            details={"target": "unknown_agent", "namespace": "ns1", "context": ""},
-            namespace="ns1",
-        ))
+        bus.publish(
+            ContextEntry(
+                source="unknown",
+                category="handoff_request",
+                summary="test",
+                details={"target": "unknown_agent", "namespace": "ns1", "context": ""},
+                namespace="ns1",
+            )
+        )
 
         # Should not call either investigation function
-        with patch("sre_agent.monitor._run_security_followup_sync") as mock_sec, \
-             patch("sre_agent.monitor._run_proactive_investigation_sync") as mock_sre:
+        with (
+            patch("sre_agent.monitor._run_security_followup_sync") as mock_sec,
+            patch("sre_agent.monitor._run_proactive_investigation_sync") as mock_sre,
+        ):
             asyncio.get_event_loop().run_until_complete(session.process_handoffs())
             mock_sec.assert_not_called()
             mock_sre.assert_not_called()

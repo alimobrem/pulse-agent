@@ -13,16 +13,16 @@ import json
 import logging
 import os
 import re
-import threading
 import time
 import uuid
-from datetime import datetime, timezone
+from collections.abc import Callable
+from datetime import UTC, datetime
 from typing import Any
 
-from .db import get_database
 from . import db_schema
-from .k8s_client import get_core_client, get_apps_client, get_custom_client, get_autoscaling_client, safe
+from .db import get_database
 from .errors import ToolError
+from .k8s_client import get_apps_client, get_autoscaling_client, get_core_client, get_custom_client, safe
 
 logger = logging.getLogger("pulse_agent.monitor")
 
@@ -208,26 +208,28 @@ def get_fix_history(page: int = 1, page_size: int = 20, filters: dict | None = N
 
         actions = []
         for r in rows:
-            actions.append({
-                "id": r["id"],
-                "findingId": r["finding_id"],
-                "timestamp": r["timestamp"],
-                "category": r["category"],
-                "tool": r["tool"],
-                "input": json.loads(r["input"]) if r["input"] else {},
-                "status": r["status"],
-                "beforeState": r["before_state"],
-                "afterState": r["after_state"],
-                "error": r["error"],
-                "reasoning": r["reasoning"],
-                "durationMs": r["duration_ms"],
-                "rollbackAvailable": bool(r["rollback_available"]),
-                "rollbackAction": json.loads(r["rollback_action"]) if r["rollback_action"] else None,
-                "resources": json.loads(r["resources"]) if r["resources"] else [],
-                "verificationStatus": r["verification_status"],
-                "verificationEvidence": r["verification_evidence"],
-                "verificationTimestamp": r["verification_timestamp"],
-            })
+            actions.append(
+                {
+                    "id": r["id"],
+                    "findingId": r["finding_id"],
+                    "timestamp": r["timestamp"],
+                    "category": r["category"],
+                    "tool": r["tool"],
+                    "input": json.loads(r["input"]) if r["input"] else {},
+                    "status": r["status"],
+                    "beforeState": r["before_state"],
+                    "afterState": r["after_state"],
+                    "error": r["error"],
+                    "reasoning": r["reasoning"],
+                    "durationMs": r["duration_ms"],
+                    "rollbackAvailable": bool(r["rollback_available"]),
+                    "rollbackAction": json.loads(r["rollback_action"]) if r["rollback_action"] else None,
+                    "resources": json.loads(r["resources"]) if r["resources"] else [],
+                    "verificationStatus": r["verification_status"],
+                    "verificationEvidence": r["verification_evidence"],
+                    "verificationTimestamp": r["verification_timestamp"],
+                }
+            )
 
         return {"actions": actions, "total": total, "page": page, "pageSize": page_size}
     except Exception as e:
@@ -305,7 +307,7 @@ def execute_rollback(action_id: str) -> dict:
         return {"error": "Action not found"}
     return {
         "error": "Rollback not available. Auto-fix actions (pod deletion, rolling restart) "
-                 "cannot be reversed — the controller recreates pods automatically.",
+        "cannot be reversed — the controller recreates pods automatically.",
     }
 
 
@@ -327,6 +329,7 @@ def update_action_verification(action_id: str, status: str, evidence: str) -> No
 
 # ── Scan Functions ─────────────────────────────────────────────────────────
 
+
 def scan_crashlooping_pods(pods=None) -> list[dict]:
     """Find pods in CrashLoopBackOff or high restart counts."""
     crashloop_threshold = int(os.environ.get("PULSE_AGENT_CRASHLOOP_THRESHOLD", "3"))
@@ -346,15 +349,17 @@ def scan_crashlooping_pods(pods=None) -> list[dict]:
                 if cs.restart_count >= crashloop_threshold:
                     waiting = cs.state.waiting
                     reason = waiting.reason if waiting else "Unknown"
-                    findings.append(_make_finding(
-                        severity=SEVERITY_CRITICAL if cs.restart_count >= 10 else SEVERITY_WARNING,
-                        category="crashloop",
-                        title=f"Pod {name} restarting ({cs.restart_count}x)",
-                        summary=f"Container '{cs.name}' has restarted {cs.restart_count} times. Reason: {reason}",
-                        resources=[{"kind": "Pod", "name": name, "namespace": ns}],
-                        auto_fixable=True,
-                        runbook_id="crashloop-restart",
-                    ))
+                    findings.append(
+                        _make_finding(
+                            severity=SEVERITY_CRITICAL if cs.restart_count >= 10 else SEVERITY_WARNING,
+                            category="crashloop",
+                            title=f"Pod {name} restarting ({cs.restart_count}x)",
+                            summary=f"Container '{cs.name}' has restarted {cs.restart_count} times. Reason: {reason}",
+                            resources=[{"kind": "Pod", "name": name, "namespace": ns}],
+                            auto_fixable=True,
+                            runbook_id="crashloop-restart",
+                        )
+                    )
     except Exception as e:
         logger.error("Crash loop scan failed: %s", e)
     return findings
@@ -376,20 +381,22 @@ def scan_pending_pods() -> list[dict]:
             # Check how long it's been pending
             created = pod.metadata.creation_timestamp
             if created:
-                age_minutes = (datetime.now(timezone.utc) - created).total_seconds() / 60
+                age_minutes = (datetime.now(UTC) - created).total_seconds() / 60
                 if age_minutes > 5:
                     reason = ""
                     for cond in pod.status.conditions or []:
                         if cond.type == "PodScheduled" and cond.status == "False":
                             reason = cond.message or cond.reason or "Unschedulable"
                             break
-                    findings.append(_make_finding(
-                        severity=SEVERITY_WARNING if age_minutes < 30 else SEVERITY_CRITICAL,
-                        category="scheduling",
-                        title=f"Pod {name} pending for {int(age_minutes)}m",
-                        summary=f"Pod has been pending for {int(age_minutes)} minutes. {reason}",
-                        resources=[{"kind": "Pod", "name": name, "namespace": ns}],
-                    ))
+                    findings.append(
+                        _make_finding(
+                            severity=SEVERITY_WARNING if age_minutes < 30 else SEVERITY_CRITICAL,
+                            category="scheduling",
+                            title=f"Pod {name} pending for {int(age_minutes)}m",
+                            summary=f"Pod has been pending for {int(age_minutes)} minutes. {reason}",
+                            resources=[{"kind": "Pod", "name": name, "namespace": ns}],
+                        )
+                    )
     except Exception as e:
         logger.error("Pending pod scan failed: %s", e)
     return findings
@@ -411,15 +418,17 @@ def scan_failed_deployments() -> list[dict]:
             desired = d.spec.replicas or 0
             available = d.status.available_replicas or 0
             if desired > 0 and available < desired:
-                findings.append(_make_finding(
-                    severity=SEVERITY_WARNING if available > 0 else SEVERITY_CRITICAL,
-                    category="workloads",
-                    title=f"Deployment {name} degraded ({available}/{desired})",
-                    summary=f"Only {available} of {desired} replicas available",
-                    resources=[{"kind": "Deployment", "name": name, "namespace": ns}],
-                    auto_fixable=True,
-                    runbook_id="deployment-degraded",
-                ))
+                findings.append(
+                    _make_finding(
+                        severity=SEVERITY_WARNING if available > 0 else SEVERITY_CRITICAL,
+                        category="workloads",
+                        title=f"Deployment {name} degraded ({available}/{desired})",
+                        summary=f"Only {available} of {desired} replicas available",
+                        resources=[{"kind": "Deployment", "name": name, "namespace": ns}],
+                        auto_fixable=True,
+                        runbook_id="deployment-degraded",
+                    )
+                )
     except Exception as e:
         logger.error("Deployment scan failed: %s", e)
     return findings
@@ -437,21 +446,25 @@ def scan_node_pressure() -> list[dict]:
             name = node.metadata.name
             for cond in node.status.conditions or []:
                 if cond.type in ("DiskPressure", "MemoryPressure", "PIDPressure") and cond.status == "True":
-                    findings.append(_make_finding(
-                        severity=SEVERITY_CRITICAL,
-                        category="nodes",
-                        title=f"Node {name} has {cond.type}",
-                        summary=f"{cond.type}: {cond.message or cond.reason or 'Condition active'}",
-                        resources=[{"kind": "Node", "name": name}],
-                    ))
+                    findings.append(
+                        _make_finding(
+                            severity=SEVERITY_CRITICAL,
+                            category="nodes",
+                            title=f"Node {name} has {cond.type}",
+                            summary=f"{cond.type}: {cond.message or cond.reason or 'Condition active'}",
+                            resources=[{"kind": "Node", "name": name}],
+                        )
+                    )
                 if cond.type == "Ready" and cond.status != "True":
-                    findings.append(_make_finding(
-                        severity=SEVERITY_CRITICAL,
-                        category="nodes",
-                        title=f"Node {name} NotReady",
-                        summary=f"Node is not ready: {cond.message or cond.reason or 'Unknown'}",
-                        resources=[{"kind": "Node", "name": name}],
-                    ))
+                    findings.append(
+                        _make_finding(
+                            severity=SEVERITY_CRITICAL,
+                            category="nodes",
+                            title=f"Node {name} NotReady",
+                            summary=f"Node is not ready: {cond.message or cond.reason or 'Unknown'}",
+                            resources=[{"kind": "Node", "name": name}],
+                        )
+                    )
     except Exception as e:
         logger.error("Node pressure scan failed: %s", e)
     return findings
@@ -468,7 +481,7 @@ def scan_expiring_certs() -> list[dict]:
         secrets = safe(lambda: core.list_secret_for_all_namespaces(field_selector="type=kubernetes.io/tls"))
         if isinstance(secrets, ToolError):
             return findings
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         warn_threshold = timedelta(days=30)
 
         for secret in secrets.items:
@@ -482,6 +495,7 @@ def scan_expiring_certs() -> list[dict]:
             try:
                 import ssl
                 import tempfile
+
                 cert_bytes = base64.b64decode(cert_data)
                 with tempfile.NamedTemporaryFile(suffix=".crt", delete=True) as f:
                     f.write(cert_bytes)
@@ -491,30 +505,36 @@ def scan_expiring_certs() -> list[dict]:
                     except (AttributeError, Exception) as cert_err:
                         logger.warning(
                             "Cannot decode cert %s/%s (CPython-specific API): %s",
-                            ns, name, cert_err,
+                            ns,
+                            name,
+                            cert_err,
                         )
                         continue
                 not_after_str = cert_info.get("notAfter", "")
                 if not_after_str:
                     # Format: "Mon DD HH:MM:SS YYYY GMT"
-                    not_after = datetime.strptime(not_after_str, "%b %d %H:%M:%S %Y %Z").replace(tzinfo=timezone.utc)
+                    not_after = datetime.strptime(not_after_str, "%b %d %H:%M:%S %Y %Z").replace(tzinfo=UTC)
                     remaining = not_after - now
                     if remaining < timedelta(0):
-                        findings.append(_make_finding(
-                            severity=SEVERITY_CRITICAL,
-                            category="cert_expiry",
-                            title=f"Certificate {name} EXPIRED",
-                            summary=f"TLS certificate expired {abs(remaining.days)} days ago",
-                            resources=[{"kind": "Secret", "name": name, "namespace": ns}],
-                        ))
+                        findings.append(
+                            _make_finding(
+                                severity=SEVERITY_CRITICAL,
+                                category="cert_expiry",
+                                title=f"Certificate {name} EXPIRED",
+                                summary=f"TLS certificate expired {abs(remaining.days)} days ago",
+                                resources=[{"kind": "Secret", "name": name, "namespace": ns}],
+                            )
+                        )
                     elif remaining < warn_threshold:
-                        findings.append(_make_finding(
-                            severity=SEVERITY_WARNING,
-                            category="cert_expiry",
-                            title=f"Certificate {name} expiring in {remaining.days}d",
-                            summary=f"TLS certificate expires on {not_after.isoformat()}",
-                            resources=[{"kind": "Secret", "name": name, "namespace": ns}],
-                        ))
+                        findings.append(
+                            _make_finding(
+                                severity=SEVERITY_WARNING,
+                                category="cert_expiry",
+                                title=f"Certificate {name} expiring in {remaining.days}d",
+                                summary=f"TLS certificate expires on {not_after.isoformat()}",
+                                resources=[{"kind": "Secret", "name": name, "namespace": ns}],
+                            )
+                        )
             except Exception:
                 pass  # Skip unparseable certs
     except Exception as e:
@@ -528,7 +548,8 @@ def scan_firing_alerts() -> list[dict]:
     try:
         core = get_core_client()
         result = core.connect_get_namespaced_service_proxy_with_path(
-            "thanos-querier:web", "openshift-monitoring",
+            "thanos-querier:web",
+            "openshift-monitoring",
             path="api/v1/rules?type=alert",
             _preload_content=False,
         )
@@ -549,8 +570,16 @@ def scan_firing_alerts() -> list[dict]:
                     # Skip watchdog and info alerts
                     if alertname in ("Watchdog", "InfoInhibitor"):
                         continue
-                    sev = SEVERITY_CRITICAL if severity == "critical" else SEVERITY_WARNING if severity == "warning" else SEVERITY_INFO
-                    summary = alert.get("annotations", {}).get("summary", alert.get("annotations", {}).get("message", ""))
+                    sev = (
+                        SEVERITY_CRITICAL
+                        if severity == "critical"
+                        else SEVERITY_WARNING
+                        if severity == "warning"
+                        else SEVERITY_INFO
+                    )
+                    summary = alert.get("annotations", {}).get(
+                        "summary", alert.get("annotations", {}).get("message", "")
+                    )
                     resources = []
                     if labels.get("pod"):
                         resources.append({"kind": "Pod", "name": labels["pod"], "namespace": ns})
@@ -558,13 +587,15 @@ def scan_firing_alerts() -> list[dict]:
                         resources.append({"kind": "Deployment", "name": labels["deployment"], "namespace": ns})
                     elif labels.get("node"):
                         resources.append({"kind": "Node", "name": labels["node"]})
-                    findings.append(_make_finding(
-                        severity=sev,
-                        category="alerts",
-                        title=alertname,
-                        summary=summary[:200] if summary else f"Alert {alertname} firing",
-                        resources=resources,
-                    ))
+                    findings.append(
+                        _make_finding(
+                            severity=sev,
+                            category="alerts",
+                            title=alertname,
+                            summary=summary[:200] if summary else f"Alert {alertname} firing",
+                            resources=resources,
+                        )
+                    )
     except Exception as e:
         logger.debug("Alert scan failed (monitoring may not be available): %s", e)
     return findings
@@ -586,13 +617,15 @@ def scan_oom_killed_pods(pods=None) -> list[dict]:
             for cs in pod.status.container_statuses or []:
                 last = cs.last_state
                 if last and last.terminated and last.terminated.reason == "OOMKilled":
-                    findings.append(_make_finding(
-                        severity=SEVERITY_CRITICAL,
-                        category="oom",
-                        title=f"Pod {name} OOMKilled",
-                        summary=f"Container '{cs.name}' was OOMKilled (exit code {last.terminated.exit_code})",
-                        resources=[{"kind": "Pod", "name": name, "namespace": ns}],
-                    ))
+                    findings.append(
+                        _make_finding(
+                            severity=SEVERITY_CRITICAL,
+                            category="oom",
+                            title=f"Pod {name} OOMKilled",
+                            summary=f"Container '{cs.name}' was OOMKilled (exit code {last.terminated.exit_code})",
+                            resources=[{"kind": "Pod", "name": name, "namespace": ns}],
+                        )
+                    )
     except Exception as e:
         logger.error("OOMKilled scan failed: %s", e)
     return findings
@@ -614,15 +647,17 @@ def scan_image_pull_errors(pods=None) -> list[dict]:
             for cs in pod.status.container_statuses or []:
                 waiting = cs.state.waiting if cs.state else None
                 if waiting and waiting.reason in ("ImagePullBackOff", "ErrImagePull"):
-                    findings.append(_make_finding(
-                        severity=SEVERITY_WARNING,
-                        category="image_pull",
-                        title=f"Pod {name} {waiting.reason}",
-                        summary=f"Container '{cs.name}' cannot pull image: {waiting.message or waiting.reason}",
-                        resources=[{"kind": "Pod", "name": name, "namespace": ns}],
-                        auto_fixable=True,
-                        runbook_id="image-pull-restart",
-                    ))
+                    findings.append(
+                        _make_finding(
+                            severity=SEVERITY_WARNING,
+                            category="image_pull",
+                            title=f"Pod {name} {waiting.reason}",
+                            summary=f"Container '{cs.name}' cannot pull image: {waiting.message or waiting.reason}",
+                            resources=[{"kind": "Pod", "name": name, "namespace": ns}],
+                            auto_fixable=True,
+                            runbook_id="image-pull-restart",
+                        )
+                    )
     except Exception as e:
         logger.error("Image pull scan failed: %s", e)
     return findings
@@ -633,22 +668,28 @@ def scan_degraded_operators() -> list[dict]:
     findings = []
     try:
         custom = get_custom_client()
-        result = safe(lambda: custom.list_cluster_custom_object(
-            group="config.openshift.io", version="v1", plural="clusteroperators",
-        ))
+        result = safe(
+            lambda: custom.list_cluster_custom_object(
+                group="config.openshift.io",
+                version="v1",
+                plural="clusteroperators",
+            )
+        )
         if isinstance(result, ToolError):
             return findings
         for op in result.get("items", []):
             name = op.get("metadata", {}).get("name", "")
             for cond in op.get("status", {}).get("conditions", []):
                 if cond.get("type") == "Degraded" and cond.get("status") == "True":
-                    findings.append(_make_finding(
-                        severity=SEVERITY_CRITICAL,
-                        category="operators",
-                        title=f"ClusterOperator {name} degraded",
-                        summary=f"Operator degraded: {cond.get('message', cond.get('reason', 'Unknown'))}",
-                        resources=[{"kind": "ClusterOperator", "name": name}],
-                    ))
+                    findings.append(
+                        _make_finding(
+                            severity=SEVERITY_CRITICAL,
+                            category="operators",
+                            title=f"ClusterOperator {name} degraded",
+                            summary=f"Operator degraded: {cond.get('message', cond.get('reason', 'Unknown'))}",
+                            resources=[{"kind": "ClusterOperator", "name": name}],
+                        )
+                    )
     except Exception as e:
         logger.error("Degraded operators scan failed: %s", e)
     return findings
@@ -670,13 +711,15 @@ def scan_daemonset_gaps() -> list[dict]:
             desired = ds.status.desired_number_scheduled or 0
             ready = ds.status.number_ready or 0
             if desired > 0 and ready < desired:
-                findings.append(_make_finding(
-                    severity=SEVERITY_WARNING if ready > 0 else SEVERITY_CRITICAL,
-                    category="daemonsets",
-                    title=f"DaemonSet {name} not fully ready ({ready}/{desired})",
-                    summary=f"Only {ready} of {desired} desired pods are ready",
-                    resources=[{"kind": "DaemonSet", "name": name, "namespace": ns}],
-                ))
+                findings.append(
+                    _make_finding(
+                        severity=SEVERITY_WARNING if ready > 0 else SEVERITY_CRITICAL,
+                        category="daemonsets",
+                        title=f"DaemonSet {name} not fully ready ({ready}/{desired})",
+                        summary=f"Only {ready} of {desired} desired pods are ready",
+                        resources=[{"kind": "DaemonSet", "name": name, "namespace": ns}],
+                    )
+                )
     except Exception as e:
         logger.error("DaemonSet gap scan failed: %s", e)
     return findings
@@ -698,13 +741,15 @@ def scan_hpa_saturation() -> list[dict]:
             max_replicas = hpa.spec.max_replicas or 0
             current = hpa.status.current_replicas or 0
             if max_replicas > 0 and current >= max_replicas:
-                findings.append(_make_finding(
-                    severity=SEVERITY_WARNING,
-                    category="hpa",
-                    title=f"HPA {name} at max replicas ({current}/{max_replicas})",
-                    summary=f"HPA is at maximum capacity ({current}/{max_replicas} replicas)",
-                    resources=[{"kind": "HorizontalPodAutoscaler", "name": name, "namespace": ns}],
-                ))
+                findings.append(
+                    _make_finding(
+                        severity=SEVERITY_WARNING,
+                        category="hpa",
+                        title=f"HPA {name} at max replicas ({current}/{max_replicas})",
+                        summary=f"HPA is at maximum capacity ({current}/{max_replicas} replicas)",
+                        resources=[{"kind": "HorizontalPodAutoscaler", "name": name, "namespace": ns}],
+                    )
+                )
     except Exception as e:
         logger.error("HPA saturation scan failed: %s", e)
     return findings
@@ -737,19 +782,24 @@ async def _send_webhook(finding: dict) -> None:
         return
     try:
         import urllib.request
-        payload = json.dumps({
-            "severity": finding.get("severity"),
-            "title": finding.get("title"),
-            "summary": finding.get("summary"),
-            "resources": finding.get("resources", []),
-            "timestamp": finding.get("timestamp"),
-        }).encode()
+
+        payload = json.dumps(
+            {
+                "severity": finding.get("severity"),
+                "title": finding.get("title"),
+                "summary": finding.get("summary"),
+                "resources": finding.get("resources", []),
+                "timestamp": finding.get("timestamp"),
+            }
+        ).encode()
         headers: dict[str, str] = {"Content-Type": "application/json"}
         if WEBHOOK_SECRET:
             sig = hmac.new(WEBHOOK_SECRET.encode(), payload, hashlib.sha256).hexdigest()
             headers["X-Pulse-Signature"] = f"sha256={sig}"
         req = urllib.request.Request(
-            WEBHOOK_URL, data=payload, headers=headers,
+            WEBHOOK_URL,
+            data=payload,
+            headers=headers,
         )
         await asyncio.to_thread(urllib.request.urlopen, req, timeout=5)
     except Exception as e:
@@ -805,16 +855,9 @@ def _fix_workloads(finding: dict) -> tuple[str, str, str]:
     before = f"Deployment {r['name']} in {r['namespace']}: {available}/{desired} available"
     # Trigger rolling restart
     from datetime import datetime as _dt
-    now = _dt.now(timezone.utc).isoformat()
-    body = {
-        "spec": {
-            "template": {
-                "metadata": {
-                    "annotations": {"kubectl.kubernetes.io/restartedAt": now}
-                }
-            }
-        }
-    }
+
+    now = _dt.now(UTC).isoformat()
+    body = {"spec": {"template": {"metadata": {"annotations": {"kubectl.kubernetes.io/restartedAt": now}}}}}
     apps.patch_namespaced_deployment(r["name"], r["namespace"], body=body)
     return ("restart_deployment", before, f"Deployment {r['name']} rolling restart triggered")
 
@@ -844,15 +887,10 @@ def _fix_image_pull(finding: dict) -> tuple[str, str, str]:
             for rs_ref in rs.metadata.owner_references or []:
                 if rs_ref.kind == "Deployment":
                     from datetime import datetime as _dt
-                    now = _dt.now(timezone.utc).isoformat()
+
+                    now = _dt.now(UTC).isoformat()
                     body = {
-                        "spec": {
-                            "template": {
-                                "metadata": {
-                                    "annotations": {"kubectl.kubernetes.io/restartedAt": now}
-                                }
-                            }
-                        }
+                        "spec": {"template": {"metadata": {"annotations": {"kubectl.kubernetes.io/restartedAt": now}}}}
                     }
                     apps.patch_namespaced_deployment(rs_ref.name, ns, body=body)
                     return ("restart_deployment", before, f"Deployment {rs_ref.name} rolling restart triggered")
@@ -860,32 +898,18 @@ def _fix_image_pull(finding: dict) -> tuple[str, str, str]:
         elif ref.kind == "StatefulSet":
             apps = get_apps_client()
             from datetime import datetime as _dt
-            now = _dt.now(timezone.utc).isoformat()
-            body = {
-                "spec": {
-                    "template": {
-                        "metadata": {
-                            "annotations": {"kubectl.kubernetes.io/restartedAt": now}
-                        }
-                    }
-                }
-            }
+
+            now = _dt.now(UTC).isoformat()
+            body = {"spec": {"template": {"metadata": {"annotations": {"kubectl.kubernetes.io/restartedAt": now}}}}}
             apps.patch_namespaced_stateful_set(ref.name, ns, body=body)
             return ("restart_statefulset", before, f"StatefulSet {ref.name} rolling restart triggered")
 
         elif ref.kind == "DaemonSet":
             apps = get_apps_client()
             from datetime import datetime as _dt
-            now = _dt.now(timezone.utc).isoformat()
-            body = {
-                "spec": {
-                    "template": {
-                        "metadata": {
-                            "annotations": {"kubectl.kubernetes.io/restartedAt": now}
-                        }
-                    }
-                }
-            }
+
+            now = _dt.now(UTC).isoformat()
+            body = {"spec": {"template": {"metadata": {"annotations": {"kubectl.kubernetes.io/restartedAt": now}}}}}
             apps.patch_namespaced_daemon_set(ref.name, ns, body=body)
             return ("restart_daemonset", before, f"DaemonSet {ref.name} rolling restart triggered")
 
@@ -933,16 +957,16 @@ def _finding_key(finding: dict) -> str:
 def _extract_json_object(text: str) -> dict[str, Any] | None:
     """Extract the first valid JSON object from text."""
     for i, ch in enumerate(text):
-        if ch == '{':
+        if ch == "{":
             depth = 0
             for j in range(i, len(text)):
-                if text[j] == '{':
+                if text[j] == "{":
                     depth += 1
-                elif text[j] == '}':
+                elif text[j] == "}":
                     depth -= 1
                 if depth == 0:
                     try:
-                        obj = json.loads(text[i:j + 1])
+                        obj = json.loads(text[i : j + 1])
                         if isinstance(obj, dict):
                             return obj
                     except json.JSONDecodeError:
@@ -953,15 +977,15 @@ def _extract_json_object(text: str) -> dict[str, Any] | None:
 def _sanitize_for_prompt(text: str) -> str:
     """Strip potential prompt injection from cluster-sourced text."""
     patterns = [
-        r'ignore\s+(all\s+)?previous\s+instructions',
-        r'you\s+are\s+now',
-        r'system:\s*',
-        r'assistant:\s*',
-        r'<\/?system>',
+        r"ignore\s+(all\s+)?previous\s+instructions",
+        r"you\s+are\s+now",
+        r"system:\s*",
+        r"assistant:\s*",
+        r"<\/?system>",
     ]
     result = text
     for pattern in patterns:
-        result = re.sub(pattern, '[REDACTED]', result, flags=re.IGNORECASE)
+        result = re.sub(pattern, "[REDACTED]", result, flags=re.IGNORECASE)
     return result[:500]  # Cap length
 
 
@@ -969,9 +993,7 @@ def _build_investigation_prompt(finding: dict) -> str:
     resources = finding.get("resources", [])
     sanitized_resources = []
     for r in resources:
-        sanitized_resources.append({
-            k: _sanitize_for_prompt(str(v)) for k, v in r.items()
-        })
+        sanitized_resources.append({k: _sanitize_for_prompt(str(v)) for k, v in r.items()})
     prompt = (
         "Investigate the following Kubernetes issue and return ONLY JSON.\n"
         "Rules:\n"
@@ -996,6 +1018,7 @@ def _build_investigation_prompt(finding: dict) -> str:
 
     # Inject shared context from the context bus
     from .context_bus import get_context_bus
+
     bus = get_context_bus()
     namespace = resources[0].get("namespace", "") if resources else ""
     shared = bus.build_context_prompt(namespace=namespace)
@@ -1021,14 +1044,22 @@ def get_investigation_stats() -> dict:
 
 def _run_proactive_investigation_sync(finding: dict) -> dict[str, Any]:
     from .agent import (
-        create_client,
-        run_agent_streaming,
         SYSTEM_PROMPT as SRE_SYSTEM_PROMPT,
+    )
+    from .agent import (
         TOOL_DEFS as SRE_TOOL_DEFS,
+    )
+    from .agent import (
         TOOL_MAP as SRE_TOOL_MAP,
+    )
+    from .agent import (
         WRITE_TOOLS as SRE_WRITE_TOOLS,
     )
-    from .harness import select_tools, build_cached_system_prompt, get_cluster_context, COMPONENT_HINT
+    from .agent import (
+        create_client,
+        run_agent_streaming,
+    )
+    from .harness import COMPONENT_HINT, build_cached_system_prompt, get_cluster_context, select_tools
 
     readonly_defs = [tool_def for tool_def in SRE_TOOL_DEFS if tool_def.get("name") not in SRE_WRITE_TOOLS]
     readonly_map = {name: tool for name, tool in SRE_TOOL_MAP.items() if name not in SRE_WRITE_TOOLS}
@@ -1081,12 +1112,16 @@ def _run_proactive_investigation_sync(finding: dict) -> dict[str, Any]:
 def _run_security_followup_sync(finding: dict) -> dict:
     """Run a lightweight security check on the namespace of a critical finding."""
     from .agent import create_client, run_agent_streaming
+    from .harness import COMPONENT_HINT, build_cached_system_prompt, get_cluster_context, select_tools
     from .security_agent import (
         SECURITY_SYSTEM_PROMPT,
+    )
+    from .security_agent import (
         TOOL_DEFS as SEC_TOOL_DEFS,
+    )
+    from .security_agent import (
         TOOL_MAP as SEC_TOOL_MAP,
     )
-    from .harness import select_tools, build_cached_system_prompt, get_cluster_context, COMPONENT_HINT
 
     client = create_client()
     resources = finding.get("resources", [])
@@ -1134,6 +1169,7 @@ def _run_security_followup_sync(finding: dict) -> dict:
 
 
 # ── Monitor Loop ───────────────────────────────────────────────────────────
+
 
 class MonitorSession:
     """Manages a single /ws/monitor connection with periodic scanning."""
@@ -1194,8 +1230,11 @@ class MonitorSession:
 
         for finding in findings:
             if fixes_this_cycle >= MAX_FIXES_PER_CYCLE:
-                logger.info("Auto-fix rate limit reached (%d/%d), skipping remaining findings",
-                            fixes_this_cycle, MAX_FIXES_PER_CYCLE)
+                logger.info(
+                    "Auto-fix rate limit reached (%d/%d), skipping remaining findings",
+                    fixes_this_cycle,
+                    MAX_FIXES_PER_CYCLE,
+                )
                 break
 
             if not finding.get("autoFixable"):
@@ -1221,8 +1260,12 @@ class MonitorSession:
             if resource_key and resource_key in self._recent_fixes:
                 cooldown_remaining = 300 - (time.time() - self._recent_fixes[resource_key])
                 if cooldown_remaining > 0:
-                    logger.info("Auto-fix cooldown: %s was fixed %.0fs ago, skipping (%.0fs remaining)",
-                                resource_key, time.time() - self._recent_fixes[resource_key], cooldown_remaining)
+                    logger.info(
+                        "Auto-fix cooldown: %s was fixed %.0fs ago, skipping (%.0fs remaining)",
+                        resource_key,
+                        time.time() - self._recent_fixes[resource_key],
+                        cooldown_remaining,
+                    )
                     continue
 
             # Bare pod protection: don't delete pods that have no ownerReferences
@@ -1233,11 +1276,16 @@ class MonitorSession:
                         core = get_core_client()
                         pod = core.read_namespaced_pod(r["name"], r.get("namespace", "default"))
                         if not pod.metadata.owner_references:
-                            logger.warning("Auto-fix skipped: Pod %s/%s has no ownerReferences (bare pod, won't be recreated)",
-                                           r.get("namespace", "default"), r["name"])
+                            logger.warning(
+                                "Auto-fix skipped: Pod %s/%s has no ownerReferences (bare pod, won't be recreated)",
+                                r.get("namespace", "default"),
+                                r["name"],
+                            )
                             continue
                     except Exception as e:
-                        logger.warning("Auto-fix skipped: could not verify ownerReferences for %s: %s", r.get("name"), e)
+                        logger.warning(
+                            "Auto-fix skipped: could not verify ownerReferences for %s: %s", r.get("name"), e
+                        )
                         continue
 
             confidence = _estimate_auto_fix_confidence(finding)
@@ -1257,7 +1305,7 @@ class MonitorSession:
                 self._pending_action_approvals[action_report["id"]] = approval_future
                 try:
                     approved = bool(await asyncio.wait_for(approval_future, timeout=120))
-                except asyncio.TimeoutError:
+                except TimeoutError:
                     approved = False
                 finally:
                     self._pending_action_approvals.pop(action_report["id"], None)
@@ -1278,7 +1326,9 @@ class MonitorSession:
                 logger.warning(
                     "Auto-fix executing WITHOUT confirmation gate (trust_level=%d, category=%s, resource=%s). "
                     "This is by design for autonomous operation.",
-                    self.trust_level, category, resource_key,
+                    self.trust_level,
+                    category,
+                    resource_key,
                 )
 
             # Send executing report
@@ -1310,20 +1360,28 @@ class MonitorSession:
 
                 logger.info(
                     "Auto-fix completed: category=%s finding=%s tool=%s duration=%dms (%d/%d this cycle)",
-                    category, finding["id"], tool, duration_ms, fixes_this_cycle, MAX_FIXES_PER_CYCLE,
+                    category,
+                    finding["id"],
+                    tool,
+                    duration_ms,
+                    fixes_this_cycle,
+                    MAX_FIXES_PER_CYCLE,
                 )
 
                 # Publish fix to shared context bus
-                from .context_bus import get_context_bus, ContextEntry
+                from .context_bus import ContextEntry, get_context_bus
+
                 bus = get_context_bus()
-                bus.publish(ContextEntry(
-                    source="monitor",
-                    category="fix",
-                    summary=f"Auto-fixed {category}: {finding.get('title', '')}",
-                    details={"fix_applied": tool, "before_state": before_state, "after_state": after_state},
-                    namespace=resources[0].get("namespace", "") if resources else "",
-                    resources=resources,
-                ))
+                bus.publish(
+                    ContextEntry(
+                        source="monitor",
+                        category="fix",
+                        summary=f"Auto-fixed {category}: {finding.get('title', '')}",
+                        details={"fix_applied": tool, "before_state": before_state, "after_state": after_state},
+                        namespace=resources[0].get("namespace", "") if resources else "",
+                        resources=resources,
+                    )
+                )
             except Exception as e:
                 duration_ms = _ts() - start_ms
                 action_report["status"] = "failed"
@@ -1332,7 +1390,9 @@ class MonitorSession:
 
                 logger.info(
                     "Auto-fix failed: category=%s finding=%s error=%s",
-                    category, finding["id"], e,
+                    category,
+                    finding["id"],
+                    e,
                 )
 
             # Send completed/failed report
@@ -1359,8 +1419,11 @@ class MonitorSession:
             self._daily_investigation_count = 0
             self._daily_investigation_reset = time.time()
         if self._daily_investigation_count >= MAX_DAILY_INVESTIGATIONS:
-            logger.info("Daily investigation budget exhausted (%d/%d)",
-                        self._daily_investigation_count, MAX_DAILY_INVESTIGATIONS)
+            logger.info(
+                "Daily investigation budget exhausted (%d/%d)",
+                self._daily_investigation_count,
+                MAX_DAILY_INVESTIGATIONS,
+            )
             return
 
         max_per_scan = int(os.environ.get("PULSE_AGENT_INVESTIGATIONS_MAX_PER_SCAN", "2"))
@@ -1411,32 +1474,37 @@ class MonitorSession:
                     asyncio.to_thread(_run_proactive_investigation_sync, finding),
                     timeout=timeout_seconds,
                 )
-                report.update({
-                    "status": "completed",
-                    "summary": result.get("summary", ""),
-                    "suspectedCause": result.get("suspectedCause", ""),
-                    "recommendedFix": result.get("recommendedFix", ""),
-                    "confidence": result.get("confidence", 0.0),
-                })
+                report.update(
+                    {
+                        "status": "completed",
+                        "summary": result.get("summary", ""),
+                        "suspectedCause": result.get("suspectedCause", ""),
+                        "recommendedFix": result.get("recommendedFix", ""),
+                        "confidence": result.get("confidence", 0.0),
+                    }
+                )
                 investigations_run += 1
                 self._daily_investigation_count += 1
                 self._recent_investigations[key] = now
 
                 # Publish investigation result to shared context bus
-                from .context_bus import get_context_bus, ContextEntry
+                from .context_bus import ContextEntry, get_context_bus
+
                 bus = get_context_bus()
-                bus.publish(ContextEntry(
-                    source="monitor",
-                    category="investigation",
-                    summary=f"Investigated {finding.get('category')}: {result.get('summary', '')}",
-                    details={
-                        "suspected_cause": result.get("suspectedCause", ""),
-                        "recommended_fix": result.get("recommendedFix", ""),
-                        "confidence": result.get("confidence", 0),
-                    },
-                    namespace=finding.get("resources", [{}])[0].get("namespace", ""),
-                    resources=finding.get("resources", []),
-                ))
+                bus.publish(
+                    ContextEntry(
+                        source="monitor",
+                        category="investigation",
+                        summary=f"Investigated {finding.get('category')}: {result.get('summary', '')}",
+                        details={
+                            "suspected_cause": result.get("suspectedCause", ""),
+                            "recommended_fix": result.get("recommendedFix", ""),
+                            "confidence": result.get("confidence", 0),
+                        },
+                        namespace=finding.get("resources", [{}])[0].get("namespace", ""),
+                        resources=finding.get("resources", []),
+                    )
+                )
 
                 # Security followup: max 1 per scan, 10min cooldown
                 if (
@@ -1456,7 +1524,7 @@ class MonitorSession:
                         security_followup_done_this_scan = True
                         self._last_security_followup = now
                         logger.info("Security followup completed for finding %s", finding.get("id", ""))
-                    except asyncio.TimeoutError:
+                    except TimeoutError:
                         logger.warning("Security followup timed out for finding %s", finding.get("id", ""))
                     except Exception as e:
                         logger.warning("Security followup failed for finding %s: %s", finding.get("id", ""), e)
@@ -1465,6 +1533,7 @@ class MonitorSession:
                 if os.environ.get("PULSE_AGENT_MEMORY", "") == "1" and result.get("confidence", 0) >= 0.7:
                     try:
                         from .memory import get_manager
+
                         manager = get_manager()
                         if manager:
                             inv_namespace = ""
@@ -1482,12 +1551,15 @@ class MonitorSession:
                                 "error_type": finding.get("category", ""),
                             }
                             manager.store_incident(inv_incident, confirmed=False)
-                            logger.info("Stored high-confidence investigation: %s (confidence=%.2f)",
-                                        finding.get("title", ""), result.get("confidence", 0))
+                            logger.info(
+                                "Stored high-confidence investigation: %s (confidence=%.2f)",
+                                finding.get("title", ""),
+                                result.get("confidence", 0),
+                            )
                     except Exception as e:
                         logger.warning("Failed to store investigation: %s", e)
 
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 report["error"] = f"Investigation timed out after {timeout_seconds}s"
             except Exception as e:
                 report["error"] = str(e)
@@ -1529,7 +1601,7 @@ class MonitorSession:
                 # Also check namespace-level: if any resource in same ns+category is still failing
                 # This catches renamed pods (e.g. after a restart)
                 ns_key = f"{resource.get('namespace', '')}:{category}"
-                if ns_key in active_ns_category and active_ns_category[ns_key]:
+                if active_ns_category.get(ns_key):
                     matches_active = True
                     matched_resource = f"{ns_key} (namespace-level match)"
                     break
@@ -1557,10 +1629,7 @@ class MonitorSession:
                 db = get_database()
                 finding_id = payload.get("finding_id", "")
                 if finding_id:
-                    inv = db.fetchone(
-                        "SELECT id, confidence FROM investigations WHERE finding_id = ?",
-                        (finding_id,)
-                    )
+                    inv = db.fetchone("SELECT id, confidence FROM investigations WHERE finding_id = ?", (finding_id,))
                     if inv:
                         if status == "verified":
                             new_conf = min(1.0, (inv["confidence"] or 0.5) + 0.05)
@@ -1572,19 +1641,23 @@ class MonitorSession:
                 logger.debug("Failed to update investigation confidence: %s", e)
 
             # Publish verification to shared context bus
-            from .context_bus import get_context_bus, ContextEntry
+            from .context_bus import ContextEntry, get_context_bus
+
             bus = get_context_bus()
-            bus.publish(ContextEntry(
-                source="monitor",
-                category="verification",
-                summary=f"Verification {status}: {evidence}",
-                details={"status": status, "evidence": evidence},
-            ))
+            bus.publish(
+                ContextEntry(
+                    source="monitor",
+                    category="verification",
+                    summary=f"Verification {status}: {evidence}",
+                    details={"status": status, "evidence": evidence},
+                )
+            )
 
             # Auto-learn from verified fixes (Improvement #1)
             if status == "verified" and os.environ.get("PULSE_AGENT_MEMORY", "") == "1":
                 try:
                     from .memory import get_manager
+
                     manager = get_manager()
                     if manager:
                         # Extract namespace/resource_type from resources
@@ -1633,9 +1706,7 @@ class MonitorSession:
         _POD_SCANNERS = {"crashloop", "oom", "image_pull"}
         shared_pods = None
         try:
-            shared_pods = await asyncio.to_thread(
-                lambda: safe(lambda: get_core_client().list_pod_for_all_namespaces())
-            )
+            shared_pods = await asyncio.to_thread(lambda: safe(lambda: get_core_client().list_pod_for_all_namespaces()))
         except Exception as e:
             logger.error("Failed to fetch shared pod list: %s", e)
 
@@ -1665,18 +1736,21 @@ class MonitorSession:
             del self._last_findings[key]
 
         # Publish critical new findings to shared context bus
-        from .context_bus import get_context_bus, ContextEntry
+        from .context_bus import ContextEntry, get_context_bus
+
         bus = get_context_bus()
         for f in new_findings:
             if f.get("severity") == SEVERITY_CRITICAL:
-                bus.publish(ContextEntry(
-                    source="monitor",
-                    category="finding",
-                    summary=f"Critical finding: {f.get('title', '')}",
-                    details={"severity": f.get("severity"), "category": f.get("category")},
-                    namespace=f.get("resources", [{}])[0].get("namespace", ""),
-                    resources=f.get("resources", []),
-                ))
+                bus.publish(
+                    ContextEntry(
+                        source="monitor",
+                        category="finding",
+                        summary=f"Critical finding: {f.get('title', '')}",
+                        details={"severity": f.get("severity"), "category": f.get("category")},
+                        namespace=f.get("resources", [{}])[0].get("namespace", ""),
+                        resources=f.get("resources", []),
+                    )
+                )
 
         # Push new findings and send webhook for critical ones
         for f in new_findings:
@@ -1688,25 +1762,31 @@ class MonitorSession:
         # Send snapshot of all active finding IDs so UI can remove stale ones
         # H2: cap activeIds to 500 entries to prevent unbounded growth
         active_ids = [f["id"] for f in all_findings][:500]
-        await self.send({
-            "type": "findings_snapshot",
-            "activeIds": active_ids,
-            "timestamp": _ts(),
-        })
+        await self.send(
+            {
+                "type": "findings_snapshot",
+                "activeIds": active_ids,
+                "timestamp": _ts(),
+            }
+        )
 
         # Push monitor status
         scan_duration = time.time() - scan_start
-        await self.send({
-            "type": "monitor_status",
-            "activeWatches": [cat for cat, _ in ALL_SCANNERS],
-            "lastScan": _ts(),
-            "findingsCount": len(self._last_findings),
-            "nextScan": _ts() + self.scan_interval * 1000,
-        })
+        await self.send(
+            {
+                "type": "monitor_status",
+                "activeWatches": [cat for cat, _ in ALL_SCANNERS],
+                "lastScan": _ts(),
+                "findingsCount": len(self._last_findings),
+                "nextScan": _ts() + self.scan_interval * 1000,
+            }
+        )
 
         logger.info(
             "Scan complete: %d total findings (%d new) in %.1fs",
-            len(self._last_findings), len(new_findings), scan_duration,
+            len(self._last_findings),
+            len(new_findings),
+            scan_duration,
         )
 
         await self.run_investigations(all_findings)
@@ -1770,7 +1850,9 @@ class MonitorSession:
                     "title": f"SRE investigation requested: {_sanitize_for_prompt(details.get('kind', ''))}/{_sanitize_for_prompt(details.get('name', ''))}",
                     "summary": context,
                     "severity": "warning",
-                    "resources": [{"kind": details.get("kind", ""), "name": details.get("name", ""), "namespace": namespace}],
+                    "resources": [
+                        {"kind": details.get("kind", ""), "name": details.get("name", ""), "namespace": namespace}
+                    ],
                 }
                 try:
                     await asyncio.wait_for(
@@ -1784,7 +1866,9 @@ class MonitorSession:
         # Clean up processed requests
         if rows:
             try:
-                db.execute("DELETE FROM context_entries WHERE category = ? AND timestamp > ?", ("handoff_request", cutoff))
+                db.execute(
+                    "DELETE FROM context_entries WHERE category = ? AND timestamp > ?", ("handoff_request", cutoff)
+                )
                 db.commit()
             except Exception as e:
                 logger.error("Failed to clean up handoff requests: %s", e)

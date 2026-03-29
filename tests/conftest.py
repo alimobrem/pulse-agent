@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
@@ -16,7 +16,7 @@ def _text(result):
 
 def _ts(minutes_ago: int = 5) -> datetime:
     """Create a timezone-aware timestamp N minutes ago."""
-    return datetime.now(timezone.utc).replace(microsecond=0) - __import__("datetime").timedelta(minutes=minutes_ago)
+    return datetime.now(UTC).replace(microsecond=0) - __import__("datetime").timedelta(minutes=minutes_ago)
 
 
 def _make_pod(
@@ -49,7 +49,9 @@ def _make_pod(
         name="main",
         image=image,
         security_context=sc,
-        resources=SimpleNamespace(requests={"cpu": "100m", "memory": "128Mi"}, limits={"cpu": "500m", "memory": "512Mi"}),
+        resources=SimpleNamespace(
+            requests={"cpu": "100m", "memory": "128Mi"}, limits={"cpu": "500m", "memory": "512Mi"}
+        ),
         ports=[SimpleNamespace(container_port=8080, protocol="TCP")],
         env=[],
         image_pull_policy="IfNotPresent",
@@ -93,7 +95,7 @@ def _make_pod(
 def _make_node(name="node-1", ready=True, cpu="4", memory="16Gi", roles=None):
     """Build a mock V1Node object."""
     labels = {}
-    for role in (roles or ["worker"]):
+    for role in roles or ["worker"]:
         labels[f"node-role.kubernetes.io/{role}"] = ""
     return SimpleNamespace(
         metadata=SimpleNamespace(
@@ -150,13 +152,20 @@ def _make_deployment(name="nginx", namespace="default", replicas=3, ready=3, ava
             updated_replicas=replicas,
             available_replicas=available,
             conditions=[
-                SimpleNamespace(type="Available", status="True", reason="MinimumReplicasAvailable", message="Deployment has minimum availability."),
+                SimpleNamespace(
+                    type="Available",
+                    status="True",
+                    reason="MinimumReplicasAvailable",
+                    message="Deployment has minimum availability.",
+                ),
             ],
         ),
     )
 
 
-def _make_event(reason="Scheduled", message="Successfully assigned", event_type="Normal", kind="Pod", obj_name="test-pod"):
+def _make_event(
+    reason="Scheduled", message="Successfully assigned", event_type="Normal", kind="Pod", obj_name="test-pod"
+):
     return SimpleNamespace(
         type=event_type,
         reason=reason,
@@ -213,26 +222,22 @@ def mock_security_k8s():
         patch("sre_agent.k8s_client._initialized", True),
         patch("sre_agent.k8s_client._load_k8s"),
         patch("sre_agent.security_tools.get_core_client") as core,
-        patch("sre_agent.security_tools.get_apps_client") as apps,
         patch("sre_agent.security_tools.get_rbac_client") as rbac,
         patch("sre_agent.security_tools.get_networking_client") as networking,
         patch("sre_agent.security_tools.get_custom_client") as custom,
     ):
         core_mock = MagicMock()
-        apps_mock = MagicMock()
         rbac_mock = MagicMock()
         networking_mock = MagicMock()
         custom_mock = MagicMock()
 
         core.return_value = core_mock
-        apps.return_value = apps_mock
         rbac.return_value = rbac_mock
         networking.return_value = networking_mock
         custom.return_value = custom_mock
 
         yield {
             "core": core_mock,
-            "apps": apps_mock,
             "rbac": rbac_mock,
             "networking": networking_mock,
             "custom": custom_mock,

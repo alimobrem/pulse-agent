@@ -1,10 +1,9 @@
 """Tests for memory retrieval and context assembly."""
 
-import json
 import pytest
 
+from sre_agent.memory.retrieval import MAX_MEMORY_CHARS, build_memory_context
 from sre_agent.memory.store import IncidentStore
-from sre_agent.memory.retrieval import build_memory_context, MAX_MEMORY_CHARS
 
 
 @pytest.fixture
@@ -24,7 +23,8 @@ class TestBuildMemoryContext:
             query="pods crashing in default",
             tool_sequence=[{"name": "list_pods"}, {"name": "get_pod_logs"}],
             resolution="OOMKilled — increased memory",
-            outcome="resolved", score=0.9,
+            outcome="resolved",
+            score=0.9,
         )
         result = build_memory_context(store, "pods crashing in production")
         assert "Past Similar Incidents" in result

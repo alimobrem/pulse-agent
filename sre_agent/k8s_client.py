@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import logging
 import os
-from datetime import datetime, timezone
-from typing import Any, Optional
+from datetime import UTC, datetime
+from typing import Any
 
 from kubernetes import client, config
 from kubernetes.client.rest import ApiException
@@ -128,14 +128,14 @@ def safe(fn) -> Any:
         return classify_api_error(e)
 
 
-def age(ts: Optional[datetime]) -> str:
+def age(ts: datetime | None) -> str:
     """Format a timestamp as a human-readable age string."""
     if ts is None:
         return "unknown"
     # Use astimezone to handle both naive and aware datetimes safely
     if ts.tzinfo is None:
-        ts = ts.replace(tzinfo=timezone.utc)
-    delta = datetime.now(timezone.utc) - ts.astimezone(timezone.utc)
+        ts = ts.replace(tzinfo=UTC)
+    delta = datetime.now(UTC) - ts.astimezone(UTC)
     secs = int(delta.total_seconds())
     if secs < 60:
         return f"{secs}s"

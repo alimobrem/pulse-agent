@@ -1,6 +1,5 @@
 """Tests for the SQLite incident store."""
 
-import json
 import pytest
 
 from sre_agent.memory.store import IncidentStore, extract_keywords

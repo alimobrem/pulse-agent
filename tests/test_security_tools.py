@@ -4,24 +4,22 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-import pytest
 from kubernetes.client.rest import ApiException
 
-from tests.conftest import _list_result, _make_namespace, _make_pod, _ts
-
-from sre_agent.security_tools import (
-    scan_pod_security,
-    scan_images,
-    scan_rbac_risks,
-    list_service_account_secrets,
-    scan_network_policies,
-    scan_sccs,
-    scan_scc_usage,
-    scan_secrets,
-    get_security_summary,
-)
-from sre_agent.security_agent import ALL_TOOLS as SEC_ALL_TOOLS
 from sre_agent.k8s_tools import WRITE_TOOLS
+from sre_agent.security_agent import ALL_TOOLS as SEC_ALL_TOOLS
+from sre_agent.security_tools import (
+    get_security_summary,
+    list_service_account_secrets,
+    scan_images,
+    scan_network_policies,
+    scan_pod_security,
+    scan_rbac_risks,
+    scan_scc_usage,
+    scan_sccs,
+    scan_secrets,
+)
+from tests.conftest import _list_result, _make_namespace, _make_pod, _ts
 
 
 class TestScanPodSecurity:
@@ -113,10 +111,12 @@ class TestScanRbacRisks:
 
 class TestScanNetworkPolicies:
     def test_finds_unprotected_namespaces(self, mock_security_k8s):
-        mock_security_k8s["core"].list_namespace.return_value = _list_result([
-            _make_namespace("my-app"),
-            _make_namespace("default"),
-        ])
+        mock_security_k8s["core"].list_namespace.return_value = _list_result(
+            [
+                _make_namespace("my-app"),
+                _make_namespace("default"),
+            ]
+        )
         mock_security_k8s["networking"].list_network_policy_for_all_namespaces.return_value = _list_result([])
         result = scan_network_policies.call({"namespace": "ALL"})
         assert "my-app" in result
@@ -126,20 +126,22 @@ class TestScanNetworkPolicies:
 class TestScanSccs:
     def test_detects_privileged_scc(self, mock_security_k8s):
         mock_security_k8s["custom"].list_cluster_custom_object.return_value = {
-            "items": [{
-                "metadata": {"name": "privileged"},
-                "allowPrivilegedContainer": True,
-                "allowHostNetwork": True,
-                "allowHostPID": False,
-                "allowHostIPC": False,
-                "allowHostPorts": False,
-                "allowHostDirVolumePlugin": False,
-                "runAsUser": {"type": "RunAsAny"},
-                "seLinuxContext": {"type": "RunAsAny"},
-                "volumes": ["*"],
-                "users": ["system:admin"],
-                "groups": [],
-            }],
+            "items": [
+                {
+                    "metadata": {"name": "privileged"},
+                    "allowPrivilegedContainer": True,
+                    "allowHostNetwork": True,
+                    "allowHostPID": False,
+                    "allowHostIPC": False,
+                    "allowHostPorts": False,
+                    "allowHostDirVolumePlugin": False,
+                    "runAsUser": {"type": "RunAsAny"},
+                    "seLinuxContext": {"type": "RunAsAny"},
+                    "volumes": ["*"],
+                    "users": ["system:admin"],
+                    "groups": [],
+                }
+            ],
         }
         result = scan_sccs.call({})
         assert "PRIVILEGED" in result
@@ -224,13 +226,23 @@ class TestGetSecuritySummary:
 class TestSecurityAgentToolList:
     def test_excludes_write_tools(self):
         tool_names = {t.name for t in SEC_ALL_TOOLS}
-        assert tool_names & WRITE_TOOLS == set(), f"Security agent should not have write tools: {tool_names & WRITE_TOOLS}"
+        assert tool_names & WRITE_TOOLS == set(), (
+            f"Security agent should not have write tools: {tool_names & WRITE_TOOLS}"
+        )
 
     def test_includes_security_tools(self):
         tool_names = {t.name for t in SEC_ALL_TOOLS}
-        expected = {"scan_pod_security", "scan_images", "scan_rbac_risks", "scan_network_policies",
-                    "scan_sccs", "scan_scc_usage", "scan_secrets", "get_security_summary",
-                    "list_service_account_secrets"}
+        expected = {
+            "scan_pod_security",
+            "scan_images",
+            "scan_rbac_risks",
+            "scan_network_policies",
+            "scan_sccs",
+            "scan_scc_usage",
+            "scan_secrets",
+            "get_security_summary",
+            "list_service_account_secrets",
+        }
         assert expected <= tool_names, f"Missing security tools: {expected - tool_names}"
 
     def test_includes_sre_read_tools(self):
