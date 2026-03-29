@@ -4,10 +4,8 @@ FROM registry.access.redhat.com/ubi9/python-312:latest
 WORKDIR /opt/app-root/src
 
 COPY pyproject.toml .
-RUN pip install --no-cache-dir anthropic[vertex] kubernetes rich fastapi uvicorn[standard] websockets cryptography
-
 COPY sre_agent/ sre_agent/
-RUN pip install --no-deps --force-reinstall .
+RUN pip install --no-cache-dir .
 
 USER 1001
 EXPOSE 8080
