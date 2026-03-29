@@ -43,6 +43,10 @@ Pulse Agent connects directly to your cluster's Kubernetes API and uses Claude O
 - **Auto-Fix at Trust Level 4** — Applies all fixable findings automatically, with rollback snapshots for every action
 - **Confidence Scores** — Every finding, investigation, and action includes a confidence score (0-100%) so you know exactly how much to trust each suggestion
 - **Resolution Events** — When findings resolve (auto-fix or self-healed), the monitor emits `resolution` events so the UI can celebrate wins
+- **Morning Briefing** — `GET /briefing` endpoint returns time-aware greeting, action summary, and investigation count for the last N hours
+- **Reasoning Chains** — Investigation reports include `evidence` (facts that support the diagnosis) and `alternativesConsidered` (hypotheses ruled out)
+- **Simulation Preview** — `POST /simulate` endpoint predicts impact, risk level, and estimated duration for any action before execution
+- **Noise Learning** — Tracks transient findings that self-resolve; assigns `noiseScore` to suppress flaky alerts
 - **Finding Lifecycle** — Stale finding cleanup after each scan cycle, severity escalation on repeat occurrences
 
 ### Orchestrator
@@ -344,6 +348,8 @@ pulse-agent-api  # Starts on port 8080
 | `GET /health` | Circuit breaker state, error summary, autofix status |
 | `GET /tools` | List all available tools by mode with confirmation flags |
 | `GET /fix-history` | Paginated fix history with filters |
+| `GET /briefing` | Cluster activity summary for last N hours |
+| `POST /simulate` | Predict impact of an action without executing |
 | `GET /predictions` | Predictions (WebSocket-only, returns empty) |
 | `GET /memory/export` | Export learned runbooks + patterns |
 | `POST /memory/import` | Import runbooks + patterns |
@@ -579,7 +585,7 @@ pip install -e '.[test]'
 python -m pytest tests/ -v
 ```
 
-384 tests covering all tools, agent loop safety mechanisms, error classification, error tracking, config validation, unit parsing, orchestrator, context bus, handoff tools, and the memory system. All tests run without a cluster or API key (fully mocked).
+393 tests covering all tools, agent loop safety mechanisms, error classification, error tracking, config validation, unit parsing, orchestrator, context bus, handoff tools, and the memory system. All tests run without a cluster or API key (fully mocked).
 
 ## Evaluation Framework
 
@@ -633,7 +639,7 @@ Suites:
 ---
 
 <p align="center">
-  <strong>109 tools</strong> &bull; <strong>11 scanners</strong> &bull; <strong>10 runbooks</strong> &bull; <strong>8 tool categories</strong> &bull; <strong>384 tests</strong> &bull; <strong>Protocol v2</strong>
+  <strong>109 tools</strong> &bull; <strong>11 scanners</strong> &bull; <strong>10 runbooks</strong> &bull; <strong>8 tool categories</strong> &bull; <strong>393 tests</strong> &bull; <strong>Protocol v2</strong>
 </p>
 
 <p align="center">

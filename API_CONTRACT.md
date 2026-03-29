@@ -20,7 +20,9 @@ Defines the REST and WebSocket protocol between the Pulse UI and Pulse Agent. Bo
 | `GET` | `/fix-history/{id}` | token | Single action detail with before/after state |
 | `POST` | `/fix-history/{id}/rollback` | token | Rollback a completed action (supported for `restart_deployment`; returns error for unsupported action types) |
 | `GET` | `/eval/status` | token | Cached quality gate snapshot (release, safety, integration, outcomes) |
+| `GET` | `/briefing` | token | Cluster activity summary for last N hours (greeting, actions, investigations) |
 | `GET` | `/predictions` | token | Returns empty — predictions are WebSocket-only (`/ws/monitor`) |
+| `POST` | `/simulate` | token | Predict impact of a tool action without executing it |
 | `GET` | `/memory/export` | token | Export learned runbooks and patterns as JSON |
 | `POST` | `/memory/import` | token | Import runbooks and patterns from another pod's export |
 | `GET` | `/monitor/capabilities` | token | Max trust level and supported auto-fix categories |
@@ -331,7 +333,7 @@ Triggers an immediate cluster scan. If a scan is already in progress, returns an
 }
 ```
 
-The optional `confidence` field (0.0–1.0) indicates how confident the scanner is that this is a real issue.
+The optional `confidence` field (0.0–1.0) indicates how confident the scanner is that this is a real issue. The optional `noiseScore` field (0.0–1.0) indicates how likely this finding is transient noise (based on historical self-resolution patterns). Findings with `noiseScore >= 0.5` are dimmed in the UI.
 
 #### `prediction` — Predicted future issue
 
@@ -383,9 +385,13 @@ The optional `confidence` field (0.0–1.0) indicates how confident the scanner 
   "suspectedCause": "ConfigMap key removed in recent rollout",
   "recommendedFix": "Restore key and restart deployment",
   "confidence": 0.82,
+  "evidence": ["ConfigMap 'app-config' key 'DB_HOST' missing since rollout at 14:32", "Pod logs show KeyError on startup"],
+  "alternativesConsidered": ["Image pull failure ruled out — image exists and pulled successfully"],
   "timestamp": 1711540800
 }
 ```
+
+Optional fields: `evidence` (list of facts supporting the diagnosis), `alternativesConsidered` (hypotheses checked and ruled out).
 
 #### `verification_report` — Next-scan validation after a fix action
 

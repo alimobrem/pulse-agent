@@ -13,6 +13,7 @@ from sre_agent.monitor import (
     SEVERITY_WARNING,
     MonitorSession,
     _estimate_finding_confidence,
+    _finding_key,
     _make_action_report,
     _make_finding,
     _make_prediction,
@@ -908,3 +909,99 @@ class TestResolutionEvents:
         if len(session._recent_fix_ids) > 500:
             session._recent_fix_ids = set(list(session._recent_fix_ids)[-500:])
         assert len(session._recent_fix_ids) == 500
+
+
+class TestBriefing:
+    def test_briefing_returns_greeting(self):
+        from sre_agent.monitor import get_briefing
+
+        result = get_briefing(hours=12)
+        assert result["greeting"] in ("Good morning", "Good afternoon", "Good evening")
+        assert "summary" in result
+        assert result["hours"] == 12
+        assert result["actions"]["total"] >= 0
+
+    def test_briefing_empty_db(self):
+        from sre_agent.monitor import get_briefing
+
+        result = get_briefing(hours=1)
+        assert result["summary"] == "All quiet — no issues detected."
+        assert result["actions"]["completed"] == 0
+
+    def test_briefing_with_actions(self):
+        from sre_agent.monitor import get_briefing, save_action
+
+        action = _make_action_report(
+            finding_id="f-test",
+            tool="restart_deployment",
+            inp={},
+            status="completed",
+            reasoning="test fix",
+        )
+        save_action(action, category="workloads", resources=[])
+        result = get_briefing(hours=1)
+        assert result["actions"]["completed"] == 1
+        assert "auto-fixed" in result["summary"]
+
+
+class TestSimulation:
+    def test_simulate_known_tool(self):
+        from sre_agent.monitor import simulate_action
+
+        result = simulate_action("restart_deployment", {"name": "web", "namespace": "prod"})
+        assert result["tool"] == "restart_deployment"
+        assert result["risk"] == "medium"
+        assert result["reversible"] is True
+        assert "estimatedDuration" in result
+
+    def test_simulate_high_risk_tool(self):
+        from sre_agent.monitor import simulate_action
+
+        result = simulate_action("drain_node", {"name": "worker-1"})
+        assert result["risk"] == "high"
+        assert result["reversible"] is False
+
+    def test_simulate_unknown_tool(self):
+        from sre_agent.monitor import simulate_action
+
+        result = simulate_action("unknown_tool", {})
+        assert result["risk"] == "low"
+        assert "unknown_tool" in result["description"]
+
+
+class TestNoiseTracking:
+    def test_noise_score_not_set_on_first_appearance(self):
+        ws = MagicMock()
+        session = MonitorSession(ws, trust_level=1)
+        # No transient history — noise score should not be set
+        finding = _make_finding(
+            severity="warning",
+            category="pending",
+            title="Pod pending",
+            summary="test",
+            resources=[{"kind": "Pod", "name": "x", "namespace": "ns"}],
+        )
+        key = _finding_key(finding)
+        assert session._transient_counts.get(key, 0) == 0
+
+    def test_transient_count_increments(self):
+        ws = MagicMock()
+        session = MonitorSession(ws, trust_level=1)
+        key = "pending:Pod pending:Pod:ns:x"
+        session._transient_counts[key] = 2
+        # Simulate another disappearance
+        session._transient_counts[key] += 1
+        assert session._transient_counts[key] == 3
+
+    def test_noise_threshold_configurable(self):
+        import os
+
+        old = os.environ.get("PULSE_AGENT_NOISE_THRESHOLD")
+        os.environ["PULSE_AGENT_NOISE_THRESHOLD"] = "0.9"
+        ws = MagicMock()
+        session = MonitorSession(ws, trust_level=1)
+        assert session._noise_threshold == 0.9
+        if old is not None:
+            os.environ["PULSE_AGENT_NOISE_THRESHOLD"] = old
+        else:
+            os.environ.pop("PULSE_AGENT_NOISE_THRESHOLD", None)

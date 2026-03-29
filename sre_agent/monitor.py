@@ -270,6 +270,70 @@ def get_fix_history(page: int = 1, page_size: int = 20, filters: dict | None = N
         return {"actions": [], "total": 0, "page": page, "pageSize": page_size}
 
 
+def get_briefing(hours: int = 12) -> dict:
+    """Build a briefing summary of recent cluster activity."""
+    try:
+        _ensure_tables()
+        db = get_database()
+        since = _ts() - (hours * 3600 * 1000)
+
+        # Recent actions
+        actions = db.fetchall("SELECT status, category, tool FROM actions WHERE timestamp >= ?", (since,))
+        total_actions = len(actions)
+        completed = sum(1 for a in actions if a["status"] == "completed")
+        failed = sum(1 for a in actions if a["status"] == "failed")
+        categories_fixed = list({a["category"] for a in actions if a["status"] == "completed"})
+
+        # Recent investigations
+        investigations = db.fetchall("SELECT status FROM investigations WHERE timestamp >= ?", (since,))
+        total_investigations = len(investigations)
+
+        # Determine greeting
+        import datetime as _dtmod
+
+        hour = _dtmod.datetime.now().hour
+        if hour < 12:
+            greeting = "Good morning"
+        elif hour < 17:
+            greeting = "Good afternoon"
+        else:
+            greeting = "Good evening"
+
+        # Build summary sentence
+        if total_actions == 0 and total_investigations == 0:
+            summary = "All quiet — no issues detected."
+        else:
+            parts = []
+            if completed:
+                parts.append(f"{completed} issue{'s' if completed != 1 else ''} auto-fixed")
+            if failed:
+                parts.append(f"{failed} fix{'es' if failed != 1 else ''} failed")
+            if total_investigations:
+                parts.append(
+                    f"{total_investigations} investigation{'s' if total_investigations != 1 else ''} completed"
+                )
+            summary = ", ".join(parts) + "."
+
+        return {
+            "greeting": greeting,
+            "summary": summary,
+            "hours": hours,
+            "actions": {"total": total_actions, "completed": completed, "failed": failed},
+            "investigations": total_investigations,
+            "categoriesFixed": categories_fixed,
+        }
+    except Exception as e:
+        logger.error("Failed to build briefing: %s", e)
+        return {
+            "greeting": "Hello",
+            "summary": "Unable to load briefing.",
+            "hours": hours,
+            "actions": {"total": 0, "completed": 0, "failed": 0},
+            "investigations": 0,
+            "categoriesFixed": [],
+        }
+
+
 def get_action_detail(action_id: str) -> dict | None:
     """Get a single action by ID."""
     try:
@@ -311,8 +375,9 @@ def save_investigation(report: dict, finding: dict) -> None:
         db.execute(
             """INSERT OR REPLACE INTO investigations
                (id, finding_id, timestamp, category, severity, status, summary,
-                suspected_cause, recommended_fix, confidence, error, resources)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                suspected_cause, recommended_fix, confidence, error, resources,
+                evidence, alternatives_considered)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 report.get("id"),
                 report.get("findingId", ""),
@@ -326,6 +391,8 @@ def save_investigation(report: dict, finding: dict) -> None:
                 float(report.get("confidence") or 0.0),
                 report.get("error"),
                 json.dumps(finding.get("resources", [])),
+                json.dumps(report.get("evidence", [])),
+                json.dumps(report.get("alternativesConsidered", [])),
             ),
         )
         db.commit()
@@ -1120,7 +1187,9 @@ def _build_investigation_prompt(finding: dict) -> str:
         '  "summary": "short human summary",\n'
         '  "suspected_cause": "likely root cause",\n'
         '  "recommended_fix": "next best action",\n'
-        '  "confidence": 0.0\n'
+        '  "confidence": 0.0,\n'
+        '  "evidence": ["fact 1 that supports the diagnosis", "fact 2"],\n'
+        '  "alternatives_considered": ["hypothesis ruled out and why"]\n'
         "}\n"
     )
 
@@ -1134,6 +1203,53 @@ def _build_investigation_prompt(finding: dict) -> str:
         prompt += f"\n\n{shared}\n"
 
     return prompt
+
+
+# ── Simulation ────────────────────────────────────────────────────────────
+
+
+_SIMULATION_DESCRIPTIONS: dict[str, str] = {
+    "delete_pod": "Pod will be deleted. If managed by a controller (Deployment, ReplicaSet, etc.), a new pod will be created automatically within seconds. Brief disruption to in-flight requests.",
+    "restart_deployment": "All pods in the deployment will be replaced via rolling restart. Pods terminate one at a time (default surge/unavailability). Typically takes 30-120 seconds depending on pod count and readiness probes.",
+    "scale_deployment": "Deployment replica count will change. Scaling up adds new pods (subject to scheduling, resource quotas). Scaling down terminates excess pods with graceful shutdown.",
+    "cordon_node": "Node will be marked unschedulable. Existing pods continue running but no new pods will be scheduled here. Reversible with uncordon.",
+    "drain_node": "All pods on the node will be evicted (respecting PodDisruptionBudgets). Node marked unschedulable. This can cause service disruption if insufficient capacity elsewhere.",
+    "rollback_deployment": "Deployment will revert to a previous ReplicaSet revision. Pods will be replaced via rolling update to the previous template.",
+    "apply_yaml": "Kubernetes resource will be created or updated. Server-side dry-run validates the manifest before apply.",
+    "create_network_policy": "A NetworkPolicy will be created restricting traffic. Existing connections may be dropped depending on CNI plugin behavior.",
+}
+
+
+def simulate_action(tool: str, inp: dict) -> dict:
+    """Predict the impact of a tool action without executing it."""
+    description = _SIMULATION_DESCRIPTIONS.get(tool, f"Action '{tool}' will be executed on the cluster.")
+
+    # Estimate risk level
+    high_risk = {"drain_node", "apply_yaml", "scale_deployment"}
+    medium_risk = {"delete_pod", "restart_deployment", "rollback_deployment", "cordon_node"}
+    if tool in high_risk:
+        risk = "high"
+    elif tool in medium_risk:
+        risk = "medium"
+    else:
+        risk = "low"
+
+    # Build context-specific detail
+    detail = description
+    if tool == "scale_deployment" and "replicas" in inp:
+        detail += f" Target: {inp.get('replicas')} replicas."
+    if tool == "delete_pod" and "name" in inp:
+        detail += f" Pod: {inp.get('namespace', 'default')}/{inp.get('name')}."
+
+    return {
+        "tool": tool,
+        "risk": risk,
+        "description": detail,
+        "reversible": tool not in {"drain_node"},
+        "estimatedDuration": "30-120s"
+        if tool in {"restart_deployment", "drain_node", "rollback_deployment"}
+        else "< 10s",
+    }
 
 
 # ── Cost / usage tracking ──────────────────────────────────────────────────
@@ -1220,11 +1336,19 @@ def _run_proactive_investigation_sync(finding: dict) -> dict[str, Any]:
     except Exception:
         confidence = 0.0
     confidence = max(0.0, min(1.0, confidence))
+    evidence = parsed.get("evidence", [])
+    if not isinstance(evidence, list):
+        evidence = []
+    alternatives = parsed.get("alternatives_considered", [])
+    if not isinstance(alternatives, list):
+        alternatives = []
     return {
         "summary": summary,
         "suspectedCause": suspected_cause,
         "recommendedFix": recommended_fix,
         "confidence": round(confidence, 2),
+        "evidence": [str(e) for e in evidence[:10]],
+        "alternativesConsidered": [str(a) for a in alternatives[:10]],
     }
 
 
@@ -1321,6 +1445,9 @@ class MonitorSession:
         self._scan_lock = asyncio.Lock()  # H1: prevent concurrent scans
         self._last_security_followup: float = 0.0  # cooldown tracker
         self._recent_fix_ids: set[str] = set()  # finding IDs that were auto-fixed (for resolution attribution)
+        # Noise learning: track findings that appear then quickly disappear
+        self._transient_counts: dict[str, int] = {}  # finding_key -> count of transient appearances
+        self._noise_threshold = float(os.environ.get("PULSE_AGENT_NOISE_THRESHOLD", "0.7"))
 
     def resolve_action_response(self, action_id: str, approved: bool) -> bool:
         """Resolve an outstanding action approval request."""
@@ -1886,14 +2013,30 @@ class MonitorSession:
                 }
             )
 
+        # Track transient findings for noise learning
+        for key in stale_keys:
+            self._transient_counts[key] = self._transient_counts.get(key, 0) + 1
+
         # Cap _recent_fix_ids to prevent unbounded growth on long-running sessions
         if len(self._recent_fix_ids) > 500:
             self._recent_fix_ids = set(list(self._recent_fix_ids)[-500:])
+        # Cap transient counts
+        if len(self._transient_counts) > 1000:
+            # Keep only the most frequent
+            sorted_keys = sorted(self._transient_counts, key=self._transient_counts.get, reverse=True)  # type: ignore[arg-type]
+            self._transient_counts = {k: self._transient_counts[k] for k in sorted_keys[:500]}
 
-        # Enrich findings with confidence scores (before context bus so consumers get scores)
+        # Enrich findings with confidence and noise scores (before context bus so consumers get scores)
         for f in new_findings:
             if "confidence" not in f:
                 f["confidence"] = _estimate_finding_confidence(f)
+            # Compute noise score from transient history
+            fkey = _finding_key(f)
+            transient_count = self._transient_counts.get(fkey, 0)
+            if transient_count >= 3:
+                f["noiseScore"] = min(1.0, round(transient_count * 0.2, 2))
+            elif transient_count > 0:
+                f["noiseScore"] = round(transient_count * 0.1, 2)
 
         # Publish critical new findings to shared context bus
         from .context_bus import ContextEntry, get_context_bus

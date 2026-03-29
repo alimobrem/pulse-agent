@@ -19,7 +19,7 @@ import uuid
 from contextlib import asynccontextmanager
 from importlib.metadata import version as pkg_version
 
-from fastapi import FastAPI, Header, HTTPException, Query, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, Header, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
 
 from .agent import (
     ALL_TOOLS as SRE_ALL_TOOLS,
@@ -1054,6 +1054,19 @@ async def rollback_action(
     return result
 
 
+@app.get("/briefing")
+async def rest_briefing(
+    hours: int = Query(12, ge=1, le=72),
+    authorization: str | None = Header(None),
+    token: str | None = Query(None),
+):
+    """Cluster activity briefing for the last N hours. Requires token auth."""
+    _verify_rest_token(authorization, token)
+    from .monitor import get_briefing
+
+    return get_briefing(hours)
+
+
 @app.get("/predictions")
 async def rest_predictions(
     authorization: str | None = Header(None),
@@ -1071,6 +1084,23 @@ async def rest_predictions(
         "total": 0,
         "note": "Predictions are currently only available via the /ws/monitor WebSocket stream.",
     }
+
+
+@app.post("/simulate")
+async def rest_simulate(
+    request: Request,
+    authorization: str | None = Header(None),
+    token: str | None = Query(None),
+):
+    """Predict the impact of a tool action without executing it. Requires token auth."""
+    _verify_rest_token(authorization, token)
+    body = await request.json()
+    tool = body.get("tool", "")
+    inp = body.get("input", {})
+    from .monitor import simulate_action
+
+    result = simulate_action(tool, inp)
+    return result
 
 
 @app.get("/monitor/capabilities")

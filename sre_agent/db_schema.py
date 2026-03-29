@@ -98,7 +98,9 @@ CREATE TABLE IF NOT EXISTS investigations (
     recommended_fix TEXT,
     confidence REAL,
     error TEXT,
-    resources TEXT
+    resources TEXT,
+    evidence TEXT,
+    alternatives_considered TEXT
 );
 """
 
