@@ -1,6 +1,6 @@
-# Default 2 replicas for HA when using PostgreSQL (external DB).
-# With SQLite (database.type=sqlite), set to 1 unless using ReadWriteMany storage.
-replicaCount: 2
+# Default 1 replica — memory PVC uses ReadWriteOnce (gp3-csi).
+# Set to 2+ only with ReadWriteMany storage or no PVC.
+replicaCount: 1
 
 image:
   # Quay.io (recommended): quay.io/amobrem/pulse-agent
@@ -70,9 +70,8 @@ resources:
     cpu: 500m
     memory: 512Mi
 
-# Database — PostgreSQL (production) or SQLite (dev)
+# Database — PostgreSQL (production)
 database:
-  # "postgresql" for production, "sqlite" for local dev/testing
   type: "postgresql"
   # PostgreSQL settings (only used when type=postgresql)
   postgresql:

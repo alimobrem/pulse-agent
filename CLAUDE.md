@@ -141,7 +141,7 @@ Rules: validate inputs with `_validate_k8s_name()`/`_validate_k8s_namespace()`, 
 - `errors.py` — `ToolError` classification (7 categories + suggestions)
 - `error_tracker.py` — thread-safe ring buffer for error aggregation
 - `runbooks.py` — 10 built-in SRE runbooks injected into system prompt
-- `memory/` — self-improving agent (PostgreSQL or SQLite, pattern detection, learned runbooks)
+- `memory/` — self-improving agent (PostgreSQL, pattern detection, learned runbooks)
 - `k8s_client.py` — lazy-initialized K8s client with `safe()` wrapper
 - `context_bus.py` — shared context bus for cross-agent communication
 - `orchestrator.py` — intent classification + agent routing for `/ws/agent`
@@ -168,7 +168,7 @@ Rules: validate inputs with `_validate_k8s_name()`/`_validate_k8s_namespace()`, 
 | `PULSE_AGENT_SCAN_INTERVAL` | Monitor scan interval (seconds) | `60` |
 | `PULSE_AGENT_HARNESS` | Enable harness optimizations | `1` |
 | `PULSE_AGENT_MEMORY` | Enable self-improving memory | `1` (enabled) |
-| `PULSE_AGENT_DATABASE_URL` | Database URL (PostgreSQL or SQLite) | `sqlite:////tmp/pulse_agent/pulse.db` |
+| `PULSE_AGENT_DATABASE_URL` | Database URL (PostgreSQL) | required |
 | `PULSE_AGENT_AUTOFIX_ENABLED` | Enable monitor auto-fix | `true` |
 | `PULSE_AGENT_MAX_TRUST_LEVEL` | Server-side max trust level (0-4) | `3` |
 | `PULSE_AGENT_CB_THRESHOLD` | Circuit breaker failure threshold | `3` |

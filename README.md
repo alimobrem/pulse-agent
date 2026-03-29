@@ -34,7 +34,7 @@ Pulse Agent connects directly to your cluster's Kubernetes API and uses Claude O
 - **Structured Error Types** — ToolError classification with 7 categories (permission, not_found, conflict, validation, server, network, quota) and actionable suggestions
 - **Error Tracking** — Thread-safe ring buffer (500 entries) with per-category aggregation and top-tool breakdown
 - **Health Endpoint** — `/health` returns circuit breaker state, error summary, and recent errors
-- **SQLite Resilience** — `@db_safe` decorator on all memory operations prevents crashes on database errors
+- **Database Resilience** — `@db_safe` decorator on all memory operations prevents crashes on database errors
 
 ### Autonomous Monitor
 - **Continuous Scanning** — 60-second scan interval via `/ws/monitor` endpoint, pushing findings to the Pulse UI in real time
@@ -66,7 +66,7 @@ Pulse Agent connects directly to your cluster's Kubernetes API and uses Claude O
 
 ### Database
 - **PostgreSQL** — Production database for fix history, incident memory, learned runbooks, and patterns. Configured via `PULSE_AGENT_DATABASE_URL`. Auto-generated password as K8s Secret.
-- **SQLite** — Fallback for development/testing when no PostgreSQL URL is configured. Default: `/tmp/pulse_agent/pulse.db`.
+- **Local Dev Fallback** — SQLite fallback for local development when no PostgreSQL URL is configured. Not recommended for production.
 
 ### Pydantic Configuration
 - **`PulseAgentSettings`** — All configuration via `pydantic-settings` with `PULSE_AGENT_` env prefix, `.env` file support, and type validation at startup (`config.py`)
@@ -120,7 +120,7 @@ export ANTHROPIC_API_KEY=sk-ant-...
 | `PULSE_AGENT_MODEL` | Claude model to use | `claude-opus-4-6` |
 | `PULSE_AGENT_MAX_TOKENS` | Max output tokens per response | `16000` |
 | `PULSE_AGENT_MEMORY` | Enable self-improving memory (`1`/`true`) | `1` (enabled) |
-| `PULSE_AGENT_DATABASE_URL` | Database connection URL (PostgreSQL or SQLite) | `sqlite:////tmp/pulse_agent/pulse.db` |
+| `PULSE_AGENT_DATABASE_URL` | PostgreSQL connection URL | Set by Helm chart |
 | `PULSE_AGENT_AUTOFIX_ENABLED` | Enable/disable monitor auto-fix | `true` |
 | `PULSE_AGENT_MAX_TRUST_LEVEL` | Server-side max trust level cap (0-4) | `3` |
 | `PULSE_AGENT_SCAN_INTERVAL` | Monitor scan interval (seconds) | `60` |
@@ -504,7 +504,7 @@ sre_agent/
 ├── security_tools.py    # 9 security scanning tools (@beta_tool)
 ├── handoff_tools.py     # 2 agent-to-agent handoff tools (request_security_scan, request_sre_investigation)
 ├── harness.py           # Claude harness: tool selection, prompt caching, cluster context
-├── db.py                # Database abstraction (PostgreSQL + SQLite)
+├── db.py                # Database abstraction (PostgreSQL)
 ├── db_schema.py         # Shared schema definitions
 ├── context_bus.py       # Shared context bus for cross-agent communication (database-backed)
 ├── units.py             # Kubernetes resource unit parsing (CPU, memory)
