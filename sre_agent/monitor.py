@@ -905,6 +905,18 @@ ALL_SCANNERS = [
 ]
 
 
+def _get_all_scanners() -> list[tuple[str, Callable]]:
+    """Return all scanners including audit scanners (lazy import to avoid circular dependency)."""
+    from .audit_scanner import scan_config_changes, scan_rbac_changes, scan_recent_deployments, scan_warning_events
+
+    return ALL_SCANNERS + [
+        ("audit_config", scan_config_changes),
+        ("audit_rbac", scan_rbac_changes),
+        ("audit_deployment", scan_recent_deployments),
+        ("audit_events", scan_warning_events),
+    ]
+
+
 # ── Webhook escalation ─────────────────────────────────────────────────────
 
 WEBHOOK_URL = os.environ.get("PULSE_AGENT_WEBHOOK_URL", "")
@@ -1968,7 +1980,7 @@ class MonitorSession:
         except Exception as e:
             logger.error("Failed to fetch shared pod list: %s", e)
 
-        for category, scanner in ALL_SCANNERS:
+        for category, scanner in _get_all_scanners():
             try:
                 if category in _POD_SCANNERS and shared_pods is not None:
                     findings = await asyncio.to_thread(scanner, shared_pods)
