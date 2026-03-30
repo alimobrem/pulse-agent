@@ -397,6 +397,96 @@ async def _create_and_register_future(ws_id: str, tool_name: str, tool_input: di
     return future
 
 
+def _make_receive_loop(
+    websocket: WebSocket,
+    session_id: str,
+    messages: list[dict],
+    incoming: asyncio.Queue,
+):
+    """Create a shared WebSocket receive loop for SRE/Security/Auto-agent endpoints.
+
+    Handles: confirm_response (with nonce + memory learning), clear, feedback, message routing.
+    """
+
+    async def _receive_loop():
+        try:
+            while True:
+                raw = await websocket.receive_text()
+                if len(raw) > MAX_MESSAGE_SIZE:
+                    await websocket.send_json({"type": "error", "message": "Message too large"})
+                    continue
+                try:
+                    data = json.loads(raw)
+                except json.JSONDecodeError:
+                    await websocket.send_json({"type": "error", "message": "Invalid JSON"})
+                    continue
+
+                msg_type = data.get("type")
+
+                if msg_type == "confirm_response":
+                    future = _pending_confirms.get(session_id)
+                    expected_nonce = _pending_nonces.get(session_id)
+                    received_nonce = data.get("nonce", "")
+
+                    if not future or future.done():
+                        logger.warning("Confirm response received but no pending future (session=%s)", session_id)
+                    elif expected_nonce and received_nonce != expected_nonce:
+                        logger.warning("Confirm response nonce mismatch — possible replay (session=%s)", session_id)
+                        future.set_result(False)
+                    else:
+                        approved = data.get("approved", False)
+                        future.set_result(approved)
+                        logger.info("Confirmation received: approved=%s nonce=%s", approved, received_nonce[:8])
+                        try:
+                            from .memory import get_manager
+
+                            manager = get_manager()
+                            if manager and approved:
+                                manager.update_last_outcome(True)
+                        except Exception:
+                            pass
+                    _pending_nonces.pop(session_id, None)
+                    continue
+
+                if msg_type == "clear":
+                    messages.clear()
+                    await websocket.send_json({"type": "cleared"})
+                    continue
+
+                if msg_type == "feedback":
+                    resolved = data.get("resolved", False)
+                    try:
+                        from .memory import get_manager
+
+                        manager = get_manager()
+                        if manager:
+                            result = manager.update_last_outcome(resolved)
+                            await websocket.send_json(
+                                {
+                                    "type": "feedback_ack",
+                                    "resolved": resolved,
+                                    "score": result.get("score", 0) if result else 0,
+                                    "runbookExtracted": bool(result and result.get("runbook_id")),
+                                }
+                            )
+                        else:
+                            await websocket.send_json({"type": "feedback_ack", "resolved": resolved, "score": 0})
+                    except Exception as e:
+                        logger.debug("Feedback recording failed: %s", e)
+                        await websocket.send_json({"type": "feedback_ack", "resolved": resolved, "score": 0})
+                    continue
+
+                await incoming.put(data)
+        except WebSocketDisconnect:
+            _ws_alive[session_id] = False
+            await incoming.put(None)
+        except Exception:
+            _ws_alive[session_id] = False
+            await incoming.put(None)
+
+    return _receive_loop
+
+
 @app.websocket("/ws/{mode}")
 async def websocket_agent(websocket: WebSocket, mode: str):
     """WebSocket endpoint for agent chat.
@@ -463,88 +553,7 @@ async def websocket_agent(websocket: WebSocket, mode: str):
 
     # Message queue for incoming messages while agent is running
     incoming: asyncio.Queue = asyncio.Queue()
-
-    async def _receive_loop():
-        """Receive messages from the WebSocket and route them."""
-        try:
-            while True:
-                raw = await websocket.receive_text()
-                if len(raw) > MAX_MESSAGE_SIZE:
-                    await websocket.send_json({"type": "error", "message": "Message too large"})
-                    continue
-                try:
-                    data = json.loads(raw)
-                except json.JSONDecodeError:
-                    await websocket.send_json({"type": "error", "message": "Invalid JSON"})
-                    continue
-
-                msg_type = data.get("type")
-
-                # Confirm responses are handled immediately (even while agent runs)
-                if msg_type == "confirm_response":
-                    future = _pending_confirms.get(session_id)
-                    expected_nonce = _pending_nonces.get(session_id)
-                    received_nonce = data.get("nonce", "")
-
-                    if not future or future.done():
-                        logger.warning("Confirm response received but no pending future (session=%s)", session_id)
-                    elif expected_nonce and received_nonce != expected_nonce:
-                        logger.warning("Confirm response nonce mismatch — possible replay (session=%s)", session_id)
-                        future.set_result(False)
-                    else:
-                        approved = data.get("approved", False)
-                        future.set_result(approved)
-                        logger.info("Confirmation received: approved=%s nonce=%s", approved, received_nonce[:8])
-                        # Record confirmation as implicit feedback for memory learning
-                        try:
-                            from .memory import get_manager
-
-                            manager = get_manager()
-                            if manager and approved:
-                                manager.update_last_outcome(True)
-                        except Exception:
-                            pass
-                    _pending_nonces.pop(session_id, None)
-                    continue
-
-                if msg_type == "clear":
-                    messages.clear()
-                    await websocket.send_json({"type": "cleared"})
-                    continue
-
-                if msg_type == "feedback":
-                    resolved = data.get("resolved", False)
-                    try:
-                        from .memory import get_manager
-
-                        manager = get_manager()
-                        if manager:
-                            result = manager.update_last_outcome(resolved)
-                            await websocket.send_json(
-                                {
-                                    "type": "feedback_ack",
-                                    "resolved": resolved,
-                                    "score": result.get("score", 0) if result else 0,
-                                    "runbookExtracted": bool(result and result.get("runbook_id")),
-                                }
-                            )
-                        else:
-                            await websocket.send_json({"type": "feedback_ack", "resolved": resolved, "score": 0})
-                    except Exception as e:
-                        logger.debug("Feedback recording failed: %s", e)
-                        await websocket.send_json({"type": "feedback_ack", "resolved": resolved, "score": 0})
-                    continue
-
-                # Queue other messages for the main loop
-                await incoming.put(data)
-        except WebSocketDisconnect:
-            _ws_alive[session_id] = False
-            await incoming.put(None)  # Signal disconnect
-        except Exception:
-            _ws_alive[session_id] = False
-            await incoming.put(None)
-
-    # Start the receive loop as a concurrent task
+    _receive_loop = _make_receive_loop(websocket, session_id, messages, incoming)
     receive_task = asyncio.create_task(_receive_loop())
 
     try:
@@ -725,88 +734,7 @@ async def websocket_auto_agent(websocket: WebSocket):
 
     # Message queue for incoming messages while agent is running
     incoming: asyncio.Queue = asyncio.Queue()
-
-    async def _receive_loop():
-        """Receive messages from the WebSocket and route them."""
-        try:
-            while True:
-                raw = await websocket.receive_text()
-                if len(raw) > MAX_MESSAGE_SIZE:
-                    await websocket.send_json({"type": "error", "message": "Message too large"})
-                    continue
-                try:
-                    data = json.loads(raw)
-                except json.JSONDecodeError:
-                    await websocket.send_json({"type": "error", "message": "Invalid JSON"})
-                    continue
-
-                msg_type = data.get("type")
-
-                # Confirm responses are handled immediately (even while agent runs)
-                if msg_type == "confirm_response":
-                    future = _pending_confirms.get(session_id)
-                    expected_nonce = _pending_nonces.get(session_id)
-                    received_nonce = data.get("nonce", "")
-
-                    if not future or future.done():
-                        logger.warning("Confirm response received but no pending future (session=%s)", session_id)
-                    elif expected_nonce and received_nonce != expected_nonce:
-                        logger.warning("Confirm response nonce mismatch — possible replay (session=%s)", session_id)
-                        future.set_result(False)
-                    else:
-                        approved = data.get("approved", False)
-                        future.set_result(approved)
-                        logger.info("Confirmation received: approved=%s nonce=%s", approved, received_nonce[:8])
-                        # Record confirmation as implicit feedback for memory learning
-                        try:
-                            from .memory import get_manager
-
-                            manager = get_manager()
-                            if manager and approved:
-                                manager.update_last_outcome(True)
-                        except Exception:
-                            pass
-                    _pending_nonces.pop(session_id, None)
-                    continue
-
-                if msg_type == "clear":
-                    messages.clear()
-                    await websocket.send_json({"type": "cleared"})
-                    continue
-
-                if msg_type == "feedback":
-                    resolved = data.get("resolved", False)
-                    try:
-                        from .memory import get_manager
-
-                        manager = get_manager()
-                        if manager:
-                            result = manager.update_last_outcome(resolved)
-                            await websocket.send_json(
-                                {
-                                    "type": "feedback_ack",
-                                    "resolved": resolved,
-                                    "score": result.get("score", 0) if result else 0,
-                                    "runbookExtracted": bool(result and result.get("runbook_id")),
-                                }
-                            )
-                        else:
-                            await websocket.send_json({"type": "feedback_ack", "resolved": resolved, "score": 0})
-                    except Exception as e:
-                        logger.debug("Feedback recording failed: %s", e)
-                        await websocket.send_json({"type": "feedback_ack", "resolved": resolved, "score": 0})
-                    continue
-
-                # Queue other messages for the main loop
-                await incoming.put(data)
-        except WebSocketDisconnect:
-            _ws_alive[session_id] = False
-            await incoming.put(None)  # Signal disconnect
-        except Exception:
-            _ws_alive[session_id] = False
-            await incoming.put(None)
-
-    # Start the receive loop as a concurrent task
+    _receive_loop = _make_receive_loop(websocket, session_id, messages, incoming)
     receive_task = asyncio.create_task(_receive_loop())
 
     try:
