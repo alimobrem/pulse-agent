@@ -4,7 +4,7 @@
   <a href="https://github.com/alimobrem/pulse-agent/releases/tag/v1.8.0"><img src="https://img.shields.io/badge/release-v1.8.0-2563eb?style=for-the-badge" alt="Version"></a>
   <img src="https://img.shields.io/badge/tools-109-10b981?style=for-the-badge" alt="Tools">
   <img src="https://img.shields.io/badge/scanners-11-10b981?style=for-the-badge" alt="Scanners">
-  <img src="https://img.shields.io/badge/tests-320-10b981?style=for-the-badge" alt="Tests">
+  <img src="https://img.shields.io/badge/tests-397-10b981?style=for-the-badge" alt="Tests">
   <img src="https://img.shields.io/badge/license-MIT-6366f1?style=for-the-badge" alt="License">
 </p>
 

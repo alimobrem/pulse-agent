@@ -581,14 +581,7 @@ async def websocket_agent(websocket: WebSocket, mode: str):
 
             messages.append({"role": "user", "content": content})
 
-            # Apply communication style preference
-            prefs = data.get("preferences", {})
-            comm_style = prefs.get("communicationStyle", "") if isinstance(prefs, dict) else ""
-            style_hint = ""
-            if comm_style == "brief":
-                style_hint = "\n\nUser preference: Be concise. Short answers, bullet points, no verbose explanations."
-            elif comm_style == "technical":
-                style_hint = "\n\nUser preference: Be deeply technical. Include CLI commands, YAML snippets, and implementation details."
+            style_hint = _apply_style_hint(data)
 
             # Inject shared context from context bus
             from .context_bus import ContextEntry, get_context_bus
@@ -861,14 +854,7 @@ async def websocket_auto_agent(websocket: WebSocket):
 
             messages.append({"role": "user", "content": content})
 
-            # Apply communication style preference
-            prefs = data.get("preferences", {})
-            comm_style = prefs.get("communicationStyle", "") if isinstance(prefs, dict) else ""
-            style_hint = ""
-            if comm_style == "brief":
-                style_hint = "\n\nUser preference: Be concise. Short answers, bullet points, no verbose explanations."
-            elif comm_style == "technical":
-                style_hint = "\n\nUser preference: Be deeply technical. Include CLI commands, YAML snippets, and implementation details."
+            style_hint = _apply_style_hint(data)
 
             # Inject shared context from context bus
             from .context_bus import ContextEntry, get_context_bus
@@ -1093,6 +1079,19 @@ async def websocket_monitor(websocket: WebSocket):
 
 
 # ── Protocol v2: REST endpoints ───────────────────────────────────────────
+
+
+def _apply_style_hint(data: dict) -> str:
+    """Extract communication style from message preferences and return a system prompt hint."""
+    prefs = data.get("preferences", {})
+    comm_style = prefs.get("communicationStyle", "") if isinstance(prefs, dict) else ""
+    if comm_style == "brief":
+        return "\n\nUser preference: Be concise. Short answers, bullet points, no verbose explanations."
+    elif comm_style == "technical":
+        return (
+            "\n\nUser preference: Be deeply technical. Include CLI commands, YAML snippets, and implementation details."
+        )
+    return ""
 
 
 def _verify_rest_token(authorization: str | None = Header(None), token: str | None = Query(None)):
@@ -1351,10 +1350,7 @@ async def memory_incidents(
     manager = get_manager()
     if not manager:
         return {"incidents": []}
-    if search:
-        incidents = manager.store.search_incidents(search, limit=limit)
-    else:
-        incidents = manager.store.search_incidents("", limit=limit)
+    incidents = manager.store.search_incidents(search, limit=limit)
     return {"incidents": incidents}
 
 
