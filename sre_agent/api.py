@@ -240,12 +240,14 @@ async def _run_agent_ws(
         _schedule_send({"type": "thinking_delta", "thinking": delta})
 
     session_tools: list[str] = []
+    session_components: list[dict] = []
 
     def on_tool_use(name: str):
         session_tools.append(name)
         _schedule_send({"type": "tool_use", "tool": name})
 
     def on_component(name: str, spec: dict):
+        session_components.append(spec)
         _schedule_send({"type": "component", "spec": spec, "tool": name})
 
     def on_confirm(tool_name: str, tool_input: dict) -> bool:
@@ -312,6 +314,28 @@ async def _run_agent_ws(
         on_confirm=on_confirm,
         on_component=on_component,
     )
+
+    # Check if the response contains a view_spec marker (from create_dashboard tool)
+    if full_response and "__VIEW_SPEC__" in full_response:
+        import re as _re
+
+        match = _re.search(r"__VIEW_SPEC__([^|]+)\|([^|]+)\|(.*?)(?:\n|$)", full_response)
+        if match:
+            view_id, view_title, view_desc = match.group(1), match.group(2), match.group(3)
+            import time as _time
+
+            await websocket.send_json(
+                {
+                    "type": "view_spec",
+                    "spec": {
+                        "id": view_id,
+                        "title": view_title,
+                        "description": view_desc,
+                        "layout": session_components,
+                        "generatedAt": int(_time.time() * 1000),
+                    },
+                }
+            )
 
     # Evaluate the interaction for memory scoring
     if os.environ.get("PULSE_AGENT_MEMORY", "1") == "1":

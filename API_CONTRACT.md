@@ -428,6 +428,28 @@ Emitted when a previously active finding disappears from the scan results. Enabl
 
 `resolvedBy` values: `"auto-fix"` (monitor applied a fix), `"self-healed"` (issue disappeared without intervention).
 
+#### `view_spec` — AI-generated custom dashboard
+
+Emitted when the agent calls `create_dashboard`. Contains a collection of component specs that the UI can save as a persistent custom view.
+
+```json
+{
+  "type": "view_spec",
+  "spec": {
+    "id": "cv-abc123",
+    "title": "SRE Overview",
+    "description": "Node health, crashlooping pods, RBAC risks",
+    "layout": [
+      {"kind": "data_table", "title": "...", "columns": [...], "rows": [...]},
+      {"kind": "chart", "title": "...", "series": [...]}
+    ],
+    "generatedAt": 1711540800000
+  }
+}
+```
+
+The UI shows a "Save Dashboard" prompt. Saved views are accessible at `/custom/:viewId` and persist in localStorage.
+
 #### `findings_snapshot` — Active findings reconciliation
 
 Sent after each scan cycle. Contains the IDs of all currently active findings. The UI removes any locally-held findings whose IDs are not in `activeIds`, preventing stale entries from accumulating after issues are resolved.
