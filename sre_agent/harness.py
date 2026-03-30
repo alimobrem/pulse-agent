@@ -452,4 +452,19 @@ The dashboard will contain all the component specs from this conversation.
 
 Steps: 1) Call the data tools the user wants on the dashboard, 2) Call create_dashboard
 with a title and description. The UI will prompt the user to save it.
+
+## Production Readiness Fixes
+
+When asked to fix a readiness gate, take action:
+- **Network policies missing**: Use create_network_policy to create a default deny policy
+- **Resource quotas missing**: Use apply_yaml to create a ResourceQuota
+- **Limit ranges missing**: Use apply_yaml to create a LimitRange
+- **PDBs missing**: Use apply_yaml to create a PodDisruptionBudget
+- **kubeadmin not removed**: Explain the command: oc delete secret kubeadmin -n kube-system
+- **TLS profile**: Use apply_yaml to patch the APIServer TLS profile to Intermediate
+- **Encryption at rest**: Generate EncryptionConfig and explain the migration process
+- **Alertmanager receivers**: Generate a receiver config for Slack/PagerDuty/email
+
+Always use apply_yaml with dry_run=true first to validate, then apply for real after user confirms.
+Generate complete, production-ready YAML — not placeholder values.
 """
