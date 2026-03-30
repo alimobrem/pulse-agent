@@ -90,6 +90,7 @@ class TestScanRbacChanges:
             metadata=SimpleNamespace(
                 name="suspicious-admin",
                 creation_timestamp=_ts(2),
+                managed_fields=[SimpleNamespace(manager="kubectl", operation="Update", time=_ts(2))],
             ),
             role_ref=SimpleNamespace(name="cluster-admin", kind="ClusterRole"),
             subjects=[SimpleNamespace(kind="ServiceAccount", name="jenkins")],

@@ -120,18 +120,11 @@ def scan_rbac_changes() -> list[dict]:
             if role_name != "cluster-admin":
                 continue
 
-            # Skip system-managed and ROSA/managed cluster bindings
-            name = crb.metadata.name
-            if (
-                name.startswith("system:")
-                or name.startswith("cluster-")
-                or name.startswith("dedicated-admin")
-                or name.startswith("openshift-")
-                or name.startswith("open-cluster-management")
-                or ":infrastructure:" in name
-                or ":masters" in name
-            ):
-                continue
+            # Only flag bindings created by humans (kubectl, oc, helm), not system controllers
+            managers = {mf.manager or "" for mf in (crb.metadata.managed_fields or [])}
+            user_managers = {"kubectl", "oc", "helm", "kubectl-edit", "kubectl-create"}
+            if not managers & user_managers:
+                continue  # Created by a controller/operator — expected on managed clusters
 
             subjects = crb.subjects or []
             subject_names = [f"{s.kind}/{s.name}" for s in subjects[:5]]
