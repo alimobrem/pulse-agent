@@ -442,4 +442,14 @@ Focus your text response on:
 - Risk assessment
 
 Do NOT repeat raw data that the tools already displayed as components.
+
+## Custom Dashboards
+
+When the user asks to "create a dashboard", "build a custom view", "make a dashboard
+showing X and Y", or "save this as a view" — use the `create_dashboard` tool AFTER
+you have already called the relevant data tools (list_pods, get_node_metrics, etc.).
+The dashboard will contain all the component specs from this conversation.
+
+Steps: 1) Call the data tools the user wants on the dashboard, 2) Call create_dashboard
+with a title and description. The UI will prompt the user to save it.
 """

@@ -1059,3 +1059,25 @@ class TestNoiseTracking:
             os.environ["PULSE_AGENT_NOISE_THRESHOLD"] = old
         else:
             os.environ.pop("PULSE_AGENT_NOISE_THRESHOLD", None)
+
+
+class TestCreateDashboard:
+    def test_create_dashboard_returns_marker(self):
+        from sre_agent.view_tools import create_dashboard
+
+        result = create_dashboard("My Dashboard", "Node health overview")
+        assert result.startswith("__VIEW_SPEC__")
+        parts = result.replace("__VIEW_SPEC__", "").split("|")
+        assert len(parts) == 3
+        assert parts[0].startswith("cv-")
+        assert parts[1] == "My Dashboard"
+        assert parts[2] == "Node health overview"
+
+    def test_create_dashboard_generates_unique_ids(self):
+        from sre_agent.view_tools import create_dashboard
+
+        r1 = create_dashboard("A", "")
+        r2 = create_dashboard("B", "")
+        id1 = r1.replace("__VIEW_SPEC__", "").split("|")[0]
+        id2 = r2.replace("__VIEW_SPEC__", "").split("|")[0]
+        assert id1 != id2
