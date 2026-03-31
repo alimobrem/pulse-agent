@@ -1,10 +1,10 @@
 # Pulse Agent
 
 <p>
-  <a href="https://github.com/alimobrem/pulse-agent/releases/tag/v1.9.0"><img src="https://img.shields.io/badge/release-v1.9.0-2563eb?style=for-the-badge" alt="Version"></a>
-  <img src="https://img.shields.io/badge/tools-109-10b981?style=for-the-badge" alt="Tools">
+  <a href="https://github.com/alimobrem/pulse-agent/releases/tag/v1.9.3"><img src="https://img.shields.io/badge/release-v1.9.3-2563eb?style=for-the-badge" alt="Version"></a>
+  <img src="https://img.shields.io/badge/tools-112-10b981?style=for-the-badge" alt="Tools">
   <img src="https://img.shields.io/badge/scanners-11-10b981?style=for-the-badge" alt="Scanners">
-  <img src="https://img.shields.io/badge/tests-397-10b981?style=for-the-badge" alt="Tests">
+  <img src="https://img.shields.io/badge/tests-450-10b981?style=for-the-badge" alt="Tests">
   <img src="https://img.shields.io/badge/license-MIT-6366f1?style=for-the-badge" alt="License">
 </p>
 
@@ -399,6 +399,7 @@ Supported: `data_table`, `info_card_grid`, `badge_list`, `status_list`, `key_val
 
 | Pulse Agent | OpenShift Pulse UI | Protocol |
 |------------|-------------------|----------|
+| v1.9.3 | v5.16.2+ | 2 |
 | v1.9.0 | v5.14.0+ | 2 |
 | v1.8.0 | v5.14.0+ | 2 |
 | v1.7.1 | v5.14.0+ | 2 |
@@ -415,27 +416,29 @@ The `/version` endpoint returns the protocol version. The UI checks this on conn
 
 ## Deploy to Cluster
 
-### Quick Deploy (24s with Podman)
+### Quick Deploy (Quay.io)
 
 ```bash
-cd pulse-agent
-./deploy/quick-deploy.sh openshiftpulse
+# Build locally and push to Quay.io
+podman build --platform linux/amd64 -t quay.io/amobrem/pulse-agent:latest -f Dockerfile.full .
+podman push quay.io/amobrem/pulse-agent:latest
+oc rollout restart deployment/pulse-agent-openshift-sre-agent -n openshiftpulse
 ```
 
-Builds locally with Podman (cached layers), pushes directly to the internal registry, pins image digest, restarts deployment, and verifies health. Falls back to `oc start-build` if Podman is unavailable.
+### Full Deploy (UI + Agent together)
 
-### Rebuild Dependencies
-
-Only needed when `pyproject.toml` changes or for security patches:
+From the [Pulse UI](https://github.com/alimobrem/OpenshiftPulse) repo:
 ```bash
-./deploy/rebuild-deps.sh openshiftpulse
+ANTHROPIC_API_KEY=sk-ant-... ./deploy/deploy.sh --agent-repo ../pulse-agent
 ```
+
+Builds both images locally with Podman, pushes to Quay.io, deploys via Helm. Agent deploys first (auto-generates WS token), then UI reads and uses that token. Never uses S2I or on-cluster builds.
 
 ### Build Image
 
 ```bash
-docker build -t your-registry/pulse-agent:1.5.3 .
-docker push your-registry/pulse-agent:1.5.3
+podman build --platform linux/amd64 -t quay.io/amobrem/pulse-agent:v1.9.3 -f Dockerfile.full .
+podman push quay.io/amobrem/pulse-agent:v1.9.3
 ```
 
 ### Helm Install
@@ -579,8 +582,8 @@ git push && git push --tags   # GitHub Actions builds and pushes automatically
 
 **Manual build:**
 ```bash
-docker build -f Dockerfile.full -t quay.io/amobrem/pulse-agent:v1.9.0 .
-docker push quay.io/amobrem/pulse-agent:v1.9.0
+podman build --platform linux/amd64 -f Dockerfile.full -t quay.io/amobrem/pulse-agent:v1.9.3 .
+podman push quay.io/amobrem/pulse-agent:v1.9.3
 ```
 
 **Required GitHub Secrets:**
