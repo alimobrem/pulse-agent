@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Pulse Agent // AI SRE for OpenShift</title>
+  <meta name="description" content="AI-powered SRE and Security agent for OpenShift/Kubernetes. Claude-powered diagnostics, 112 tools, autonomous monitoring, self-improving memory.">
+  <meta property="og:title" content="Pulse Agent">
+  <meta property="og:description" content="AI SRE agent for OpenShift — 112 tools, 11 scanners, autonomous monitoring">
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Inter:wght@400;600;800;900&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #050510;
+      --surface: #0a0a1a;
+      --border: #1a1a3a;
+      --text: #e0e0f0;
+      --muted: #5a5a8a;
+      --cyan: #00f0ff;
+      --magenta: #ff00aa;
+      --violet: #8b5cf6;
+      --green: #00ff88;
+      --yellow: #ffee00;
+      --red: #ff3355;
+      --orange: #ff8800;
+      --glow-cyan: 0 0 20px rgba(0,240,255,0.3), 0 0 40px rgba(0,240,255,0.1);
+      --glow-magenta: 0 0 20px rgba(255,0,170,0.3), 0 0 40px rgba(255,0,170,0.1);
+      --glow-green: 0 0 20px rgba(0,255,136,0.3);
+    }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { background: var(--bg); color: var(--text); font-family: 'Inter', -apple-system, sans-serif; line-height: 1.6; overflow-x: hidden; }
+    a { color: var(--green); text-decoration: none; }
+    a:hover { text-shadow: var(--glow-green); }
+    body::after { content: ''; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0,255,136,0.012) 2px, rgba(0,255,136,0.012) 4px); pointer-events: none; z-index: 9999; }
+    .grid-bg { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background-image: linear-gradient(rgba(0,255,136,0.02) 1px, transparent 1px), linear-gradient(90deg, rgba(0,255,136,0.02) 1px, transparent 1px); background-size: 60px 60px; pointer-events: none; z-index: -1; }
+
+    .hero { text-align: center; padding: 100px 24px 80px; position: relative; }
+    .hero::before { content: ''; position: absolute; top: -200px; left: 50%; transform: translateX(-50%); width: 800px; height: 800px; background: radial-gradient(circle, rgba(0,255,136,0.06) 0%, rgba(139,92,246,0.04) 40%, transparent 70%); pointer-events: none; }
+    .hero .logo { font-size: 4rem; margin-bottom: 16px; filter: drop-shadow(0 0 20px rgba(0,255,136,0.5)); animation: pulse-glow 3s ease-in-out infinite; }
+    @keyframes pulse-glow { 0%, 100% { filter: drop-shadow(0 0 20px rgba(0,255,136,0.5)); } 50% { filter: drop-shadow(0 0 30px rgba(139,92,246,0.6)); } }
+    .hero h1 { font-size: 3.5rem; font-weight: 900; letter-spacing: -0.03em; background: linear-gradient(135deg, var(--green), var(--cyan), var(--violet)); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
+    .hero .version { display: inline-block; font-family: 'JetBrains Mono', monospace; font-size: 0.75rem; color: var(--green); border: 1px solid rgba(0,255,136,0.3); padding: 2px 10px; border-radius: 4px; margin-top: 12px; text-shadow: var(--glow-green); }
+    .hero .tagline { font-size: 1.2rem; color: var(--muted); max-width: 650px; margin: 20px auto 36px; }
+    .hero .tagline em { color: var(--green); font-style: normal; text-shadow: 0 0 10px rgba(0,255,136,0.3); }
+    .hero-buttons { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
+    .btn { display: inline-flex; align-items: center; gap: 8px; padding: 12px 28px; border-radius: 4px; font-weight: 700; font-size: 0.9rem; text-transform: uppercase; letter-spacing: 0.05em; transition: all 0.2s; border: 1px solid transparent; font-family: 'JetBrains Mono', monospace; }
+    .btn-primary { background: transparent; color: var(--green); border-color: var(--green); box-shadow: var(--glow-green), inset 0 0 20px rgba(0,255,136,0.05); }
+    .btn-primary:hover { background: rgba(0,255,136,0.1); box-shadow: 0 0 30px rgba(0,255,136,0.4), inset 0 0 30px rgba(0,255,136,0.1); text-decoration: none; }
+    .btn-secondary { background: transparent; color: var(--cyan); border-color: rgba(0,240,255,0.4); }
+    .btn-secondary:hover { background: rgba(0,240,255,0.1); box-shadow: var(--glow-cyan) 0 0 20px rgba(0,240,255,0.3); text-decoration: none; }
+    .btn-ghost { background: transparent; color: var(--muted); border-color: var(--border); }
+    .btn-ghost:hover { border-color: var(--violet); color: var(--violet); text-decoration: none; }
+
+    .neon-divider { height: 1px; background: linear-gradient(90deg, transparent, var(--green), var(--cyan), var(--violet), transparent); opacity: 0.4; }
+    .stats-bar { display: flex; justify-content: center; gap: 48px; padding: 40px 24px; }
+    .stat { text-align: center; }
+    .stat-value { font-size: 2rem; font-weight: 900; font-family: 'JetBrains Mono', monospace; color: var(--green); text-shadow: 0 0 15px rgba(0,255,136,0.4); }
+    .stat-value.cyan { color: var(--cyan); text-shadow: 0 0 15px rgba(0,240,255,0.4); }
+    .stat-value.magenta { color: var(--magenta); text-shadow: 0 0 15px rgba(255,0,170,0.4); }
+    .stat-value.yellow { color: var(--yellow); text-shadow: 0 0 15px rgba(255,238,0,0.4); }
+    .stat-label { font-size: 0.7rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.1em; font-family: 'JetBrains Mono', monospace; }
+
+    .section { max-width: 1100px; margin: 0 auto; padding: 80px 24px; }
+    .section h2 { font-size: 1.8rem; font-weight: 800; color: var(--green); text-shadow: 0 0 20px rgba(0,255,136,0.3); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 8px; font-family: 'JetBrains Mono', monospace; }
+    .section .subtitle { color: var(--muted); margin-bottom: 40px; }
+
+    .features { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 16px; }
+    .feature-card { background: linear-gradient(135deg, rgba(10,10,30,0.9), rgba(10,20,15,0.9)); border: 1px solid var(--border); border-radius: 4px; padding: 24px; transition: all 0.3s; position: relative; overflow: hidden; }
+    .feature-card::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 2px; background: linear-gradient(90deg, var(--green), var(--cyan)); opacity: 0; transition: opacity 0.3s; }
+    .feature-card:hover { border-color: rgba(0,255,136,0.3); box-shadow: 0 0 20px rgba(0,255,136,0.05); }
+    .feature-card:hover::before { opacity: 1; }
+    .feature-card h3 { font-size: 1rem; font-weight: 700; font-family: 'JetBrains Mono', monospace; margin-bottom: 8px; display: flex; align-items: center; gap: 8px; }
+    .feature-card p { color: var(--muted); font-size: 0.85rem; }
+    .badge { display: inline-block; padding: 2px 8px; border-radius: 2px; font-size: 0.6rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.1em; font-family: 'JetBrains Mono', monospace; }
+    .badge-auto { background: rgba(0,255,136,0.15); color: var(--green); border: 1px solid rgba(0,255,136,0.3); }
+    .badge-sec { background: rgba(255,0,170,0.15); color: var(--magenta); border: 1px solid rgba(255,0,170,0.3); }
+    .badge-ai { background: rgba(0,240,255,0.1); color: var(--cyan); border: 1px solid rgba(0,240,255,0.3); }
+
+    .code-block { background: var(--surface); border: 1px solid var(--border); border-radius: 4px; padding: 24px; font-family: 'JetBrains Mono', monospace; font-size: 0.8rem; line-height: 1.9; overflow-x: auto; color: var(--muted); position: relative; }
+    .code-block::before { content: 'terminal'; position: absolute; top: 8px; right: 12px; font-size: 0.6rem; color: rgba(0,255,136,0.3); text-transform: uppercase; letter-spacing: 0.1em; }
+    .code-block .cmd { color: var(--green); }
+    .code-block .flag { color: var(--cyan); }
+    .code-block .comment { color: rgba(90,90,138,0.6); }
+    .code-block .prompt { color: var(--magenta); }
+
+    .tools-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 8px; }
+    .tool-item { font-family: 'JetBrains Mono', monospace; font-size: 0.75rem; padding: 8px 12px; background: var(--surface); border: 1px solid var(--border); border-radius: 4px; color: var(--muted); }
+    .tool-item .name { color: var(--green); }
+
+    .cta-section { text-align: center; padding: 100px 24px; position: relative; }
+    .cta-section h2 { font-size: 2rem; margin-bottom: 12px; color: var(--text); text-shadow: none; text-transform: none; }
+    .cta-section p { color: var(--muted); margin-bottom: 32px; max-width: 500px; margin-left: auto; margin-right: auto; }
+    footer { text-align: center; padding: 32px 24px; color: var(--muted); font-size: 0.75rem; font-family: 'JetBrains Mono', monospace; }
+
+    @media (max-width: 768px) { .hero h1 { font-size: 2.2rem; } .stats-bar { gap: 20px; flex-wrap: wrap; } .features { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+  <div class="grid-bg"></div>
+
+  <section class="hero">
+    <div class="logo">&#x1F916;</div>
+    <h1>PULSE AGENT</h1>
+    <div class="version">v1.9.3 // 112 TOOLS // PROTOCOL v2</div>
+    <p class="tagline">AI-powered SRE and Security agent for OpenShift. <em>Claude</em> diagnoses, triages, and remediates — 24/7.</p>
+    <div class="hero-buttons">
+      <a href="https://github.com/alimobrem/pulse-agent" class="btn btn-primary">[ SOURCE ]</a>
+      <a href="https://github.com/alimobrem/pulse-agent/releases/latest" class="btn btn-secondary">RELEASES</a>
+      <a href="https://alimobrem.github.io/OpenshiftPulse/" class="btn btn-ghost">PULSE UI &#x2192;</a>
+    </div>
+  </section>
+
+  <div class="neon-divider"></div>
+
+  <div class="stats-bar">
+    <div class="stat"><div class="stat-value">112</div><div class="stat-label">Tools</div></div>
+    <div class="stat"><div class="stat-value cyan">11</div><div class="stat-label">Scanners</div></div>
+    <div class="stat"><div class="stat-value magenta">397</div><div class="stat-label">Tests</div></div>
+    <div class="stat"><div class="stat-value">5</div><div class="stat-label">Trust Levels</div></div>
+    <div class="stat"><div class="stat-value yellow">60s</div><div class="stat-label">Scan Interval</div></div>
+    <div class="stat"><div class="stat-value" style="color: var(--green)">0</div><div class="stat-label">CVEs</div></div>
+  </div>
+
+  <div class="neon-divider"></div>
+
+  <section class="section">
+    <h2>// CAPABILITIES</h2>
+    <p class="subtitle">Full-spectrum cluster operations. Autonomous when you trust it.</p>
+    <div class="features">
+      <div class="feature-card">
+        <h3>SRE Diagnostics <span class="badge badge-ai">AI</span></h3>
+        <p>Investigate pod failures, crash loops, OOM kills, scheduling problems. Correlate events, logs, and Prometheus metrics for root cause analysis.</p>
+      </div>
+      <div class="feature-card">
+        <h3>Security Scanner <span class="badge badge-sec">SEC</span></h3>
+        <p>Privileged containers, RBAC audit, network policy gaps, image security, SCC analysis, secret hygiene. Full cluster security posture in one scan.</p>
+      </div>
+      <div class="feature-card">
+        <h3>Autonomous Monitor <span class="badge badge-auto">AUTO</span></h3>
+        <p>11 scanners running every 60 seconds. Crashloops, pending pods, failed deployments, node pressure, cert expiry, firing alerts, OOM kills, image pull errors.</p>
+      </div>
+      <div class="feature-card">
+        <h3>Auto-Fix Engine <span class="badge badge-auto">AUTO</span></h3>
+        <p>Trust level 3: safe fixes without approval. Trust level 4: full autonomous. Rollback snapshots for every action. Rate-limited with cooldown.</p>
+      </div>
+      <div class="feature-card">
+        <h3>Orchestrator <span class="badge badge-ai">AI</span></h3>
+        <p>Auto-routing agent classifies SRE vs Security intent per message. Keyword-based fast routing, shared context bus, cross-agent handoff.</p>
+      </div>
+      <div class="feature-card">
+        <h3>Self-Improving Memory <span class="badge badge-ai">AI</span></h3>
+        <p>Learns from every interaction. Extracts runbooks from confirmed resolutions. Detects patterns. Augments prompts with relevant past incidents.</p>
+      </div>
+      <div class="feature-card">
+        <h3>Confidence Scoring</h3>
+        <p>Every finding, investigation, and action includes a 0-100% confidence score. Reasoning chains with evidence and alternatives considered.</p>
+      </div>
+      <div class="feature-card">
+        <h3>Error Intelligence</h3>
+        <p>Structured error types with 7 categories. Thread-safe ring buffer tracking. Circuit breaker with auto-recovery. Database resilience decorators.</p>
+      </div>
+      <div class="feature-card">
+        <h3>Morning Briefing</h3>
+        <p>Time-aware greeting, action summary, investigation count, current cluster state. The 30-second standup replacement for your cluster.</p>
+      </div>
+    </div>
+  </section>
+
+  <div class="neon-divider"></div>
+
+  <section class="section">
+    <h2>// CONVERSATION</h2>
+    <p class="subtitle">Talk to your cluster like a colleague.</p>
+    <div class="code-block" style="margin-bottom: 16px;">
+      <span class="prompt">sre&gt;</span> <span class="cmd">Check overall cluster health</span><br>
+      <span class="prompt">sre&gt;</span> <span class="cmd">Why are pods crashing in namespace monitoring?</span><br>
+      <span class="prompt">sre&gt;</span> <span class="cmd">Show me all Warning events across the cluster</span><br>
+      <span class="prompt">sre&gt;</span> <span class="cmd">What's the resource utilization across nodes?</span><br>
+      <span class="prompt">sre&gt;</span> <span class="cmd">Scale deployment nginx in namespace prod to 5 replicas</span><br>
+    </div>
+    <div class="code-block">
+      <span class="prompt">sec&gt;</span> <span class="cmd">Run a full security audit of the cluster</span><br>
+      <span class="prompt">sec&gt;</span> <span class="cmd">Check RBAC for overly permissive roles</span><br>
+      <span class="prompt">sec&gt;</span> <span class="cmd">Which namespaces are missing network policies?</span><br>
+      <span class="prompt">sec&gt;</span> <span class="cmd">Show me all pods running under privileged SCCs</span><br>
+    </div>
+  </section>
+
+  <div class="neon-divider"></div>
+
+  <section class="section">
+    <h2>// TRUST LEVELS</h2>
+    <p class="subtitle">Progressive autonomy. You decide how much to trust.</p>
+    <div class="features" style="grid-template-columns: repeat(5, 1fr);">
+      <div class="feature-card" style="text-align: center;">
+        <h3 style="justify-content: center; font-size: 2rem; color: var(--muted);">0</h3>
+        <p style="font-size: 0.75rem;">Monitor Only<br><span style="color: var(--muted);">Observe & report</span></p>
+      </div>
+      <div class="feature-card" style="text-align: center;">
+        <h3 style="justify-content: center; font-size: 2rem; color: var(--cyan);">1</h3>
+        <p style="font-size: 0.75rem;">Suggest<br><span style="color: var(--muted);">Dry-run previews</span></p>
+      </div>
+      <div class="feature-card" style="text-align: center;">
+        <h3 style="justify-content: center; font-size: 2rem; color: var(--yellow);">2</h3>
+        <p style="font-size: 0.75rem;">Ask First<br><span style="color: var(--muted);">Propose + confirm</span></p>
+      </div>
+      <div class="feature-card" style="text-align: center; border-color: rgba(0,255,136,0.3);">
+        <h3 style="justify-content: center; font-size: 2rem; color: var(--green);">3</h3>
+        <p style="font-size: 0.75rem;">Auto-Fix Safe<br><span style="color: var(--green);">Low-risk auto</span></p>
+      </div>
+      <div class="feature-card" style="text-align: center; border-color: rgba(255,0,170,0.3);">
+        <h3 style="justify-content: center; font-size: 2rem; color: var(--magenta);">4</h3>
+        <p style="font-size: 0.75rem;">Full Auto<br><span style="color: var(--magenta);">All categories</span></p>
+      </div>
+    </div>
+  </section>
+
+  <div class="neon-divider"></div>
+
+  <section class="section">
+    <h2>// QUICK START</h2>
+    <p class="subtitle">From zero to scanning in 60 seconds.</p>
+    <div class="code-block">
+      <span class="comment"># install</span><br>
+      <span class="cmd">git clone</span> https://github.com/alimobrem/pulse-agent.git<br>
+      <span class="cmd">cd</span> pulse-agent && <span class="cmd">pip install</span> <span class="flag">-e .</span><br><br>
+      <span class="comment"># configure (pick one)</span><br>
+      <span class="flag">ANTHROPIC_VERTEX_PROJECT_ID</span>=your-project <span class="flag">CLOUD_ML_REGION</span>=us-east5 <span class="comment"># Vertex AI</span><br>
+      <span class="flag">ANTHROPIC_API_KEY</span>=sk-ant-... <span class="comment"># or Anthropic API</span><br><br>
+      <span class="comment"># run</span><br>
+      <span class="cmd">python -m sre_agent.main</span> <span class="comment"># SRE agent</span><br>
+      <span class="cmd">python -m sre_agent.main</span> <span class="flag">security</span> <span class="comment"># Security scanner</span><br>
+      <span class="cmd">pulse-agent-api</span> <span class="comment"># API server (for Pulse UI)</span><br><br>
+      <span class="comment"># deploy to OpenShift with Pulse UI</span><br>
+      <span class="cmd">./deploy/deploy.sh</span> <span class="flag">--agent-repo</span> . <span class="comment"># from Pulse UI repo</span>
+    </div>
+  </section>
+
+  <div class="neon-divider"></div>
+
+  <section class="cta-section">
+    <h2>Your cluster deserves an AI copilot.</h2>
+    <p>Pair with <a href="https://alimobrem.github.io/OpenshiftPulse/">OpenShift Pulse</a> for the full experience, or run standalone as a CLI.</p>
+    <div class="hero-buttons">
+      <a href="https://github.com/alimobrem/pulse-agent" class="btn btn-primary">[ DEPLOY AGENT ]</a>
+      <a href="https://alimobrem.github.io/OpenshiftPulse/" class="btn btn-secondary">PULSE UI</a>
+    </div>
+  </section>
+
+  <footer>
+    PULSE AGENT // MIT LICENSE // <a href="https://github.com/alimobrem/pulse-agent">GITHUB</a> &middot; <a href="https://alimobrem.github.io/OpenshiftPulse/">PULSE UI</a> &middot; <a href="https://github.com/alimobrem/pulse-agent/blob/main/CHANGELOG.md">CHANGELOG</a>
+  </footer>
+
+</body>
+</html>
