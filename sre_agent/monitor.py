@@ -173,12 +173,18 @@ def save_action(
         rollback_available, rollback_action_json = _make_rollback_info(action, finding)
 
         db.execute(
-            """INSERT OR REPLACE INTO actions
+            """INSERT INTO actions
                (id, finding_id, timestamp, category, tool, input, status,
                 before_state, after_state, error, reasoning, duration_ms,
                 rollback_available, rollback_action, resources, verification_status,
                 verification_evidence, verification_timestamp)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+               ON CONFLICT (id) DO UPDATE SET
+               status = EXCLUDED.status, after_state = EXCLUDED.after_state,
+               error = EXCLUDED.error, duration_ms = EXCLUDED.duration_ms,
+               verification_status = EXCLUDED.verification_status,
+               verification_evidence = EXCLUDED.verification_evidence,
+               verification_timestamp = EXCLUDED.verification_timestamp""",
             (
                 action["id"],
                 action.get("findingId", ""),
@@ -373,11 +379,16 @@ def save_investigation(report: dict, finding: dict) -> None:
         _ensure_tables()
         db = get_database()
         db.execute(
-            """INSERT OR REPLACE INTO investigations
+            """INSERT INTO investigations
                (id, finding_id, timestamp, category, severity, status, summary,
                 suspected_cause, recommended_fix, confidence, error, resources,
                 evidence, alternatives_considered)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+               ON CONFLICT (id) DO UPDATE SET
+               status = EXCLUDED.status, summary = EXCLUDED.summary,
+               suspected_cause = EXCLUDED.suspected_cause,
+               recommended_fix = EXCLUDED.recommended_fix,
+               confidence = EXCLUDED.confidence, error = EXCLUDED.error""",
             (
                 report.get("id"),
                 report.get("findingId", ""),

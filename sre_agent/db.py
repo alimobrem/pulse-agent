@@ -1,10 +1,15 @@
-"""Database abstraction -- supports SQLite (dev/test) and PostgreSQL (production).
+"""PostgreSQL database layer for Pulse Agent.
+
+Production uses PostgreSQL exclusively. SQLite is retained only as an
+in-memory backend for the test suite (no psycopg2 required to run tests).
 
 Usage:
     db = get_database()  # reads PULSE_AGENT_DATABASE_URL env var
     db.execute("INSERT INTO actions (id, status) VALUES (?, ?)", ("a-1", "completed"))
     db.commit()
     rows = db.fetchall("SELECT * FROM actions WHERE status = ?", ("completed",))
+
+Queries use ``?`` placeholders which are auto-translated to ``%s`` for PostgreSQL.
 """
 
 from __future__ import annotations
@@ -20,7 +25,7 @@ logger = logging.getLogger("pulse_agent.db")
 
 
 class Database:
-    """Unified database interface for SQLite and PostgreSQL."""
+    """Database interface — PostgreSQL in production, SQLite for tests."""
 
     def __init__(self, url: str):
         self.url = url
@@ -52,7 +57,6 @@ class Database:
             return
         try:
             if self.is_postgres:
-                # PostgreSQL: check if connection is still alive
                 cur = self._conn.cursor()
                 cur.execute("SELECT 1")
                 cur.close()
@@ -68,13 +72,13 @@ class Database:
             self._connect()
 
     def _translate_query(self, query: str) -> str:
-        """Translate SQLite ``?`` placeholders to PostgreSQL ``%s``."""
+        """Translate ``?`` placeholders to PostgreSQL ``%s``."""
         if self.is_postgres:
             return query.replace("?", "%s")
         return query
 
     def _translate_schema(self, schema: str) -> str:
-        """Translate SQLite schema DDL to PostgreSQL."""
+        """Translate schema DDL for PostgreSQL."""
         if self.is_postgres:
             schema = schema.replace("INTEGER PRIMARY KEY AUTOINCREMENT", "SERIAL PRIMARY KEY")
             schema = schema.replace("INSERT OR REPLACE", "INSERT")
@@ -87,16 +91,16 @@ class Database:
         with self._lock:
             translated = self._translate_query(query)
             if self.is_postgres:
-                return self._execute_pg(translated, params)
+                cur = self._conn.cursor()
+                cur.execute(translated, params)
+                return cur
             return self._conn.execute(translated, params)
 
     def executescript(self, script: str) -> None:
-        """Execute a multi-statement script with schema translation."""
+        """Execute a multi-statement schema script."""
         translated = self._translate_schema(script)
         with self._lock:
             if self.is_postgres:
-                # Execute each statement separately to handle IF NOT EXISTS
-                # correctly with SERIAL types (which create implicit sequences)
                 cur = self._conn.cursor()
                 for stmt in translated.split(";"):
                     stmt = stmt.strip()
@@ -104,7 +108,6 @@ class Database:
                         try:
                             cur.execute(stmt)
                         except Exception:
-                            # Statement already applied (e.g. table exists with SERIAL)
                             self._conn.rollback()
                             continue
                 self._conn.commit()
@@ -117,7 +120,8 @@ class Database:
         with self._lock:
             translated = self._translate_query(query)
             if self.is_postgres:
-                cur = self._execute_pg(translated, params)
+                cur = self._conn.cursor()
+                cur.execute(translated, params)
             else:
                 cur = self._conn.execute(translated, params)
             row = cur.fetchone()
@@ -134,17 +138,12 @@ class Database:
         with self._lock:
             translated = self._translate_query(query)
             if self.is_postgres:
-                cur = self._execute_pg(translated, params)
+                cur = self._conn.cursor()
+                cur.execute(translated, params)
                 cols = [desc[0] for desc in cur.description]
                 return [dict(zip(cols, row)) for row in cur.fetchall()]
             cur = self._conn.execute(translated, params)
             return [dict(row) for row in cur.fetchall()]
-
-    def _execute_pg(self, query: str, params: tuple) -> Any:
-        """Execute on PostgreSQL connection."""
-        cur = self._conn.cursor()
-        cur.execute(query, params)
-        return cur
 
     def commit(self) -> None:
         with self._lock:
@@ -160,7 +159,7 @@ class Database:
 
     @property
     def lastrowid(self) -> int | None:
-        """Get last inserted row ID (SQLite only, PostgreSQL uses RETURNING)."""
+        """Get last inserted row ID (SQLite tests only)."""
         with self._lock:
             if not self.is_postgres:
                 return self._conn.execute("SELECT last_insert_rowid()").fetchone()[0]
@@ -192,12 +191,21 @@ _db_lock = threading.Lock()
 
 
 def get_database() -> Database:
-    """Get or create the singleton database connection."""
+    """Get or create the singleton database connection.
+
+    Production requires PULSE_AGENT_DATABASE_URL (PostgreSQL).
+    Tests can use sqlite:// URLs without psycopg2.
+    """
     global _db
     with _db_lock:
         if _db is not None and _db.health_check():
             return _db
-        url = os.environ.get("PULSE_AGENT_DATABASE_URL", "sqlite:////tmp/pulse_agent/pulse.db")
+        url = os.environ.get("PULSE_AGENT_DATABASE_URL", "")
+        if not url:
+            raise RuntimeError(
+                "PULSE_AGENT_DATABASE_URL is required. "
+                "Set it to a PostgreSQL connection URL (e.g. postgresql://user:pass@host/db)."
+            )
         _db = Database(url)
         return _db
 
@@ -234,13 +242,12 @@ def _db_safe(fn):
     def wrapper(*args, **kwargs):
         try:
             return fn(*args, **kwargs)
-        except (json.JSONDecodeError, OSError):
+        except (sqlite3.Error, json.JSONDecodeError, OSError):
             logger.exception("View database operation failed: %s", fn.__name__)
             return None
         except Exception:
-            # Catch psycopg2 database errors
-            exc = __import__("sys").exc_info()[1]
-            mod = type(exc).__module__ or ""
+            # Catch psycopg2 errors (lazy imported in production)
+            mod = getattr(type(__import__("sys").exc_info()[1]), "__module__", "") or ""
             if mod.startswith("psycopg2"):
                 logger.exception("View database operation failed: %s", fn.__name__)
                 return None
@@ -270,12 +277,14 @@ def save_view(
 
     db = get_database()
     now = datetime.now(UTC).isoformat()
+    # Only upsert if the existing row belongs to the same owner
     db.execute(
         "INSERT INTO views (id, owner, title, description, icon, layout, positions, created_at, updated_at) "
         "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) "
         "ON CONFLICT (id) DO UPDATE SET "
         "title = EXCLUDED.title, description = EXCLUDED.description, icon = EXCLUDED.icon, "
-        "layout = EXCLUDED.layout, positions = EXCLUDED.positions, updated_at = EXCLUDED.updated_at",
+        "layout = EXCLUDED.layout, positions = EXCLUDED.positions, updated_at = EXCLUDED.updated_at "
+        "WHERE views.owner = EXCLUDED.owner",
         (view_id, owner, title, description, icon, json.dumps(layout), json.dumps(positions or {}), now, now),
     )
     db.commit()

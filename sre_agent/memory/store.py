@@ -131,8 +131,6 @@ class IncidentStore:
             self.db = db
         else:
             url = db_path or DEFAULT_DB_PATH
-            if not url.startswith(("sqlite:", "postgres")):
-                url = f"sqlite:///{url}"
             self.db = Database(url)
         self.db.executescript(SCHEMA)
 

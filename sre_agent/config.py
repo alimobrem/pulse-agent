@@ -24,8 +24,8 @@ class PulseAgentSettings(BaseSettings):
     max_tokens: int = 16000
     harness: bool = True
 
-    # Database
-    database_url: str = "sqlite:///tmp/pulse_agent/pulse.db"
+    # Database (PostgreSQL required)
+    database_url: str = ""
 
     # Memory
     memory: bool = True

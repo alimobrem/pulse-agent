@@ -1547,6 +1547,8 @@ async def rest_create_view(
     body = await request.json()
 
     view_id = body.get("id", f"cv-{uuid.uuid4().hex[:12]}")
+    if not re.match(r"^[a-zA-Z0-9_-]{1,64}$", view_id):
+        return JSONResponse(status_code=400, content={"error": "view id must be alphanumeric/hyphens, max 64 chars"})
     title = str(body.get("title", "Untitled View"))[:200]
     description = str(body.get("description", ""))[:1000]
     layout = body.get("layout", [])
@@ -1586,7 +1588,13 @@ async def rest_update_view(
     owner = _get_current_user(authorization, x_forwarded_access_token)
     body = await request.json()
 
-    result = db.update_view(view_id, owner, **body)
+    # Extract only allowed fields — never pass raw body as **kwargs
+    updates = {}
+    for key in ("title", "description", "icon", "layout", "positions"):
+        if key in body:
+            updates[key] = body[key]
+
+    result = db.update_view(view_id, owner, **updates)
     if not result:
         return JSONResponse(status_code=404, content={"error": "View not found or not owned by you"})
     return {"updated": True}
