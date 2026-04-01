@@ -326,19 +326,23 @@ async def _run_agent_ws(
     _view_updated_ids = set()
 
     def _extract_signals(messages_list):
-        """Extract structured signals from tool_result content blocks."""
+        """Extract structured signals from tool_result content blocks ONLY.
+
+        Security: only scans tool_result blocks (role=user, type=tool_result).
+        User-typed messages are never scanned, preventing signal injection.
+        """
         signals = []
         for msg in messages_list:
+            # Only scan tool result messages (role=user with list content containing tool_result blocks)
+            if msg.get("role") != "user":
+                continue
             content = msg.get("content", "")
-            texts = []
-            if isinstance(content, str):
-                texts.append(content)
-            elif isinstance(content, list):
-                for block in content:
-                    if isinstance(block, dict):
-                        texts.append(block.get("content", ""))
-                        texts.append(block.get("text", ""))
-            for text in texts:
+            if not isinstance(content, list):
+                continue
+            for block in content:
+                if not isinstance(block, dict) or block.get("type") != "tool_result":
+                    continue
+                text = block.get("content", "")
                 if text and SIGNAL_PREFIX in text:
                     try:
                         json_str = text.split(SIGNAL_PREFIX, 1)[1].strip()
@@ -1817,6 +1821,66 @@ async def rest_claim_shared_view(
     if new_id is None:
         return JSONResponse(status_code=404, content={"error": "Source view not found"})
     return {"id": new_id, "owner": owner}
+
+
+# ---------------------------------------------------------------------------
+# View Version History
+# ---------------------------------------------------------------------------
+
+
+@app.get("/views/{view_id}/versions")
+async def rest_view_versions(
+    view_id: str,
+    authorization: str | None = Header(None),
+    token: str | None = Query(None),
+    x_forwarded_access_token: str | None = Header(None, alias="X-Forwarded-Access-Token"),
+):
+    """List version history for a view."""
+    _verify_rest_token(authorization, token)
+    from . import db
+
+    owner = _get_current_user(authorization, x_forwarded_access_token)
+    # Verify ownership
+    view = db.get_view(view_id, owner)
+    if not view:
+        from fastapi.responses import JSONResponse
+
+        return JSONResponse(status_code=404, content={"error": "View not found"})
+    versions = db.list_view_versions(view_id) or []
+    return {"versions": versions, "view_id": view_id}
+
+
+@app.post("/views/{view_id}/undo")
+async def rest_undo_view(
+    view_id: str,
+    request: Request,
+    authorization: str | None = Header(None),
+    token: str | None = Query(None),
+    x_forwarded_access_token: str | None = Header(None, alias="X-Forwarded-Access-Token"),
+):
+    """Undo the last change to a view (restore previous version)."""
+    _verify_rest_token(authorization, token)
+    from fastapi.responses import JSONResponse
+
+    from . import db
+
+    owner = _get_current_user(authorization, x_forwarded_access_token)
+    body = await request.json()
+    version = body.get("version")
+
+    if version is not None:
+        # Restore specific version
+        result = db.restore_view_version(view_id, owner, int(version))
+    else:
+        # Undo last change — find the latest version and restore it
+        versions = db.list_view_versions(view_id, limit=1)
+        if not versions:
+            return JSONResponse(status_code=404, content={"error": "No version history available"})
+        result = db.restore_view_version(view_id, owner, versions[0]["version"])
+
+    if not result:
+        return JSONResponse(status_code=404, content={"error": "Version not found or access denied"})
+    return {"undone": True, "view_id": view_id}
 
 
 # ---------------------------------------------------------------------------

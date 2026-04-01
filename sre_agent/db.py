@@ -326,9 +326,17 @@ def get_view(view_id: str, owner: str | None = None) -> dict | None:
 
 @_db_safe
 def update_view(view_id: str, owner: str, **updates) -> bool:
-    """Update a view's fields. Only the owner can update."""
+    """Update a view's fields. Only the owner can update. Auto-snapshots before changes."""
     import json
     from datetime import UTC, datetime
+
+    # Auto-snapshot before any change (for undo/version history)
+    action = updates.get("_action", "update")
+    if isinstance(action, str) and "layout" in updates:
+        try:
+            snapshot_view(view_id, action)
+        except Exception:
+            pass  # Don't block the update if snapshot fails
 
     allowed = {"title", "description", "icon", "layout", "positions"}
     fields = []
@@ -401,3 +409,102 @@ def clone_view(view_id: str, new_owner: str) -> str | None:
     )
     db.commit()
     return new_id
+
+
+# ---------------------------------------------------------------------------
+# View Version History
+# ---------------------------------------------------------------------------
+
+
+@_db_safe
+def snapshot_view(view_id: str, action: str) -> int | None:
+    """Save a snapshot of the current view state before a change. Returns version number."""
+    import json
+    from datetime import UTC, datetime
+
+    db = get_database()
+    view = db.fetchone("SELECT * FROM views WHERE id = ?", (view_id,))
+    if not view:
+        return None
+
+    # Get the next version number
+    last = db.fetchone(
+        "SELECT COALESCE(MAX(version), 0) AS max_v FROM view_versions WHERE view_id = ?",
+        (view_id,),
+    )
+    next_version = (last["max_v"] if last else 0) + 1
+
+    layout = view["layout"] if isinstance(view["layout"], str) else json.dumps(view["layout"])
+    positions = view["positions"] if isinstance(view["positions"], str) else json.dumps(view["positions"])
+
+    db.execute(
+        "INSERT INTO view_versions (view_id, version, action, layout, positions, title, description, created_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        (
+            view_id,
+            next_version,
+            action,
+            layout,
+            positions,
+            view["title"],
+            view.get("description", ""),
+            datetime.now(UTC).isoformat(),
+        ),
+    )
+    db.commit()
+    return next_version
+
+
+@_db_safe
+def list_view_versions(view_id: str, limit: int = 20) -> list[dict]:
+    """List version history for a view."""
+    db = get_database()
+    rows = db.fetchall(
+        "SELECT version, action, title, created_at FROM view_versions WHERE view_id = ? ORDER BY version DESC LIMIT ?",
+        (view_id, limit),
+    )
+    return rows
+
+
+@_db_safe
+def restore_view_version(view_id: str, owner: str, version: int) -> bool:
+    """Restore a view to a specific version. Returns True on success."""
+    import json
+
+    db = get_database()
+    # Verify ownership
+    view = db.fetchone("SELECT id FROM views WHERE id = ? AND owner = ?", (view_id, owner))
+    if not view:
+        return False
+
+    # Get the version snapshot
+    snapshot = db.fetchone(
+        "SELECT layout, positions, title, description FROM view_versions WHERE view_id = ? AND version = ?",
+        (view_id, version),
+    )
+    if not snapshot:
+        return False
+
+    # Snapshot current state before restoring
+    snapshot_view(view_id, f"before_restore_to_v{version}")
+
+    # Restore
+    layout = snapshot["layout"] if isinstance(snapshot["layout"], str) else json.dumps(snapshot["layout"])
+    positions = snapshot["positions"] if isinstance(snapshot["positions"], str) else json.dumps(snapshot["positions"])
+
+    from datetime import UTC, datetime
+
+    db.execute(
+        "UPDATE views SET layout = ?, positions = ?, title = ?, description = ?, updated_at = ? WHERE id = ? AND owner = ?",
+        (
+            layout,
+            positions,
+            snapshot["title"],
+            snapshot.get("description", ""),
+            datetime.now(UTC).isoformat(),
+            view_id,
+            owner,
+        ),
+    )
+    db.commit()
+    return True

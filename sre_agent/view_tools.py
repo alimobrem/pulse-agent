@@ -305,9 +305,74 @@ def add_widget_to_view(view_id: str) -> str:
     return _signal("add_widget", f"Adding latest component to view {view_id}.", view_id=view_id)
 
 
+@beta_tool
+def undo_view_change(view_id: str, version: int = -1) -> str:
+    """Undo the last change to a view, or restore a specific version. Every view change is automatically versioned.
+
+    Args:
+        view_id: The view ID (e.g. 'cv-abc123').
+        version: Specific version number to restore. Use -1 (default) to undo the last change. Use get_view_versions to see available versions.
+    """
+    from . import db
+
+    owner = get_current_user()
+    if version == -1:
+        versions = db.list_view_versions(view_id, limit=1)
+        if not versions:
+            return "No version history available for this view."
+        version = versions[0]["version"]
+
+    result = db.restore_view_version(view_id, owner, version)
+    if not result:
+        return f"Could not restore version {version}. View not found or access denied."
+    return _signal("view_updated", f"Restored view to version {version}.", view_id=view_id)
+
+
+@beta_tool
+def get_view_versions(view_id: str) -> str:
+    """Show the version history for a view — every change is tracked.
+
+    Args:
+        view_id: The view ID (e.g. 'cv-abc123').
+    """
+    from . import db
+
+    owner = get_current_user()
+    view = db.get_view(view_id, owner)
+    if not view:
+        return f"View '{view_id}' not found."
+
+    versions = db.list_view_versions(view_id) or []
+    if not versions:
+        return f"No version history for view '{view['title']}'."
+
+    lines = [f"Version history for '{view['title']}' ({len(versions)} versions):"]
+    rows = []
+    for v in versions:
+        lines.append(f"  v{v['version']} — {v['action']} — {v['created_at']}")
+        rows.append(
+            {"version": v["version"], "action": v["action"], "title": v.get("title", ""), "created_at": v["created_at"]}
+        )
+
+    text = "\n".join(lines)
+    component = {
+        "kind": "data_table",
+        "title": f"Version History — {view['title']}",
+        "columns": [
+            {"id": "version", "header": "Version", "type": "text"},
+            {"id": "action", "header": "Action", "type": "text"},
+            {"id": "created_at", "header": "When", "type": "timestamp"},
+        ],
+        "rows": rows,
+    }
+    return (text, component)
+
+
 register_tool(create_dashboard)
 register_tool(namespace_summary)
 register_tool(list_saved_views)
 register_tool(get_view_details)
 register_tool(update_view_widgets)
 register_tool(add_widget_to_view)
+register_tool(undo_view_change)
+register_tool(get_view_versions)

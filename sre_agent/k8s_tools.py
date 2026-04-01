@@ -2608,9 +2608,8 @@ def list_resources(
     ctx = ssl.create_default_context()
     try:
         ctx.load_verify_locations("/var/run/secrets/kubernetes.io/serviceaccount/ca.crt")
-    except Exception:
-        ctx.check_hostname = False
-        ctx.verify_mode = ssl.CERT_NONE
+    except Exception as e:
+        return f"Error: Cannot load cluster CA certificate ({e}). Refusing to connect without TLS verification."
 
     # Request as Table format — server returns printer columns + pre-formatted cells
     req = urllib.request.Request(
