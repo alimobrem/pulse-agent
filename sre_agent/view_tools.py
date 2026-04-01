@@ -185,14 +185,14 @@ def update_view_widgets(
     new_title: str = "",
     new_description: str = "",
 ) -> str:
-    """Modify an existing view — remove/reorder widgets, rename, or update description. The UI auto-refreshes.
+    """Modify an existing view — rename widgets, change chart types, remove/reorder widgets, rename view. The UI auto-refreshes.
 
     Args:
         view_id: The view ID (e.g. 'cv-abc123').
-        action: One of: 'remove_widget', 'move_widget', 'rename', 'update_description'.
-        widget_index: Widget index for remove/move actions. Use get_view_details to see indices.
-        new_title: New title (for 'rename') or new position as string (for 'move_widget', e.g. '0' for top).
-        new_description: New description (only for 'update_description').
+        action: One of: 'rename_widget', 'update_widget_description', 'change_chart_type', 'remove_widget', 'move_widget', 'rename', 'update_description'.
+        widget_index: Widget index for widget actions. Use get_view_details to see indices.
+        new_title: New title for rename/rename_widget, or new position for move_widget, or chart type for change_chart_type ('line', 'bar', 'area').
+        new_description: New description for update_description/update_widget_description.
     """
     from . import db
 
@@ -227,6 +227,37 @@ def update_view_widgets(
         moved_title = widget.get("title", widget.get("kind", "widget"))
         return f"__VIEW_UPDATED__{view_id}|Moved widget '{moved_title}' from position {widget_index} to {new_pos}."
 
+    elif action == "rename_widget":
+        layout = view.get("layout", [])
+        if widget_index < 0 or widget_index >= len(layout):
+            return f"Invalid widget index {widget_index}."
+        if not new_title:
+            return "Error: new_title is required."
+        layout[widget_index]["title"] = new_title
+        db.update_view(view_id, owner, layout=layout)
+        return f"__VIEW_UPDATED__{view_id}|Renamed widget [{widget_index}] to '{new_title}'."
+
+    elif action == "update_widget_description":
+        layout = view.get("layout", [])
+        if widget_index < 0 or widget_index >= len(layout):
+            return f"Invalid widget index {widget_index}."
+        layout[widget_index]["description"] = new_description
+        db.update_view(view_id, owner, layout=layout)
+        return f"__VIEW_UPDATED__{view_id}|Updated widget [{widget_index}] description."
+
+    elif action == "change_chart_type":
+        layout = view.get("layout", [])
+        if widget_index < 0 or widget_index >= len(layout):
+            return f"Invalid widget index {widget_index}."
+        if layout[widget_index].get("kind") != "chart":
+            return f"Widget [{widget_index}] is not a chart (it's a {layout[widget_index].get('kind')})."
+        chart_type = new_title  # reuse param: 'line', 'bar', 'area'
+        if chart_type not in ("line", "bar", "area"):
+            return f"Invalid chart type '{chart_type}'. Use: line, bar, area."
+        layout[widget_index]["chartType"] = chart_type
+        db.update_view(view_id, owner, layout=layout)
+        return f"__VIEW_UPDATED__{view_id}|Changed widget [{widget_index}] to {chart_type} chart."
+
     elif action == "rename":
         if not new_title:
             return "Error: new_title is required for rename action."
@@ -238,7 +269,7 @@ def update_view_widgets(
         return f"__VIEW_UPDATED__{view_id}|Updated view description."
 
     else:
-        return f"Unknown action '{action}'. Use: remove_widget, move_widget, rename, update_description."
+        return f"Unknown action '{action}'. Use: rename_widget, update_widget_description, change_chart_type, remove_widget, move_widget, rename, update_description."
 
 
 @beta_tool
