@@ -3,11 +3,27 @@
 from __future__ import annotations
 
 import contextvars
+import json
 import uuid
 
 from anthropic import beta_tool
 
 from .tool_registry import register_tool
+
+# Structured signal prefix — tools return this instead of magic string markers.
+# The API layer checks tool results for this prefix and extracts the JSON signal.
+SIGNAL_PREFIX = "__SIGNAL__"
+
+
+def _signal(signal_type: str, message: str, **kwargs) -> str:
+    """Return a structured signal that the API layer can process.
+
+    The returned string contains both a human-readable message (for Claude)
+    and a JSON signal (for the API layer) separated by the SIGNAL_PREFIX.
+    """
+    payload = {"type": signal_type, **kwargs}
+    return f"{message}\n{SIGNAL_PREFIX}{json.dumps(payload)}"
+
 
 # Context variable for current user identity — async-safe and propagates
 # across asyncio.to_thread boundaries (unlike threading.local or globals).
@@ -33,8 +49,9 @@ def create_dashboard(title: str, description: str = "") -> str:
         description: Brief description of what the dashboard shows.
     """
     view_id = f"cv-{uuid.uuid4().hex[:12]}"
-    # Return a marker that the API layer will intercept and convert to a view_spec event
-    return f"__VIEW_SPEC__{view_id}|{title}|{description}"
+    return _signal(
+        "view_spec", f"Created view '{title}' with ID {view_id}.", view_id=view_id, title=title, description=description
+    )
 
 
 @beta_tool
@@ -210,7 +227,11 @@ def update_view_widgets(
         new_layout = [w for i, w in enumerate(layout) if i != widget_index]
         db.update_view(view_id, owner, layout=new_layout)
         # Return a marker so the API layer can emit a view_updated event
-        return f"__VIEW_UPDATED__{view_id}|Removed widget [{widget_index}]: {removed_title}. View now has {len(new_layout)} widgets."
+        return _signal(
+            "view_updated",
+            f"Removed widget [{widget_index}]: {removed_title}. View now has {len(new_layout)} widgets.",
+            view_id=view_id,
+        )
 
     elif action == "move_widget":
         layout = view.get("layout", [])
@@ -225,7 +246,9 @@ def update_view_widgets(
         layout.insert(new_pos, widget)
         db.update_view(view_id, owner, layout=layout)
         moved_title = widget.get("title", widget.get("kind", "widget"))
-        return f"__VIEW_UPDATED__{view_id}|Moved widget '{moved_title}' from position {widget_index} to {new_pos}."
+        return _signal(
+            "view_updated", f"Moved widget '{moved_title}' from position {widget_index} to {new_pos}.", view_id=view_id
+        )
 
     elif action == "rename_widget":
         layout = view.get("layout", [])
@@ -235,7 +258,7 @@ def update_view_widgets(
             return "Error: new_title is required."
         layout[widget_index]["title"] = new_title
         db.update_view(view_id, owner, layout=layout)
-        return f"__VIEW_UPDATED__{view_id}|Renamed widget [{widget_index}] to '{new_title}'."
+        return _signal("view_updated", f"Renamed widget [{widget_index}] to '{new_title}'.", view_id=view_id)
 
     elif action == "update_widget_description":
         layout = view.get("layout", [])
@@ -243,7 +266,7 @@ def update_view_widgets(
             return f"Invalid widget index {widget_index}."
         layout[widget_index]["description"] = new_description
         db.update_view(view_id, owner, layout=layout)
-        return f"__VIEW_UPDATED__{view_id}|Updated widget [{widget_index}] description."
+        return _signal("view_updated", f"Updated widget [{widget_index}] description.", view_id=view_id)
 
     elif action == "change_chart_type":
         layout = view.get("layout", [])
@@ -256,17 +279,17 @@ def update_view_widgets(
             return f"Invalid chart type '{chart_type}'. Use: line, bar, area."
         layout[widget_index]["chartType"] = chart_type
         db.update_view(view_id, owner, layout=layout)
-        return f"__VIEW_UPDATED__{view_id}|Changed widget [{widget_index}] to {chart_type} chart."
+        return _signal("view_updated", f"Changed widget [{widget_index}] to {chart_type} chart.", view_id=view_id)
 
     elif action == "rename":
         if not new_title:
             return "Error: new_title is required for rename action."
         db.update_view(view_id, owner, title=new_title)
-        return f"__VIEW_UPDATED__{view_id}|Renamed view to '{new_title}'."
+        return _signal("view_updated", f"Renamed view to '{new_title}'.", view_id=view_id)
 
     elif action == "update_description":
         db.update_view(view_id, owner, description=new_description)
-        return f"__VIEW_UPDATED__{view_id}|Updated view description."
+        return _signal("view_updated", "Updated view description.", view_id=view_id)
 
     else:
         return f"Unknown action '{action}'. Use: rename_widget, update_widget_description, change_chart_type, remove_widget, move_widget, rename, update_description."
@@ -279,9 +302,7 @@ def add_widget_to_view(view_id: str) -> str:
     Args:
         view_id: The view ID to add the widget to (e.g. 'cv-abc123').
     """
-    # Return a marker — the API layer will intercept this and add the latest
-    # session component to the view
-    return f"__ADD_WIDGET__{view_id}"
+    return _signal("add_widget", f"Adding latest component to view {view_id}.", view_id=view_id)
 
 
 register_tool(create_dashboard)

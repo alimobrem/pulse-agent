@@ -1062,22 +1062,27 @@ class TestNoiseTracking:
 
 
 class TestCreateDashboard:
-    def test_create_dashboard_returns_marker(self):
-        from sre_agent.view_tools import create_dashboard
+    def test_create_dashboard_returns_signal(self):
+        from sre_agent.view_tools import SIGNAL_PREFIX, create_dashboard
 
         result = create_dashboard("My Dashboard", "Node health overview")
-        assert result.startswith("__VIEW_SPEC__")
-        parts = result.replace("__VIEW_SPEC__", "").split("|")
-        assert len(parts) == 3
-        assert parts[0].startswith("cv-")
-        assert parts[1] == "My Dashboard"
-        assert parts[2] == "Node health overview"
+        assert SIGNAL_PREFIX in result
+        import json
+
+        signal_json = result.split(SIGNAL_PREFIX, 1)[1]
+        signal = json.loads(signal_json)
+        assert signal["type"] == "view_spec"
+        assert signal["view_id"].startswith("cv-")
+        assert signal["title"] == "My Dashboard"
+        assert signal["description"] == "Node health overview"
 
     def test_create_dashboard_generates_unique_ids(self):
-        from sre_agent.view_tools import create_dashboard
+        import json
+
+        from sre_agent.view_tools import SIGNAL_PREFIX, create_dashboard
 
         r1 = create_dashboard("A", "")
         r2 = create_dashboard("B", "")
-        id1 = r1.replace("__VIEW_SPEC__", "").split("|")[0]
-        id2 = r2.replace("__VIEW_SPEC__", "").split("|")[0]
-        assert id1 != id2
+        s1 = json.loads(r1.split(SIGNAL_PREFIX, 1)[1])
+        s2 = json.loads(r2.split(SIGNAL_PREFIX, 1)[1])
+        assert s1["view_id"] != s2["view_id"]

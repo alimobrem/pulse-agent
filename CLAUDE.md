@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-Pulse Agent — AI-powered OpenShift/Kubernetes SRE and Security agent built on Claude. Connects to live clusters via the K8s API and uses Claude Opus for diagnostics, incident triage, and automated remediation. v1.11.0, Protocol v2, 113 tools, 16 scanners, 627 tests. Auto-routing orchestrator classifies queries and routes to SRE or Security agent. Generative views: tools return component specs for rich UI rendering, user-scoped custom dashboards with share/clone.
+Pulse Agent — AI-powered OpenShift/Kubernetes SRE and Security agent built on Claude. Connects to live clusters via the K8s API and uses Claude Opus for diagnostics, incident triage, and automated remediation. v1.11.0, Protocol v2, ~70 tools (refactored), 16 scanners, 627 tests. Aladdin MVP foundation: chart-first canvas view builder, generic list_resources with K8s Table API, 14 smart column renderers, resource relationship tracer. Auto-routing orchestrator classifies queries and routes to SRE or Security agent. Generative views: tools return component specs for rich UI rendering, user-scoped custom dashboards with share/clone.
 
 **UI Repository:** `/Users/amobrem/ali/OpenshiftPulse` — React/TypeScript frontend (Zustand stores, incident views, admin dashboard).
 

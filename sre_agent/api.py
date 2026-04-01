@@ -319,103 +319,92 @@ async def _run_agent_ws(
         on_component=on_component,
     )
 
-    # If create_dashboard was called, emit a view_spec event with all components
-    if "create_dashboard" in session_tools and session_components:
-        import re as _re
-        import time as _time
+    # Process structured signals from tool results — no regex scanning needed.
+    # Tools return signals as "__SIGNAL__" + JSON in their text result.
+    from .view_tools import SIGNAL_PREFIX
 
-        view_title = "Custom Dashboard"
-        view_desc = ""
-        view_id = f"cv-{__import__('uuid').uuid4().hex[:12]}"
+    _view_updated_ids = set()
 
-        # Search messages for the __VIEW_SPEC__ marker in tool_result blocks
-        for msg in reversed(messages):
+    def _extract_signals(messages_list):
+        """Extract structured signals from tool_result content blocks."""
+        signals = []
+        for msg in messages_list:
             content = msg.get("content", "")
-            # Flatten content to searchable strings
             texts = []
             if isinstance(content, str):
                 texts.append(content)
             elif isinstance(content, list):
                 for block in content:
                     if isinstance(block, dict):
-                        # tool_result blocks use "content" key, text blocks use "text"
                         texts.append(block.get("content", ""))
                         texts.append(block.get("text", ""))
             for text in texts:
-                if text and "__VIEW_SPEC__" in text:
-                    match = _re.search(r"__VIEW_SPEC__([^|]+)\|([^|]+)\|(.*?)(?:\n|$)", text)
-                    if match:
-                        view_id, view_title, view_desc = match.group(1), match.group(2), match.group(3)
-                    break
+                if text and SIGNAL_PREFIX in text:
+                    try:
+                        json_str = text.split(SIGNAL_PREFIX, 1)[1].strip()
+                        signals.append(json.loads(json_str))
+                    except (json.JSONDecodeError, IndexError):
+                        pass
+        return signals
+
+    for sig in _extract_signals(messages):
+        sig_type = sig.get("type")
+
+        if sig_type == "view_spec" and session_components:
+            import time as _time
+
+            from . import db as _db
+
+            view_id = sig.get("view_id", f"cv-{uuid.uuid4().hex[:12]}")
+            view_title = sig.get("title", "Custom View")
+            view_desc = sig.get("description", "")
+
+            existing = _db.get_view_by_title(current_user, view_title)
+            if existing:
+                old_layout = existing.get("layout", [])
+                merged_layout = old_layout + session_components
+                _db.update_view(existing["id"], current_user, layout=merged_layout, description=view_desc)
+                _view_updated_ids.add(existing["id"])
+                logger.info(
+                    "Updated existing view: id=%s title=%s (+%d components)",
+                    existing["id"],
+                    view_title,
+                    len(session_components),
+                )
             else:
-                continue
-            break
+                logger.info(
+                    "Emitting view_spec: id=%s title=%s components=%d", view_id, view_title, len(session_components)
+                )
+                await websocket.send_json(
+                    {
+                        "type": "view_spec",
+                        "spec": {
+                            "id": view_id,
+                            "title": view_title,
+                            "description": view_desc,
+                            "layout": session_components,
+                            "generatedAt": int(_time.time() * 1000),
+                        },
+                    }
+                )
 
-        # Check if a view with this title already exists — update instead of creating duplicate
-        from . import db as _db
+        elif sig_type == "view_updated":
+            _view_updated_ids.add(sig.get("view_id", ""))
 
-        existing = _db.get_view_by_title(current_user, view_title)
-        if existing:
-            # Update existing view with new components
-            old_layout = existing.get("layout", [])
-            merged_layout = old_layout + session_components
-            _db.update_view(existing["id"], current_user, layout=merged_layout, description=view_desc)
-            view_id = existing["id"]
-            logger.info(
-                "Updated existing view: id=%s title=%s (+%d components)", view_id, view_title, len(session_components)
-            )
-            try:
-                await websocket.send_json({"type": "view_updated", "viewId": view_id})
-            except Exception:
-                pass
-        else:
-            logger.info(
-                "Emitting view_spec: id=%s title=%s components=%d", view_id, view_title, len(session_components)
-            )
-            await websocket.send_json(
-                {
-                    "type": "view_spec",
-                    "spec": {
-                        "id": view_id,
-                        "title": view_title,
-                        "description": view_desc,
-                        "layout": session_components,
-                        "generatedAt": int(_time.time() * 1000),
-                    },
-                }
-            )
+        elif sig_type == "add_widget" and session_components:
+            from . import db as _db
 
-    # If update_view_widgets or add_widget_to_view was called, emit view_updated event
-    _view_updated_ids = set()
-    # Only scan tool-result messages (role=user with tool_result blocks)
-    for msg in messages:
-        content = msg.get("content", "")
-        if isinstance(content, str):
-            all_text = content
-        elif isinstance(content, list):
-            all_text = " ".join(b.get("content", "") + " " + b.get("text", "") for b in content if isinstance(b, dict))
-        else:
-            continue
-
-        if "__VIEW_UPDATED__" in all_text:
-            match = re.search(r"__VIEW_UPDATED__([^|]+)\|", all_text)
-            if match:
-                _view_updated_ids.add(match.group(1))
-
-        if "__ADD_WIDGET__" in all_text and session_components:
-            match = re.search(r"__ADD_WIDGET__(\S+)", all_text)
-            if match:
-                vid = match.group(1).strip()
-                _view_updated_ids.add(vid)
-                from . import db as _db2
-
-                latest_component = session_components[-1]
-                view = _db2.get_view(vid, current_user)
-                if view:
-                    new_layout = view.get("layout", []) + [latest_component]
-                    _db2.update_view(vid, current_user, layout=new_layout)
+            vid = sig.get("view_id", "")
+            _view_updated_ids.add(vid)
+            latest_component = session_components[-1]
+            view = _db.get_view(vid, current_user)
+            if view:
+                new_layout = view.get("layout", []) + [latest_component]
+                _db.update_view(vid, current_user, layout=new_layout)
 
     for vid in _view_updated_ids:
+        if not vid:
+            continue
         try:
             await websocket.send_json({"type": "view_updated", "viewId": vid})
         except Exception:
