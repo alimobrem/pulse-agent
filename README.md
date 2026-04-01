@@ -1,10 +1,10 @@
 # Pulse Agent
 
 <p>
-  <a href="https://github.com/alimobrem/pulse-agent/releases/tag/v1.9.3"><img src="https://img.shields.io/badge/release-v1.9.3-2563eb?style=for-the-badge" alt="Version"></a>
-  <img src="https://img.shields.io/badge/tools-112-10b981?style=for-the-badge" alt="Tools">
+  <a href="https://github.com/alimobrem/pulse-agent/releases/tag/v1.10.0"><img src="https://img.shields.io/badge/release-v1.10.0-2563eb?style=for-the-badge" alt="Version"></a>
+  <img src="https://img.shields.io/badge/tools-113-10b981?style=for-the-badge" alt="Tools">
   <img src="https://img.shields.io/badge/scanners-11-10b981?style=for-the-badge" alt="Scanners">
-  <img src="https://img.shields.io/badge/tests-450-10b981?style=for-the-badge" alt="Tests">
+  <img src="https://img.shields.io/badge/tests-627-10b981?style=for-the-badge" alt="Tests">
   <img src="https://img.shields.io/badge/license-MIT-6366f1?style=for-the-badge" alt="License">
 </p>
 
@@ -363,6 +363,14 @@ pulse-agent-api  # Starts on port 8080
 | `POST /monitor/resume` | Resume auto-fix |
 | `GET /context` | Shared context bus entries |
 | `GET /eval/status` | Cached eval quality gate snapshot |
+| `GET /views` | List views for current user |
+| `GET /views/:id` | Get a single view |
+| `POST /views` | Save a new view |
+| `PUT /views/:id` | Update view (title, layout, positions) |
+| `DELETE /views/:id` | Delete a view |
+| `POST /views/:id/clone` | Clone own view |
+| `POST /views/:id/share` | Generate 24h share link |
+| `POST /views/claim/:token` | Claim a shared view |
 | `WS /ws/sre?token=...` | SRE agent WebSocket |
 | `WS /ws/security?token=...` | Security scanner WebSocket |
 | `WS /ws/monitor?token=...` | Autonomous monitor (16 scanners, auto-fix) |
@@ -399,7 +407,7 @@ Supported: `data_table`, `info_card_grid`, `badge_list`, `status_list`, `key_val
 
 | Pulse Agent | OpenShift Pulse UI | Protocol |
 |------------|-------------------|----------|
-| v1.9.3 | v5.16.2+ | 2 |
+| v1.10.0 | v5.16.2+ | 2 |
 | v1.9.0 | v5.14.0+ | 2 |
 | v1.8.0 | v5.14.0+ | 2 |
 | v1.7.1 | v5.14.0+ | 2 |
@@ -437,8 +445,8 @@ Builds both images locally with Podman, pushes to Quay.io, deploys via Helm. Age
 ### Build Image
 
 ```bash
-podman build --platform linux/amd64 -t quay.io/amobrem/pulse-agent:v1.9.3 -f Dockerfile.full .
-podman push quay.io/amobrem/pulse-agent:v1.9.3
+podman build --platform linux/amd64 -t quay.io/amobrem/pulse-agent:v1.10.0 -f Dockerfile.full .
+podman push quay.io/amobrem/pulse-agent:v1.10.0
 ```
 
 ### Helm Install
@@ -582,8 +590,8 @@ git push && git push --tags   # GitHub Actions builds and pushes automatically
 
 **Manual build:**
 ```bash
-podman build --platform linux/amd64 -f Dockerfile.full -t quay.io/amobrem/pulse-agent:v1.9.3 .
-podman push quay.io/amobrem/pulse-agent:v1.9.3
+podman build --platform linux/amd64 -f Dockerfile.full -t quay.io/amobrem/pulse-agent:v1.10.0 .
+podman push quay.io/amobrem/pulse-agent:v1.10.0
 ```
 
 **Required GitHub Secrets:**
@@ -653,7 +661,7 @@ Suites:
 ---
 
 <p align="center">
-  <strong>109 tools</strong> &bull; <strong>16 scanners</strong> &bull; <strong>10 runbooks</strong> &bull; <strong>8 tool categories</strong> &bull; <strong>450 tests</strong> &bull; <strong>Protocol v2</strong>
+  <strong>113 tools</strong> &bull; <strong>16 scanners</strong> &bull; <strong>10 runbooks</strong> &bull; <strong>8 tool categories</strong> &bull; <strong>627 tests</strong> &bull; <strong>Protocol v2</strong>
 </p>
 
 <p align="center">
