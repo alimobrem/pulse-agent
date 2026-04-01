@@ -1443,13 +1443,26 @@ def get_prometheus_query(query: str, time_range: str = "1h") -> str:
         base_url = "https://thanos-querier.openshift-monitoring.svc:9091"
 
     if time_range:
-        # Range query
+        # Range query — convert relative time to unix timestamps
+        import time as _time
+
+        _UNITS = {"s": 1, "m": 60, "h": 3600, "d": 86400}
+        try:
+            unit = time_range[-1]
+            amount = int(time_range[:-1])
+            seconds = amount * _UNITS.get(unit, 3600)
+        except (ValueError, IndexError):
+            seconds = 3600  # default 1h
+
+        now = int(_time.time())
+        # Auto-adjust step based on range to keep ~60-120 data points
+        step = max(60, seconds // 120)
         params = urllib.parse.urlencode(
             {
                 "query": query,
-                "start": f"now-{time_range}",
-                "end": "now",
-                "step": "60",
+                "start": str(now - seconds),
+                "end": str(now),
+                "step": str(step),
             }
         )
     else:
