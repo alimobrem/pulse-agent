@@ -59,19 +59,42 @@ class TestClamp:
 
 
 class TestTaskSuccess:
-    def test_confirmed_resolved(self):
-        assert _task_success(_scenario(user_confirmed_resolution=True)) == 1.0
+    def test_not_completed(self):
+        assert _task_success(_scenario(completed=False)) == 0.0
 
-    def test_confirmed_unresolved(self):
-        assert _task_success(_scenario(user_confirmed_resolution=False)) == 0.1
+    def test_verification_passed(self):
+        assert _task_success(_scenario(verification_passed=True)) == 1.0
 
-    def test_unknown_long_response(self):
-        s = _scenario(user_confirmed_resolution=None, final_response="x" * 200)
-        assert _task_success(s) == 0.6
+    def test_verification_failed(self):
+        assert _task_success(_scenario(verification_passed=False)) == 0.3
 
-    def test_unknown_short_response(self):
-        s = _scenario(user_confirmed_resolution=None, final_response="ok")
-        assert _task_success(s) == 0.4
+    def test_user_confirmed_no_verification(self):
+        s = _scenario(verification_passed=None, user_confirmed_resolution=True)
+        assert _task_success(s) == 0.95
+
+    def test_good_explanation_no_verification(self):
+        s = _scenario(
+            verification_passed=None,
+            user_confirmed_resolution=None,
+            final_response="The pod failed because the database was unreachable. " + "x" * 80,
+        )
+        assert _task_success(s) == 0.7
+
+    def test_adequate_length_no_explanation(self):
+        s = _scenario(
+            verification_passed=None,
+            user_confirmed_resolution=None,
+            final_response="x" * 200,
+        )
+        assert _task_success(s) == 0.5
+
+    def test_short_response_fallback(self):
+        s = _scenario(
+            verification_passed=None,
+            user_confirmed_resolution=None,
+            final_response="ok",
+        )
+        assert _task_success(s) == 0.3
 
 
 class TestSafety:

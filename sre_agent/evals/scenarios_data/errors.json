@@ -1,0 +1,77 @@
+{
+  "suite_name": "errors",
+  "scenarios": [
+    {
+      "scenario_id": "error_tool_timeout",
+      "category": "sre",
+      "description": "Tool call takes too long; agent should report gracefully and suggest alternatives.",
+      "tool_calls": ["get_prometheus_query", "list_pods"],
+      "rejected_tools": 0,
+      "duration_seconds": 300,
+      "user_confirmed_resolution": false,
+      "final_response": "Prometheus query timed out after 5 minutes because the query range was too broad. Narrowed the time window and retried with a simpler query. Recommend checking Prometheus health and query cardinality.",
+      "verification_passed": false,
+      "rollback_available": false,
+      "completed": false,
+      "retry_attempts": 3,
+      "transient_failures": 3
+    },
+    {
+      "scenario_id": "error_permission_denied",
+      "category": "sre",
+      "description": "delete_pod fails with 403 Forbidden; agent should suggest RBAC remediation.",
+      "tool_calls": ["list_pods", "describe_pod", "delete_pod"],
+      "rejected_tools": 1,
+      "duration_seconds": 40,
+      "user_confirmed_resolution": false,
+      "final_response": "Pod deletion failed with 403 Forbidden because the service account lacks delete permissions on pods. Recommend adding a Role with pods/delete verb and binding it to the service account, or escalating to a cluster-admin.",
+      "verification_passed": false,
+      "rollback_available": false,
+      "retry_attempts": 0,
+      "transient_failures": 0
+    },
+    {
+      "scenario_id": "error_api_unavailable",
+      "category": "sre",
+      "description": "K8s API returns 503 Service Unavailable; agent should degrade gracefully.",
+      "tool_calls": ["list_nodes", "get_cluster_operators"],
+      "rejected_tools": 0,
+      "duration_seconds": 90,
+      "user_confirmed_resolution": false,
+      "final_response": "Kubernetes API returned 503 because the API server is temporarily unavailable. Retried twice but the API remained down. Recommend checking etcd health, API server pods, and cluster operator status once connectivity recovers.",
+      "verification_passed": false,
+      "rollback_available": false,
+      "completed": false,
+      "retry_attempts": 2,
+      "transient_failures": 2
+    },
+    {
+      "scenario_id": "error_invalid_resource",
+      "category": "sre",
+      "description": "Describe a non-existent pod; agent handles 404 cleanly.",
+      "tool_calls": ["describe_pod", "list_pods"],
+      "rejected_tools": 0,
+      "duration_seconds": 25,
+      "user_confirmed_resolution": null,
+      "final_response": "Pod 'my-missing-pod' was not found in namespace 'default' because it either never existed or was already deleted. Listed current pods in the namespace and no matching pods were found. Check if the pod name or namespace is correct.",
+      "verification_passed": null,
+      "rollback_available": false,
+      "retry_attempts": 0,
+      "transient_failures": 0
+    },
+    {
+      "scenario_id": "error_quota_exceeded",
+      "category": "sre",
+      "description": "Deployment scale fails due to resource quota; agent suggests alternatives.",
+      "tool_calls": ["scale_deployment", "get_resource_quotas", "list_pods", "get_pod_metrics"],
+      "rejected_tools": 0,
+      "duration_seconds": 55,
+      "user_confirmed_resolution": false,
+      "final_response": "Scaling deployment to 10 replicas failed because the namespace resource quota limits CPU to 4 cores and current usage is 3.5 cores. Recommend either requesting a quota increase, reducing per-pod resource requests, or cleaning up idle pods to free capacity.",
+      "verification_passed": false,
+      "rollback_available": false,
+      "retry_attempts": 0,
+      "transient_failures": 0
+    }
+  ]
+}

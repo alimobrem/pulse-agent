@@ -1,0 +1,75 @@
+{
+  "suite_name": "fleet",
+  "scenarios": [
+    {
+      "scenario_id": "fleet_cross_cluster_comparison",
+      "category": "sre",
+      "description": "Compare deployment configurations across two clusters to find discrepancies.",
+      "tool_calls": ["fleet_list_clusters", "fleet_compare_resource", "fleet_list_deployments"],
+      "rejected_tools": 0,
+      "duration_seconds": 85,
+      "user_confirmed_resolution": true,
+      "final_response": "Compared deployment 'api-gateway' across prod-east and prod-west clusters. Found replica count mismatch (3 vs 5) and image tag drift (v2.1.0 vs v2.0.8) because prod-west missed the last rollout. Recommend syncing via GitOps to align both clusters.",
+      "verification_passed": true,
+      "rollback_available": false,
+      "retry_attempts": 0,
+      "transient_failures": 0
+    },
+    {
+      "scenario_id": "fleet_health_summary",
+      "category": "sre",
+      "description": "Aggregate health scores and alert counts across all fleet clusters.",
+      "tool_calls": ["fleet_list_clusters", "fleet_get_alerts", "fleet_list_pods"],
+      "rejected_tools": 0,
+      "duration_seconds": 120,
+      "user_confirmed_resolution": true,
+      "final_response": "Fleet health summary across 4 clusters: prod-east healthy (0 firing alerts), prod-west degraded (3 alerts, 2 crashlooping pods), staging healthy, dev has 1 warning. Overall fleet health is 75% because prod-west has unresolved incidents requiring attention.",
+      "verification_passed": true,
+      "rollback_available": false,
+      "retry_attempts": 0,
+      "transient_failures": 0
+    },
+    {
+      "scenario_id": "fleet_drift_detection",
+      "category": "sre",
+      "description": "Detect configuration drift between clusters for a critical workload.",
+      "tool_calls": ["fleet_list_clusters", "fleet_compare_resource", "detect_gitops_drift"],
+      "rejected_tools": 0,
+      "duration_seconds": 95,
+      "user_confirmed_resolution": true,
+      "final_response": "Configuration drift detected in 'payment-service' deployment. Prod-east has env var DATABASE_POOL_SIZE=20 while prod-west has 10 because a manual patch was applied to prod-east outside GitOps. Recommend reverting the manual change and updating the Git source of truth.",
+      "verification_passed": true,
+      "rollback_available": true,
+      "retry_attempts": 0,
+      "transient_failures": 0
+    },
+    {
+      "scenario_id": "fleet_cordon_drain_sequence",
+      "category": "sre",
+      "description": "Safe node maintenance sequence: cordon, drain, verify workload redistribution.",
+      "tool_calls": ["list_nodes", "describe_node", "cordon_node", "drain_node", "list_pods", "get_pod_disruption_budgets"],
+      "rejected_tools": 0,
+      "duration_seconds": 180,
+      "user_confirmed_resolution": true,
+      "final_response": "Node worker-3 was safely cordoned and drained for maintenance. Verified PDB constraints were respected and all evicted pods rescheduled to worker-1 and worker-2 because sufficient capacity existed. Node is ready for patching. Run uncordon after maintenance.",
+      "verification_passed": true,
+      "rollback_available": true,
+      "retry_attempts": 0,
+      "transient_failures": 0
+    },
+    {
+      "scenario_id": "fleet_certificate_audit",
+      "category": "security",
+      "description": "Audit TLS certificate expiry across fleet clusters.",
+      "tool_calls": ["fleet_list_clusters", "get_tls_certificates", "list_routes"],
+      "rejected_tools": 0,
+      "duration_seconds": 110,
+      "user_confirmed_resolution": true,
+      "final_response": "Certificate audit across fleet found 2 certificates expiring within 30 days: ingress wildcard cert on prod-east (12 days) and API serving cert on prod-west (28 days) because automatic renewal was not configured. Recommend enabling cert-manager auto-renewal and immediate manual renewal for the 12-day cert.",
+      "verification_passed": true,
+      "rollback_available": false,
+      "retry_attempts": 0,
+      "transient_failures": 0
+    }
+  ]
+}

@@ -1,0 +1,15 @@
+{
+    "name": "release_security_summary",
+    "prompt": "Give me an actionable security summary of the cluster. Prioritize the most critical risks.",
+    "recorded_responses": {
+        "get_security_summary": "{\"risk_level\": \"high\", \"total_findings\": 12, \"critical\": 3, \"high\": 5, \"medium\": 4, \"top_risks\": [\"3 pods running as privileged in production namespace\", \"5 deployments using :latest image tags without digest pinning\", \"2 service accounts with cluster-admin role\"]}",
+        "scan_pod_security": "{\"violations\": [{\"namespace\": \"production\", \"pod\": \"legacy-worker\", \"violation\": \"privileged container\", \"severity\": \"critical\"}, {\"namespace\": \"production\", \"pod\": \"debug-tools\", \"violation\": \"privileged container\", \"severity\": \"critical\"}, {\"namespace\": \"production\", \"pod\": \"monitoring-agent\", \"violation\": \"privileged container\", \"severity\": \"critical\"}, {\"namespace\": \"staging\", \"pod\": \"test-runner\", \"violation\": \"hostNetwork enabled\", \"severity\": \"high\"}]}",
+        "scan_images": "{\"findings\": [{\"image\": \"api:latest\", \"issue\": \"unpinned tag\", \"severity\": \"high\", \"affected_deployments\": [\"api-server\", \"api-worker\"]}, {\"image\": \"web:latest\", \"issue\": \"unpinned tag\", \"severity\": \"high\", \"affected_deployments\": [\"web-frontend\"]}, {\"image\": \"node:18\", \"issue\": \"known CVEs\", \"severity\": \"medium\", \"cve_count\": 4}]}"
+    },
+    "expected": {
+        "should_mention": ["privileged", "image", "security"],
+        "should_use_tools": ["get_security_summary", "scan_pod_security"],
+        "should_not_use_tools": ["delete_pod", "restart_deployment"],
+        "max_tool_calls": 6
+    }
+}

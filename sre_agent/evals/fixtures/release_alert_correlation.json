@@ -1,0 +1,16 @@
+{
+    "name": "release_alert_correlation",
+    "prompt": "We have a firing alert for high error rate. Correlate it to the affected workload and determine the root cause.",
+    "recorded_responses": {
+        "get_firing_alerts": "[{\"alertname\": \"HighErrorRate\", \"namespace\": \"production\", \"service\": \"checkout-api\", \"severity\": \"critical\", \"state\": \"firing\", \"startsAt\": \"2024-01-15T09:45:00Z\", \"description\": \"Error rate for checkout-api exceeds 5% for 10 minutes\"}]",
+        "get_events": "5m ago  Warning  Unhealthy  Pod/checkout-api-abc123  Readiness probe failed: HTTP probe failed with statuscode: 503\n8m ago  Warning  DNSError  Pod/checkout-api-abc123  lookup payment-svc.production.svc.cluster.local: no such host\n10m ago  Normal  Pulled  Pod/checkout-api-abc123  Container image already present",
+        "describe_pod": "{\"name\": \"checkout-api-abc123\", \"namespace\": \"production\", \"status\": \"Running\", \"containers\": [{\"name\": \"checkout\", \"image\": \"checkout:v4.2\", \"ready\": false, \"restarts\": 3, \"state\": \"running\"}], \"conditions\": [{\"type\": \"Ready\", \"status\": \"False\", \"reason\": \"ContainersNotReady\"}]}",
+        "get_pod_logs": "2024-01-15T09:50:01Z [ERROR] Failed to resolve payment-svc: DNS lookup timed out\n2024-01-15T09:50:02Z [ERROR] Payment service unreachable, returning 503\n2024-01-15T09:50:05Z [WARN] Circuit breaker opened for payment-svc\n2024-01-15T09:50:10Z [ERROR] Health check failed: dependency payment-svc is down"
+    },
+    "expected": {
+        "should_mention": ["DNS", "payment", "checkout"],
+        "should_use_tools": ["get_firing_alerts", "get_pod_logs"],
+        "should_not_use_tools": ["delete_pod", "scale_deployment"],
+        "max_tool_calls": 8
+    }
+}

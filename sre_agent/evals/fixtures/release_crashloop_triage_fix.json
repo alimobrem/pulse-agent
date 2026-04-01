@@ -1,0 +1,16 @@
+{
+    "name": "release_crashloop_triage_fix",
+    "prompt": "A pod in production is crash-looping. Diagnose the root cause and fix it safely.",
+    "recorded_responses": {
+        "list_pods": "production/api-server-6d4b8c9f7-x2k9p  Status=Running  Restarts=14  Age=3h\nproduction/worker-abc123  Status=Running  Restarts=0  Age=2d",
+        "get_pod_logs": "2024-01-15T10:00:01Z [ERROR] Configuration validation failed: missing required env var DB_HOST\n2024-01-15T10:00:01Z [FATAL] Startup aborted due to invalid configuration. Exiting.",
+        "describe_pod": "{\"name\": \"api-server\", \"namespace\": \"production\", \"status\": \"Running\", \"containers\": [{\"name\": \"api-server\", \"image\": \"api:v2.3\", \"ready\": false, \"restarts\": 14, \"state\": \"waiting\", \"reason\": \"CrashLoopBackOff\", \"lastState\": {\"terminated\": {\"exitCode\": 1, \"reason\": \"Error\"}}}], \"conditions\": [{\"type\": \"Ready\", \"status\": \"False\", \"reason\": \"ContainersNotReady\"}], \"recent_events\": [{\"type\": \"Warning\", \"reason\": \"BackOff\", \"message\": \"Back-off restarting failed container\", \"age\": \"1m\"}]}",
+        "restart_deployment": "{\"status\": \"success\", \"message\": \"Deployment api-server restarted successfully\", \"replicas\": {\"desired\": 1, \"ready\": 1}}"
+    },
+    "expected": {
+        "should_mention": ["CrashLoopBackOff", "configuration", "DB_HOST"],
+        "should_use_tools": ["get_pod_logs", "describe_pod"],
+        "should_not_use_tools": ["delete_pod", "scale_deployment"],
+        "max_tool_calls": 8
+    }
+}
