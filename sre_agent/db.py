@@ -1,8 +1,5 @@
 """PostgreSQL database layer for Pulse Agent.
 
-Production uses PostgreSQL exclusively. SQLite is retained only as an
-in-memory backend for the test suite (no psycopg2 required to run tests).
-
 Usage:
     db = get_database()  # reads PULSE_AGENT_DATABASE_URL env var
     db.execute("INSERT INTO actions (id, status) VALUES (?, ?)", ("a-1", "completed"))
@@ -17,38 +14,28 @@ from __future__ import annotations
 import logging
 import os
 import re
-import sqlite3
+import sys
 import threading
 from typing import Any
+
+import psycopg2
 
 logger = logging.getLogger("pulse_agent.db")
 
 
 class Database:
-    """Database interface — PostgreSQL in production, SQLite for tests."""
+    """PostgreSQL database interface for Pulse Agent."""
 
     def __init__(self, url: str):
         self.url = url
-        self.is_postgres = url.startswith("postgres")
         self._lock = threading.Lock()
         self._conn: Any = None
         self._connect()
 
     def _connect(self) -> None:
-        """Establish a new database connection."""
-        if self.is_postgres:
-            import psycopg2
-
-            self._conn = psycopg2.connect(self.url)
-            self._conn.autocommit = False
-        else:
-            path = self.url.replace("sqlite:///", "") if self.url.startswith("sqlite:///") else self.url
-            parent = os.path.dirname(path)
-            if parent:
-                os.makedirs(parent, exist_ok=True)
-            self._conn = sqlite3.connect(path, check_same_thread=False)
-            self._conn.row_factory = sqlite3.Row
-            self._conn.execute("PRAGMA journal_mode=WAL")
+        """Establish a new PostgreSQL connection."""
+        self._conn = psycopg2.connect(self.url)
+        self._conn.autocommit = False
 
     def _ensure_connection(self) -> None:
         """Reconnect if the connection is stale."""
@@ -56,12 +43,9 @@ class Database:
             self._connect()
             return
         try:
-            if self.is_postgres:
-                cur = self._conn.cursor()
-                cur.execute("SELECT 1")
-                cur.close()
-            else:
-                self._conn.execute("SELECT 1")
+            cur = self._conn.cursor()
+            cur.execute("SELECT 1")
+            cur.close()
         except Exception:
             logger.warning("Database connection lost, reconnecting...")
             try:
@@ -73,19 +57,17 @@ class Database:
 
     def _translate_query(self, query: str) -> str:
         """Translate ``?`` placeholders to PostgreSQL ``%s``."""
-        if self.is_postgres:
-            return query.replace("?", "%s")
-        return query
+        return query.replace("?", "%s")
 
     def _translate_schema(self, schema: str) -> str:
-        """Translate schema DDL between PostgreSQL and SQLite."""
-        if self.is_postgres:
-            schema = schema.replace("INTEGER PRIMARY KEY AUTOINCREMENT", "SERIAL PRIMARY KEY")
-            schema = schema.replace("INSERT OR REPLACE", "INSERT")
-            schema = re.sub(r"PRAGMA\s+\w+\s*=\s*\w+\s*;?", "", schema)
-        else:
-            # SQLite doesn't support SERIAL — use INTEGER PRIMARY KEY AUTOINCREMENT
-            schema = schema.replace("SERIAL PRIMARY KEY", "INTEGER PRIMARY KEY AUTOINCREMENT")
+        """Translate legacy schema DDL to PostgreSQL.
+
+        Handles AUTOINCREMENT→SERIAL conversion and removes PRAGMA
+        statements for backward compatibility with older schemas.
+        """
+        schema = schema.replace("INTEGER PRIMARY KEY AUTOINCREMENT", "SERIAL PRIMARY KEY")
+        schema = schema.replace("INSERT OR REPLACE", "INSERT")
+        schema = re.sub(r"PRAGMA\s+\w+\s*=\s*\w+\s*;?", "", schema)
         return schema
 
     def execute(self, query: str, params: tuple = ()) -> Any:
@@ -93,60 +75,47 @@ class Database:
         self._ensure_connection()
         with self._lock:
             translated = self._translate_query(query)
-            if self.is_postgres:
-                cur = self._conn.cursor()
-                cur.execute(translated, params)
-                return cur
-            return self._conn.execute(translated, params)
+            cur = self._conn.cursor()
+            cur.execute(translated, params)
+            return cur
 
     def executescript(self, script: str) -> None:
         """Execute a multi-statement schema script."""
         translated = self._translate_schema(script)
         with self._lock:
-            if self.is_postgres:
-                cur = self._conn.cursor()
-                for stmt in translated.split(";"):
-                    stmt = stmt.strip()
-                    if stmt:
-                        try:
-                            cur.execute(stmt)
-                        except Exception:
-                            self._conn.rollback()
-                            continue
-                self._conn.commit()
-            else:
-                self._conn.executescript(translated)
+            cur = self._conn.cursor()
+            for stmt in translated.split(";"):
+                stmt = stmt.strip()
+                if stmt:
+                    try:
+                        cur.execute(stmt)
+                    except Exception:
+                        self._conn.rollback()
+                        continue
+            self._conn.commit()
 
     def fetchone(self, query: str, params: tuple = ()) -> dict | None:
         """Execute and fetch one row as dict."""
         self._ensure_connection()
         with self._lock:
             translated = self._translate_query(query)
-            if self.is_postgres:
-                cur = self._conn.cursor()
-                cur.execute(translated, params)
-            else:
-                cur = self._conn.execute(translated, params)
+            cur = self._conn.cursor()
+            cur.execute(translated, params)
             row = cur.fetchone()
             if row is None:
                 return None
-            if self.is_postgres:
-                cols = [desc[0] for desc in cur.description]
-                return dict(zip(cols, row))
-            return dict(row)
+            cols = [desc[0] for desc in cur.description]
+            return dict(zip(cols, row))
 
     def fetchall(self, query: str, params: tuple = ()) -> list[dict]:
         """Execute and fetch all rows as dicts."""
         self._ensure_connection()
         with self._lock:
             translated = self._translate_query(query)
-            if self.is_postgres:
-                cur = self._conn.cursor()
-                cur.execute(translated, params)
-                cols = [desc[0] for desc in cur.description]
-                return [dict(zip(cols, row)) for row in cur.fetchall()]
-            cur = self._conn.execute(translated, params)
-            return [dict(row) for row in cur.fetchall()]
+            cur = self._conn.cursor()
+            cur.execute(translated, params)
+            cols = [desc[0] for desc in cur.description]
+            return [dict(zip(cols, row)) for row in cur.fetchall()]
 
     def commit(self) -> None:
         with self._lock:
@@ -160,26 +129,15 @@ class Database:
     def __del__(self):
         self.close()
 
-    @property
-    def lastrowid(self) -> int | None:
-        """Get last inserted row ID (SQLite tests only)."""
-        with self._lock:
-            if not self.is_postgres:
-                return self._conn.execute("SELECT last_insert_rowid()").fetchone()[0]
-            return None
-
     def health_check(self) -> bool:
         """Check if the current connection is alive (does not reconnect)."""
         if self._conn is None:
             return False
         try:
             with self._lock:
-                if self.is_postgres:
-                    cur = self._conn.cursor()
-                    cur.execute("SELECT 1")
-                    cur.close()
-                else:
-                    self._conn.execute("SELECT 1")
+                cur = self._conn.cursor()
+                cur.execute("SELECT 1")
+                cur.close()
             return True
         except Exception:
             return False
@@ -196,8 +154,7 @@ _db_lock = threading.Lock()
 def get_database() -> Database:
     """Get or create the singleton database connection.
 
-    Production requires PULSE_AGENT_DATABASE_URL (PostgreSQL).
-    Tests can use sqlite:// URLs without psycopg2.
+    Requires PULSE_AGENT_DATABASE_URL pointing to a PostgreSQL instance.
     """
     global _db
     with _db_lock:
@@ -245,13 +202,11 @@ def _db_safe(fn):
     def wrapper(*args, **kwargs):
         try:
             return fn(*args, **kwargs)
-        except (sqlite3.Error, json.JSONDecodeError, OSError):
+        except (json.JSONDecodeError, OSError):
             logger.exception("View database operation failed: %s", fn.__name__)
             return None
         except Exception:
-            # Catch psycopg2 errors (lazy imported in production)
-            mod = getattr(type(__import__("sys").exc_info()[1]), "__module__", "") or ""
-            if mod.startswith("psycopg2"):
+            if isinstance(sys.exc_info()[1], psycopg2.Error):
                 logger.exception("View database operation failed: %s", fn.__name__)
                 return None
             raise

@@ -8,7 +8,12 @@ from sre_agent.memory.store import IncidentStore
 
 @pytest.fixture
 def store():
-    s = IncidentStore(":memory:")
+    from tests.conftest import _TEST_DB_URL
+
+    s = IncidentStore(db_path=_TEST_DB_URL)
+    for table in ("incidents", "runbooks", "patterns", "metrics"):
+        s.db.execute(f"TRUNCATE {table} RESTART IDENTITY CASCADE")
+    s.db.commit()
     yield s
     s.close()
 

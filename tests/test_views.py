@@ -16,10 +16,15 @@ from sre_agent.db_schema import ALL_SCHEMAS
 
 
 @pytest.fixture(autouse=True)
-def _view_db(tmp_path):
-    """Create an in-memory SQLite DB with views table for each test."""
-    path = os.path.join(str(tmp_path), "views_test.db")
-    test_db = Database(f"sqlite:///{path}")
+def _view_db():
+    """Create a fresh PostgreSQL schema for each test."""
+    from tests.conftest import _TEST_DB_URL
+
+    test_db = Database(_TEST_DB_URL)
+    # Drop and recreate all tables for test isolation
+    test_db.execute("DROP TABLE IF EXISTS view_versions CASCADE")
+    test_db.execute("DROP TABLE IF EXISTS views CASCADE")
+    test_db.commit()
     test_db.executescript(ALL_SCHEMAS)
     set_database(test_db)
     yield test_db

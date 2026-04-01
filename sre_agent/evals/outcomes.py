@@ -12,7 +12,7 @@ from typing import Any
 
 from ..db import Database
 
-DEFAULT_FIX_DB_PATH = os.environ.get("PULSE_AGENT_DATABASE_URL", "sqlite:///tmp/pulse_agent/pulse.db")
+DEFAULT_FIX_DB_PATH = os.environ.get("PULSE_AGENT_DATABASE_URL", "")
 DEFAULT_POLICY_PATH = str(Path(__file__).resolve().parent / "policies" / "outcome_regression_policy.yaml")
 
 
@@ -113,8 +113,11 @@ def load_outcome_policy(policy_path: str = DEFAULT_POLICY_PATH) -> OutcomeRegres
 
 
 def _open_db(db_path: str) -> Database:
-    if not db_path.startswith(("sqlite:", "postgres")):
-        db_path = f"sqlite:///{db_path}"
+    if not db_path.startswith("postgres"):
+        # Use the global database if no PostgreSQL URL provided
+        from ..db import get_database
+
+        return get_database()
     return Database(db_path)
 
 

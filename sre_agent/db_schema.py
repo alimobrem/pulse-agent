@@ -83,7 +83,7 @@ CREATE TABLE IF NOT EXISTS actions (
     resources TEXT,
     verification_status TEXT,
     verification_evidence TEXT,
-    verification_timestamp INTEGER
+    verification_timestamp BIGINT
 );
 """
 

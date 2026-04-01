@@ -28,8 +28,13 @@ class TestSingleton:
 
 class TestStoreIncident:
     @pytest.fixture
-    def manager(self, tmp_path):
-        m = MemoryManager(db_path=str(tmp_path / "test.db"))
+    def manager(self):
+        from tests.conftest import _TEST_DB_URL
+
+        m = MemoryManager(db_path=_TEST_DB_URL)
+        for table in ("incidents", "runbooks", "patterns", "metrics"):
+            m.store.db.execute(f"TRUNCATE {table} RESTART IDENTITY CASCADE")
+        m.store.db.commit()
         yield m
         m.close()
 

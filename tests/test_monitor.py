@@ -26,6 +26,7 @@ from sre_agent.monitor import (
     save_investigation,
     update_action_verification,
 )
+from tests.conftest import _TEST_DB_URL
 
 
 @pytest.fixture(autouse=True)
@@ -33,13 +34,34 @@ def _use_temp_db(monkeypatch, tmp_path):
     """Use a temp database for each test."""
     import sre_agent.context_bus as _cb
     import sre_agent.monitor as _mon
+    from tests.conftest import _TEST_DB_URL
 
-    db_path = str(tmp_path / "test_fix_history.db")
-    db = Database(f"sqlite:///{db_path}")
+    db = Database(_TEST_DB_URL)
     set_database(db)
     # Reset table-creation flags so each test creates tables fresh
     _mon._tables_ensured = False
     _cb._tables_ensured = False
+    # Ensure tables exist then truncate for isolation
+    # Drop and recreate tables to pick up schema changes
+    for table in (
+        "actions",
+        "investigations",
+        "findings",
+        "context_entries",
+        "incidents",
+        "runbooks",
+        "patterns",
+        "metrics",
+    ):
+        try:
+            db.execute(f"DROP TABLE IF EXISTS {table} CASCADE")
+        except Exception:
+            pass
+    db.commit()
+    _mon._tables_ensured = False
+    _cb._tables_ensured = False
+    _mon._ensure_tables()
+    _cb._ensure_tables()
     yield
     reset_database()
     _mon._tables_ensured = False
@@ -463,7 +485,7 @@ class TestMonitorAutoLearn:
 
         from sre_agent.memory import MemoryManager, set_manager
 
-        mgr = MemoryManager(db_path=str(tmp_path / "learn.db"))
+        mgr = MemoryManager(db_path=_TEST_DB_URL)
         set_manager(mgr)
 
         sent_messages = []
@@ -518,7 +540,7 @@ class TestMonitorAutoLearn:
 
         from sre_agent.memory import MemoryManager, set_manager
 
-        mgr = MemoryManager(db_path=str(tmp_path / "learn2.db"))
+        mgr = MemoryManager(db_path=_TEST_DB_URL)
         set_manager(mgr)
 
         sent_messages = []
@@ -613,7 +635,7 @@ class TestMonitorAutoLearn:
 
         from sre_agent.memory import MemoryManager, set_manager
 
-        mgr = MemoryManager(db_path=str(tmp_path / "learn3.db"))
+        mgr = MemoryManager(db_path=_TEST_DB_URL)
         set_manager(mgr)
 
         sent_messages = []

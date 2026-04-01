@@ -13,10 +13,18 @@ from sre_agent.db import Database, reset_database, set_database
 @pytest.fixture(autouse=True)
 def _use_temp_db(tmp_path):
     """Use a temp database for each test."""
-    db_path = str(tmp_path / "test_context.db")
-    db = Database(f"sqlite:///{db_path}")
+    from tests.conftest import _TEST_DB_URL
+
+    db = Database(_TEST_DB_URL)
     set_database(db)
     _cb._tables_ensured = False
+    _cb._ensure_tables()
+    for table in ("context_entries",):
+        try:
+            db.execute(f"TRUNCATE {table} RESTART IDENTITY CASCADE")
+        except Exception:
+            pass
+    db.commit()
     yield
     reset_database()
     _cb._tables_ensured = False

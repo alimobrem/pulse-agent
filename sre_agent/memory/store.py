@@ -44,7 +44,7 @@ def db_safe(default=None):
     return decorator
 
 
-DEFAULT_DB_PATH = os.environ.get("PULSE_AGENT_DATABASE_URL", "sqlite:///tmp/pulse_agent/pulse.db")
+DEFAULT_DB_PATH = os.environ.get("PULSE_AGENT_DATABASE_URL", "")
 
 _STORE_INDEXES = """
 CREATE INDEX IF NOT EXISTS idx_incidents_keywords ON incidents(query_keywords);
@@ -150,11 +150,12 @@ class IncidentStore:
         score: float = 0,
     ) -> int:
         keywords = extract_keywords(query)
-        self.db.execute(
+        cur = self.db.execute(
             """INSERT INTO incidents (timestamp, query, query_keywords, tool_sequence,
                resolution, outcome, namespace, resource_type, error_type,
                tool_count, rejected_tools, duration_seconds, score)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+               RETURNING id""",
             (
                 datetime.now(UTC).isoformat(),
                 query,
@@ -171,8 +172,9 @@ class IncidentStore:
                 score,
             ),
         )
+        row = cur.fetchone()
         self.db.commit()
-        return self.db.lastrowid
+        return row[0] if row else -1
 
     @db_safe(default=None)
     def update_incident_outcome(self, incident_id: int, outcome: str, score: float) -> None:
@@ -233,14 +235,15 @@ class IncidentStore:
             )
             self.db.commit()
             return existing["id"]
-        self.db.execute(
+        cur = self.db.execute(
             """INSERT INTO runbooks (name, description, trigger_keywords, tool_sequence,
                created_at, updated_at, source_incident_id)
-               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+               VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING id""",
             (name, description, trigger_keywords, json.dumps(tool_sequence), now, now, source_incident_id),
         )
+        row = cur.fetchone()
         self.db.commit()
-        return self.db.lastrowid
+        return row[0] if row else -1
 
     @db_safe(default=[])
     def find_runbooks(self, query: str, limit: int = 3) -> list[dict]:
@@ -262,14 +265,15 @@ class IncidentStore:
         self, pattern_type: str, description: str, keywords: str, incident_ids: list[int], metadata: dict | None = None
     ) -> int:
         now = datetime.now(UTC).isoformat()
-        self.db.execute(
+        cur = self.db.execute(
             """INSERT INTO patterns (pattern_type, description, keywords,
                incident_ids, last_seen, first_seen, metadata)
-               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+               VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING id""",
             (pattern_type, description, keywords, json.dumps(incident_ids), now, now, json.dumps(metadata or {})),
         )
+        row = cur.fetchone()
         self.db.commit()
-        return self.db.lastrowid
+        return row[0] if row else -1
 
     def list_patterns(self, limit: int = 10) -> list[dict]:
         return self.db.fetchall("SELECT * FROM patterns ORDER BY frequency DESC, last_seen DESC LIMIT ?", (limit,))

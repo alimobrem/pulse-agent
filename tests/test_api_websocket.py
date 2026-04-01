@@ -18,7 +18,7 @@ def pulse_token():
 def ws_client(pulse_token, monkeypatch, tmp_path):
     monkeypatch.setenv("PULSE_AGENT_WS_TOKEN", pulse_token)
     monkeypatch.setenv("PULSE_AGENT_MEMORY", "0")
-    monkeypatch.setenv("PULSE_AGENT_DATABASE_URL", f"sqlite:///{tmp_path / 'test.db'}")
+    # PULSE_AGENT_DATABASE_URL set by conftest autouse fixture
 
     with (
         patch("sre_agent.k8s_client._initialized", True),

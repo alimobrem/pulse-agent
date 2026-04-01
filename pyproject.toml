@@ -11,11 +11,11 @@ dependencies = [
     "uvicorn[standard]>=0.34.0",
     "websockets>=14.0",
     "pydantic-settings>=2.0",
+    "psycopg2-binary>=2.9.0",
 ]
 
 [project.optional-dependencies]
 test = ["pytest>=8.0", "ruff>=0.4.0", "mypy>=1.0"]
-postgres = ["psycopg2-binary>=2.9.0"]
 
 [project.scripts]
 sre-agent = "sre_agent.main:main"

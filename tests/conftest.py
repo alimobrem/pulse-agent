@@ -2,11 +2,24 @@
 
 from __future__ import annotations
 
+import os
 from datetime import UTC, datetime
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
+
+# Default test database URL — local PostgreSQL via Podman
+_TEST_DB_URL = os.environ.get(
+    "PULSE_AGENT_TEST_DATABASE_URL",
+    "postgresql://pulse:pulse@localhost:5433/pulse_test",
+)
+
+
+@pytest.fixture(autouse=True)
+def _set_test_db_url(monkeypatch):
+    """Ensure all tests use the test PostgreSQL database."""
+    monkeypatch.setenv("PULSE_AGENT_DATABASE_URL", _TEST_DB_URL)
 
 
 def _text(result):

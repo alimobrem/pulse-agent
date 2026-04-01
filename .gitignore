@@ -6,3 +6,4 @@ build/
 .env
 *.egg
 .venv/
+tmp/

@@ -18,12 +18,20 @@ def _use_temp_db(monkeypatch, tmp_path):
     """Use a temp database for each test."""
     import sre_agent.context_bus as _cb
     import sre_agent.monitor as _mon
+    from tests.conftest import _TEST_DB_URL
 
-    db_path = str(tmp_path / "test_handoff.db")
-    db = Database(f"sqlite:///{db_path}")
+    db = Database(_TEST_DB_URL)
     set_database(db)
     _mon._tables_ensured = False
     _cb._tables_ensured = False
+    _mon._ensure_tables()
+    _cb._ensure_tables()
+    for table in ("actions", "investigations", "findings", "context_entries"):
+        try:
+            db.execute(f"TRUNCATE {table} RESTART IDENTITY CASCADE")
+        except Exception:
+            pass
+    db.commit()
     yield
     reset_database()
     _mon._tables_ensured = False
