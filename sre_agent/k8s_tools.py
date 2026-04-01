@@ -2578,117 +2578,141 @@ def list_resources(
     label_selector: str = "",
     field_selector: str = "",
     sort_by: str = "",
-    columns: str = "",
+    show_wide: bool = False,
 ) -> str:
-    """List any Kubernetes resource type including CRDs. Returns a dynamic table with smart column detection.
+    """List any Kubernetes resource type using the server's printer columns.
 
-    This is the universal resource listing tool. It works for ANY resource — pods, configmaps,
-    secrets, deployments, nodes, CRDs, etc. Use this for listing resources. The LLM should choose
-    the best columns for the user's needs — specify them in the columns parameter.
+    Uses the Kubernetes Table API to get the same columns as 'kubectl get'.
+    Works for ANY resource type including CRDs with custom printer columns.
 
     Args:
-        resource: Resource type plural name (e.g. 'pods', 'configmaps', 'deployments', 'nodes', 'virtualmachines').
-        namespace: Kubernetes namespace. Use 'ALL' for all namespaces. Leave empty for cluster-scoped resources.
-        group: API group (e.g. 'apps' for deployments, 'operators.coreos.com' for OLM, '' for core resources).
+        resource: Resource type plural name (e.g. 'pods', 'configmaps', 'deployments', 'nodes').
+        namespace: Kubernetes namespace. Use 'ALL' for all namespaces. Leave empty for cluster-scoped.
+        group: API group (e.g. 'apps' for deployments, '' for core resources).
         version: API version (default 'v1').
         label_selector: Filter by labels (e.g. 'app=nginx').
         field_selector: Filter by fields (e.g. 'status.phase=Running').
-        sort_by: Column ID to sort by (e.g. 'name', 'status', 'age'). Prefix with '-' for descending.
-        columns: Comma-separated column IDs to include (e.g. 'name,namespace,status,age'). If empty, auto-detect best columns for the resource type.
+        sort_by: Column name to sort by. Prefix with '-' for descending.
+        show_wide: If true, include all columns (like kubectl -o wide).
     """
-    custom = get_custom_client()
+    import ssl
+    import urllib.parse
+    import urllib.request
+
     gvr = f"{group}~{version}~{resource}" if group else f"{version}~{resource}"
 
+    # Build the API path
+    api_base = f"/apis/{group}/{version}" if group else f"/api/{version}"
+    if namespace and namespace.upper() != "ALL":
+        path = f"{api_base}/namespaces/{namespace}/{resource}"
+    else:
+        path = f"{api_base}/{resource}"
+
+    params = {}
+    if label_selector:
+        params["labelSelector"] = label_selector
+    if field_selector:
+        params["fieldSelector"] = field_selector
+    params["limit"] = str(MAX_RESULTS)
+
+    url = f"https://kubernetes.default.svc{path}"
+    if params:
+        url += "?" + urllib.parse.urlencode(params)
+
+    # Read SA token for auth
     try:
-        kwargs = {}
-        if label_selector:
-            kwargs["label_selector"] = label_selector
-        if field_selector:
-            kwargs["field_selector"] = field_selector
+        with open("/var/run/secrets/kubernetes.io/serviceaccount/token") as f:
+            token = f.read().strip()
+    except FileNotFoundError:
+        return "Error: Not running in-cluster (no service account token)."
 
-        if namespace and namespace.upper() != "ALL":
-            if group:
-                result = custom.list_namespaced_custom_object(group, version, namespace, resource, **kwargs)
-            else:
-                result = custom.list_namespaced_custom_object("", version, namespace, resource, **kwargs)
-        else:
-            if group:
-                result = custom.list_cluster_custom_object(group, version, resource, **kwargs)
-            else:
-                result = custom.list_cluster_custom_object("", version, resource, **kwargs)
-    except ApiException as e:
-        if e.status == 404:
-            return f"Resource type '{resource}' not found. Check the group ({group}) and version ({version})."
-        return f"Error ({e.status}): {e.reason}"
+    ctx = ssl.create_default_context()
+    try:
+        ctx.load_verify_locations("/var/run/secrets/kubernetes.io/serviceaccount/ca.crt")
+    except Exception:
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
 
-    items = result.get("items", [])
-    if not items:
+    # Request as Table format — server returns printer columns + pre-formatted cells
+    req = urllib.request.Request(
+        url,
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Accept": "application/json;as=Table;g=meta.k8s.io;v=v1",
+        },
+    )
+
+    try:
+        resp = urllib.request.urlopen(req, context=ctx, timeout=30)
+        data = json.loads(resp.read())
+    except Exception as e:
+        return f"Error listing {resource}: {e}"
+
+    col_defs_raw = data.get("columnDefinitions", [])
+    table_rows = data.get("rows", [])
+
+    if not table_rows:
         return f"No {resource} found."
 
-    # Get the resource-specific extractor
-    extractor = _RESOURCE_EXTRACTORS.get(resource)
+    # Map server column names to our renderer types
+    _NAME_TYPE_MAP = {
+        "Name": "resource_name",
+        "Status": "status",
+        "Phase": "status",
+        "Ready": "replicas",
+        "Age": "age",
+        "Node": "node",
+        "Namespace": "namespace",
+        "Suspend": "boolean",
+        "Selector": "labels",
+        "Node Selector": "labels",
+    }
 
-    # Build rows
+    # Build column definitions — filter by priority unless show_wide
+    max_priority = 99 if show_wide else 0
+    col_defs = []
+    col_indices = []
+    for i, col in enumerate(col_defs_raw):
+        if col.get("priority", 0) > max_priority:
+            continue
+        col_id = col["name"].lower().replace(" ", "_").replace("-", "_").replace("(", "").replace(")", "")
+        col_type = _NAME_TYPE_MAP.get(col["name"]) or _infer_column_type(col_id) or "text"
+        col_defs.append({"id": col_id, "header": col["name"], "type": col_type})
+        col_indices.append(i)
+
+    # Build rows from Table cells
     rows = []
-    for item in items[:MAX_RESULTS]:
-        meta = item.get("metadata", {})
+    for tr in table_rows:
+        cells = tr.get("cells", [])
+        meta = tr.get("object", {}).get("metadata", {}) if isinstance(tr.get("object"), dict) else {}
         ns = meta.get("namespace", "")
-        name = meta.get("name", "?")
-        status_obj = item.get("status", {}) if isinstance(item.get("status"), dict) else {}
-        spec_obj = item.get("spec", {}) if isinstance(item.get("spec"), dict) else {}
-
-        row: dict = {"_gvr": gvr, "name": name, "age": age(meta.get("creationTimestamp"))}
+        row: dict = {"_gvr": gvr}
         if ns:
             row["namespace"] = ns
 
-        # Apply resource-specific extractor
-        if extractor:
-            try:
-                extra = extractor(item, spec_obj, status_obj)
-                row.update(extra)
-            except Exception:
-                pass
-        else:
-            # Generic extraction for unknown resources
-            if "phase" in status_obj:
-                row["status"] = status_obj["phase"]
-            elif "conditions" in status_obj and isinstance(status_obj["conditions"], list) and status_obj["conditions"]:
-                row["status"] = status_obj["conditions"][-1].get("type", "")
-            if "replicas" in spec_obj:
-                row["ready"] = f"{status_obj.get('readyReplicas', 0)}/{spec_obj.get('replicas', 0)}"
-
-        # Add labels
-        labels = meta.get("labels", {})
-        if labels:
-            row["labels"] = ", ".join(f"{k}={v}" for k, v in list(labels.items())[:4])
+        for j, idx in enumerate(col_indices):
+            if idx < len(cells):
+                val = cells[idx]
+                row[col_defs[j]["id"]] = val if val is not None else ""
 
         rows.append(row)
+
+    # Add namespace column if cross-namespace listing
+    if (not namespace or namespace.upper() == "ALL") and not any(c["id"] == "namespace" for c in col_defs):
+        col_defs.insert(0, {"id": "namespace", "header": "Namespace", "type": "namespace"})
 
     # Sort if requested
     if sort_by:
         desc = sort_by.startswith("-")
-        sort_key = sort_by.lstrip("-")
+        sort_key = sort_by.lstrip("-").lower().replace(" ", "_").replace("-", "_")
         rows.sort(key=lambda r: str(r.get(sort_key, "")), reverse=desc)
 
-    # Filter columns if specified
-    requested_cols = [c.strip() for c in columns.split(",") if c.strip()] if columns else []
-
-    # Build column definitions with type hints
-    if rows:
-        if requested_cols:
-            col_ids = [c for c in requested_cols if any(c in r for r in rows)]
-        else:
-            col_ids = [k for k in rows[0] if not k.startswith("_")]
-
-        sample_row = rows[0]
-        col_defs = []
-        for c in col_ids:
-            col_type = _infer_column_type(c, sample_row.get(c))
-            col_defs.append({"id": c, "header": c.replace("_", " ").title(), "type": col_type})
-    else:
-        col_defs = [{"id": "name", "header": "Name", "type": "resource_name"}]
-
-    text_lines = [f"{r.get('namespace', '')}/{r['name']}" if r.get("namespace") else r["name"] for r in rows[:20]]
+    # Build text summary
+    name_col = next((c["id"] for c in col_defs if c.get("type") == "resource_name"), "name")
+    text_lines = []
+    for r in rows[:20]:
+        ns_prefix = f"{r.get('namespace', '')}/" if r.get("namespace") else ""
+        text_lines.append(f"{ns_prefix}{r.get(name_col, '?')}")
     text = f"{resource} ({len(rows)}):\n" + "\n".join(text_lines)
     if len(rows) > 20:
         text += f"\n... and {len(rows) - 20} more"
@@ -2696,8 +2720,7 @@ def list_resources(
     component = {
         "kind": "data_table",
         "title": f"{resource.replace('_', ' ').title()} ({len(rows)})",
-        "description": f"All {resource} in {namespace or 'cluster'}"
-        + (f" matching {label_selector}" if label_selector else ""),
+        "description": f"{'Filtered' if label_selector else 'All'} {resource} in {namespace or 'cluster'}",
         "columns": col_defs,
         "rows": rows,
     }
