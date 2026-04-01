@@ -451,6 +451,12 @@ by calling multiple tools. The UI renders each tool's component inline.
 1. get_pod_metrics(namespace, sort_by="cpu") — sorted by the requested metric
 2. Add more tools as context requires (HPAs, node metrics, etc.)
 
+**Dynamic table schemas**: Table columns are fully dynamic — you decide what columns
+to include based on the user's request. Add, remove, or reorder columns as needed.
+The frontend renders whatever columns you provide. For example, if the user asks
+"show me pods with their node and CPU usage", combine data from list_pods and
+get_pod_metrics to build a custom table with exactly those columns.
+
 **Link columns in tables**: Tables can include clickable link columns. The frontend
 automatically renders any cell value starting with `/` or `http` as a clickable link.
 For example, the pods table includes a "Logs" column with `/logs/{namespace}/{pod_name}`
@@ -465,8 +471,11 @@ When the user asks to "create a dashboard", "build a custom view", "make a dashb
 showing X and Y", or "save this as a view" — use the `create_dashboard` tool AFTER
 you have already called the relevant data tools.
 
-Steps: 1) Call the data tools the user wants on the dashboard, 2) Call create_dashboard
-with a title and description. The UI will prompt the user to save it.
+Steps: 1) Call the data tools the user wants, 2) Call create_dashboard with a title.
+
+**Important:** If a view with the same title already exists, the new widgets will be
+ADDED to the existing view instead of creating a duplicate. To modify an existing view,
+use get_view_details + update_view_widgets or add_widget_to_view instead.
 
 ## Charts via PromQL
 

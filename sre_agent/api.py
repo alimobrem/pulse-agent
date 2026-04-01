@@ -351,19 +351,40 @@ async def _run_agent_ws(
                 continue
             break
 
-        logger.info("Emitting view_spec: id=%s title=%s components=%d", view_id, view_title, len(session_components))
-        await websocket.send_json(
-            {
-                "type": "view_spec",
-                "spec": {
-                    "id": view_id,
-                    "title": view_title,
-                    "description": view_desc,
-                    "layout": session_components,
-                    "generatedAt": int(_time.time() * 1000),
-                },
-            }
-        )
+        # Check if a view with this title already exists — update instead of creating duplicate
+        from . import db as _db
+
+        existing_views = _db.list_views(current_user) or []
+        existing = next((v for v in existing_views if v.get("title") == view_title), None)
+        if existing:
+            # Update existing view with new components
+            old_layout = existing.get("layout", [])
+            merged_layout = old_layout + session_components
+            _db.update_view(existing["id"], current_user, layout=merged_layout, description=view_desc)
+            view_id = existing["id"]
+            logger.info(
+                "Updated existing view: id=%s title=%s (+%d components)", view_id, view_title, len(session_components)
+            )
+            try:
+                await websocket.send_json({"type": "view_updated", "viewId": view_id})
+            except Exception:
+                pass
+        else:
+            logger.info(
+                "Emitting view_spec: id=%s title=%s components=%d", view_id, view_title, len(session_components)
+            )
+            await websocket.send_json(
+                {
+                    "type": "view_spec",
+                    "spec": {
+                        "id": view_id,
+                        "title": view_title,
+                        "description": view_desc,
+                        "layout": session_components,
+                        "generatedAt": int(_time.time() * 1000),
+                    },
+                }
+            )
 
     # If update_view_widgets or add_widget_to_view was called, emit view_updated event
     _view_updated_ids = set()
