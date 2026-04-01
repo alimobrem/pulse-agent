@@ -2456,21 +2456,145 @@ def record_audit_entry(action: str, details: str, namespace: str = "pulse-agent"
     return f"Audit entry recorded: {entry_key}"
 
 
+# Resource-specific column extractors for common types
+_RESOURCE_EXTRACTORS: dict[str, callable] = {
+    "deployments": lambda item, spec, status: {
+        "ready": f"{status.get('readyReplicas', 0)}/{spec.get('replicas', 0)}",
+        "status": "Healthy"
+        if status.get("readyReplicas", 0) == spec.get("replicas", 0) and spec.get("replicas", 0) > 0
+        else ("Degraded" if status.get("readyReplicas", 0) > 0 else "Unavailable"),
+        "updated": status.get("updatedReplicas", 0),
+    },
+    "statefulsets": lambda item, spec, status: {
+        "ready": f"{status.get('readyReplicas', 0)}/{spec.get('replicas', 0)}",
+        "status": "Healthy"
+        if status.get("readyReplicas", 0) == spec.get("replicas", 0) and spec.get("replicas", 0) > 0
+        else "Degraded",
+    },
+    "daemonsets": lambda item, spec, status: {
+        "desired": status.get("desiredNumberScheduled", 0),
+        "ready": status.get("numberReady", 0),
+        "available": status.get("numberAvailable", 0),
+        "status": "Healthy" if status.get("numberReady", 0) == status.get("desiredNumberScheduled", 0) else "Degraded",
+    },
+    "nodes": lambda item, spec, status: {
+        "roles": ",".join(r.split("/")[-1] for r in item.get("metadata", {}).get("labels", {}) if "node-role" in r)
+        or "<none>",
+        "status": "Ready"
+        if any(c.get("type") == "Ready" and c.get("status") == "True" for c in status.get("conditions", []))
+        else "NotReady",
+        "version": (status.get("nodeInfo") or {}).get("kubeletVersion", ""),
+    },
+    "pods": lambda item, spec, status: {
+        "status": status.get("phase", "Unknown"),
+        "node": spec.get("nodeName", ""),
+        "restarts": sum(cs.get("restartCount", 0) for cs in status.get("containerStatuses", [])),
+        "logs": f"/logs/{item.get('metadata', {}).get('namespace', '')}/{item.get('metadata', {}).get('name', '')}",
+    },
+    "jobs": lambda item, spec, status: {
+        "completions": f"{status.get('succeeded', 0)}/{spec.get('completions', 1)}",
+        "status": "Complete" if status.get("succeeded") else ("Failed" if status.get("failed") else "Running"),
+    },
+    "cronjobs": lambda item, spec, status: {
+        "schedule": spec.get("schedule", ""),
+        "suspended": str(spec.get("suspend", False)),
+        "lastSchedule": status.get("lastScheduleTime", ""),
+    },
+    "services": lambda item, spec, status: {
+        "type": spec.get("type", ""),
+        "clusterIP": spec.get("clusterIP", ""),
+        "ports": ", ".join(f"{p.get('port')}/{p.get('protocol', 'TCP')}" for p in spec.get("ports", [])[:3]),
+    },
+    "persistentvolumeclaims": lambda item, spec, status: {
+        "status": status.get("phase", ""),
+        "capacity": (status.get("capacity") or {}).get("storage", ""),
+        "storageClass": spec.get("storageClassName", ""),
+    },
+    "configmaps": lambda item, spec, status: {
+        "keys": ", ".join(sorted((item.get("data") or {}).keys())[:5]) or "(empty)",
+        "key_count": len(item.get("data") or {}),
+    },
+    "secrets": lambda item, spec, status: {
+        "keys": ", ".join(sorted((item.get("data") or {}).keys())[:5]) or "(empty)",
+        "type": item.get("type", "Opaque"),
+    },
+    "namespaces": lambda item, spec, status: {
+        "status": status.get("phase", "Active"),
+    },
+    "resourcequotas": lambda item, spec, status: {
+        "hard": ", ".join(f"{k}={v}" for k, v in list((spec.get("hard") or {}).items())[:3]),
+        "used": ", ".join(f"{k}={v}" for k, v in list((status.get("used") or {}).items())[:3]),
+    },
+    "ingresses": lambda item, spec, status: {
+        "hosts": ", ".join(r.get("host", "*") for r in spec.get("rules", [])[:3]),
+        "tls": "Yes" if spec.get("tls") else "No",
+    },
+}
+
+
+def _infer_column_type(col_id: str, sample_value=None) -> str:
+    """Infer the best column renderer type from the column ID and sample value."""
+    if col_id in ("status", "phase", "state"):
+        return "status"
+    if col_id == "name":
+        return "resource_name"
+    if col_id == "namespace":
+        return "namespace"
+    if col_id == "node":
+        return "node"
+    if col_id == "age":
+        return "age"
+    if col_id in ("logs", "link"):
+        return "link"
+    if col_id in ("cpu", "cpu_pct"):
+        return "cpu"
+    if col_id in ("memory", "mem_pct"):
+        return "memory"
+    if col_id in ("ready", "replicas", "completions"):
+        return "replicas"
+    if col_id in ("labels", "annotations"):
+        return "labels"
+    if col_id in ("severity", "type"):
+        return "severity"
+    if col_id.endswith("_pct") or col_id == "utilization":
+        return "progress"
+    if col_id in ("created", "creationTimestamp", "lastSchedule", "lastScheduleTime", "startsAt"):
+        return "timestamp"
+    if isinstance(sample_value, bool):
+        return "boolean"
+    if isinstance(sample_value, str) and sample_value.startswith("/"):
+        return "link"
+    if isinstance(sample_value, str) and len(sample_value) > 18 and "T" in sample_value:
+        return "timestamp"
+    return "text"
+
+
 @beta_tool
 def list_resources(
-    resource: str, namespace: str = "", group: str = "", version: str = "v1", label_selector: str = ""
+    resource: str,
+    namespace: str = "",
+    group: str = "",
+    version: str = "v1",
+    label_selector: str = "",
+    field_selector: str = "",
+    sort_by: str = "",
+    columns: str = "",
 ) -> str:
-    """List any Kubernetes resource type including CRDs. Returns a dynamic table with auto-detected columns.
+    """List any Kubernetes resource type including CRDs. Returns a dynamic table with smart column detection.
 
-    This is a generic tool that works for ANY resource type — pods, configmaps, secrets,
-    deployments, custom CRDs, etc. Use this when no specialized list tool exists.
+    This is the universal resource listing tool. It works for ANY resource — pods, configmaps,
+    secrets, deployments, nodes, CRDs, etc. Use this for listing resources. The LLM should choose
+    the best columns for the user's needs — specify them in the columns parameter.
 
     Args:
-        resource: Resource type plural name (e.g. 'configmaps', 'secrets', 'pods', 'subscriptions', 'virtualmachines').
+        resource: Resource type plural name (e.g. 'pods', 'configmaps', 'deployments', 'nodes', 'virtualmachines').
         namespace: Kubernetes namespace. Use 'ALL' for all namespaces. Leave empty for cluster-scoped resources.
-        group: API group (e.g. 'apps', 'operators.coreos.com', 'kubevirt.io'). Leave empty for core API resources.
-        version: API version (default 'v1'). Use 'v1beta1', 'v1alpha1' for CRDs.
-        label_selector: Optional label selector (e.g. 'app=nginx').
+        group: API group (e.g. 'apps' for deployments, 'operators.coreos.com' for OLM, '' for core resources).
+        version: API version (default 'v1').
+        label_selector: Filter by labels (e.g. 'app=nginx').
+        field_selector: Filter by fields (e.g. 'status.phase=Running').
+        sort_by: Column ID to sort by (e.g. 'name', 'status', 'age'). Prefix with '-' for descending.
+        columns: Comma-separated column IDs to include (e.g. 'name,namespace,status,age'). If empty, auto-detect best columns for the resource type.
     """
     custom = get_custom_client()
     gvr = f"{group}~{version}~{resource}" if group else f"{version}~{resource}"
@@ -2479,6 +2603,8 @@ def list_resources(
         kwargs = {}
         if label_selector:
             kwargs["label_selector"] = label_selector
+        if field_selector:
+            kwargs["field_selector"] = field_selector
 
         if namespace and namespace.upper() != "ALL":
             if group:
@@ -2499,63 +2625,68 @@ def list_resources(
     if not items:
         return f"No {resource} found."
 
-    # Auto-detect columns from the first item's metadata + spec
+    # Get the resource-specific extractor
+    extractor = _RESOURCE_EXTRACTORS.get(resource)
+
+    # Build rows
     rows = []
     for item in items[:MAX_RESULTS]:
         meta = item.get("metadata", {})
         ns = meta.get("namespace", "")
         name = meta.get("name", "?")
-        row = {
-            "_gvr": gvr,
-            "name": name,
-            "age": age(meta.get("creationTimestamp")),
-        }
+        status_obj = item.get("status", {}) if isinstance(item.get("status"), dict) else {}
+        spec_obj = item.get("spec", {}) if isinstance(item.get("spec"), dict) else {}
+
+        row: dict = {"_gvr": gvr, "name": name, "age": age(meta.get("creationTimestamp"))}
         if ns:
             row["namespace"] = ns
 
-        # Extract useful spec/status fields dynamically
-        status = item.get("status", {})
-        spec = item.get("spec", {})
+        # Apply resource-specific extractor
+        if extractor:
+            try:
+                extra = extractor(item, spec_obj, status_obj)
+                row.update(extra)
+            except Exception:
+                pass
+        else:
+            # Generic extraction for unknown resources
+            if "phase" in status_obj:
+                row["status"] = status_obj["phase"]
+            elif "conditions" in status_obj and isinstance(status_obj["conditions"], list) and status_obj["conditions"]:
+                row["status"] = status_obj["conditions"][-1].get("type", "")
+            if "replicas" in spec_obj:
+                row["ready"] = f"{status_obj.get('readyReplicas', 0)}/{spec_obj.get('replicas', 0)}"
 
-        # Common status patterns
-        if "phase" in status:
-            row["status"] = status["phase"]
-        elif "conditions" in status:
-            conditions = status["conditions"]
-            if conditions:
-                latest = conditions[-1] if isinstance(conditions, list) else {}
-                row["status"] = latest.get("type", latest.get("status", ""))
-
-        # Resource-specific useful fields
-        if resource == "configmaps":
-            data = item.get("data", {})
-            row["keys"] = ", ".join(sorted(data.keys())[:5]) if data else "(empty)"
-            row["key_count"] = len(data) if data else 0
-        elif resource == "secrets":
-            data = item.get("data", {})
-            row["keys"] = ", ".join(sorted(data.keys())[:5]) if data else "(empty)"
-            row["type"] = item.get("type", "Opaque")
-        elif resource in ("services", "svc"):
-            row["type"] = spec.get("type", "")
-            ports = spec.get("ports", [])
-            row["ports"] = ", ".join(f"{p.get('port')}/{p.get('protocol', 'TCP')}" for p in ports[:3])
-            row["clusterIP"] = spec.get("clusterIP", "")
-        elif "replicas" in spec:
-            row["replicas"] = f"{status.get('readyReplicas', 0)}/{spec.get('replicas', 0)}"
-
-        # Add labels if few enough
+        # Add labels
         labels = meta.get("labels", {})
-        if labels and len(labels) <= 3:
-            row["labels"] = ", ".join(f"{k}={v}" for k, v in list(labels.items())[:3])
+        if labels:
+            row["labels"] = ", ".join(f"{k}={v}" for k, v in list(labels.items())[:4])
 
         rows.append(row)
 
-    # Build columns from the first row's keys (excluding hidden fields)
+    # Sort if requested
+    if sort_by:
+        desc = sort_by.startswith("-")
+        sort_key = sort_by.lstrip("-")
+        rows.sort(key=lambda r: str(r.get(sort_key, "")), reverse=desc)
+
+    # Filter columns if specified
+    requested_cols = [c.strip() for c in columns.split(",") if c.strip()] if columns else []
+
+    # Build column definitions with type hints
     if rows:
-        col_ids = [k for k in rows[0] if not k.startswith("_")]
-        columns = [{"id": c, "header": c.replace("_", " ").title()} for c in col_ids]
+        if requested_cols:
+            col_ids = [c for c in requested_cols if any(c in r for r in rows)]
+        else:
+            col_ids = [k for k in rows[0] if not k.startswith("_")]
+
+        sample_row = rows[0]
+        col_defs = []
+        for c in col_ids:
+            col_type = _infer_column_type(c, sample_row.get(c))
+            col_defs.append({"id": c, "header": c.replace("_", " ").title(), "type": col_type})
     else:
-        columns = [{"id": "name", "header": "Name"}]
+        col_defs = [{"id": "name", "header": "Name", "type": "resource_name"}]
 
     text_lines = [f"{r.get('namespace', '')}/{r['name']}" if r.get("namespace") else r["name"] for r in rows[:20]]
     text = f"{resource} ({len(rows)}):\n" + "\n".join(text_lines)
@@ -2564,53 +2695,45 @@ def list_resources(
 
     component = {
         "kind": "data_table",
-        "title": f"{resource.title()} ({len(rows)})",
+        "title": f"{resource.replace('_', ' ').title()} ({len(rows)})",
         "description": f"All {resource} in {namespace or 'cluster'}"
-        + (f" with {label_selector}" if label_selector else ""),
-        "columns": columns,
+        + (f" matching {label_selector}" if label_selector else ""),
+        "columns": col_defs,
         "rows": rows,
     }
     return (text, component)
 
 
 ALL_TOOLS = [
-    # Read diagnostics
-    list_namespaces,
-    list_pods,
+    # Universal resource listing — replaces list_namespaces, list_nodes, list_deployments,
+    # list_statefulsets, list_daemonsets, get_services, get_persistent_volume_claims,
+    # get_resource_quotas, list_limit_ranges. Works for any resource including CRDs.
+    list_resources,
+    # Specialized tools with unique logic (can't be replaced by list_resources)
+    list_pods,  # field_selector, logs link, restart count
     describe_pod,
     get_pod_logs,
-    list_nodes,
     describe_node,
-    get_events,
-    list_deployments,
+    get_events,  # field_selector filtering by kind/name/type
     describe_deployment,
-    get_resource_quotas,
-    get_services,
-    get_persistent_volume_claims,
     get_cluster_version,
-    get_cluster_operators,
+    get_cluster_operators,  # OpenShift condition→status mapping
     get_configmap,
-    get_node_metrics,
-    get_pod_metrics,
-    # New diagnostics
-    list_statefulsets,
-    list_daemonsets,
-    list_jobs,
-    list_cronjobs,
-    list_ingresses,
-    list_routes,
-    list_hpas,
-    list_operator_subscriptions,
-    get_firing_alerts,
-    get_prometheus_query,
-    # Generic resource listing (any type including CRDs)
-    list_resources,
-    # Sysadmin-requested diagnostics
+    get_node_metrics,  # metrics API + unit parsing
+    get_pod_metrics,  # metrics API + sort by cpu/memory
+    list_jobs,  # show_completed filter, duration
+    list_cronjobs,  # schedule, suspended, last run
+    list_ingresses,  # rules/paths/backends parsing
+    list_routes,  # OpenShift route.openshift.io
+    list_hpas,  # current metrics extraction
+    list_operator_subscriptions,  # OLM CSV/channel/health
+    get_firing_alerts,  # Alertmanager proxy
+    get_prometheus_query,  # PromQL chart generation
+    # Diagnostics
     describe_service,
     get_endpoint_slices,
     list_replicasets,
     get_pod_disruption_budgets,
-    list_limit_ranges,
     top_pods_by_restarts,
     get_recent_changes,
     get_tls_certificates,

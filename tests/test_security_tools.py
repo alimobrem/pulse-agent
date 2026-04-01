@@ -247,5 +247,5 @@ class TestSecurityAgentToolList:
 
     def test_includes_sre_read_tools(self):
         tool_names = {t.name for t in SEC_ALL_TOOLS}
-        expected_reads = {"list_pods", "describe_pod", "get_pod_logs", "list_nodes", "get_events"}
+        expected_reads = {"list_pods", "describe_pod", "get_pod_logs", "get_events"}
         assert expected_reads <= tool_names, f"Missing SRE read tools: {expected_reads - tool_names}"
