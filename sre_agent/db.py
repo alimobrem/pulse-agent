@@ -78,11 +78,14 @@ class Database:
         return query
 
     def _translate_schema(self, schema: str) -> str:
-        """Translate schema DDL for PostgreSQL."""
+        """Translate schema DDL between PostgreSQL and SQLite."""
         if self.is_postgres:
             schema = schema.replace("INTEGER PRIMARY KEY AUTOINCREMENT", "SERIAL PRIMARY KEY")
             schema = schema.replace("INSERT OR REPLACE", "INSERT")
             schema = re.sub(r"PRAGMA\s+\w+\s*=\s*\w+\s*;?", "", schema)
+        else:
+            # SQLite doesn't support SERIAL — use INTEGER PRIMARY KEY AUTOINCREMENT
+            schema = schema.replace("SERIAL PRIMARY KEY", "INTEGER PRIMARY KEY AUTOINCREMENT")
         return schema
 
     def execute(self, query: str, params: tuple = ()) -> Any:

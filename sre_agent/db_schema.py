@@ -1,11 +1,14 @@
 """PostgreSQL table schemas for Pulse Agent.
 
+Schemas are written in PostgreSQL syntax. The Database class translates
+SERIAL PRIMARY KEY to INTEGER PRIMARY KEY AUTOINCREMENT for SQLite tests.
+
 Import this module and pass the schema strings to ``Database.executescript()``.
 """
 
 INCIDENTS_SCHEMA = """
 CREATE TABLE IF NOT EXISTS incidents (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    id SERIAL PRIMARY KEY,
     timestamp TEXT NOT NULL,
     query TEXT NOT NULL,
     query_keywords TEXT NOT NULL,
@@ -24,7 +27,7 @@ CREATE TABLE IF NOT EXISTS incidents (
 
 RUNBOOKS_SCHEMA = """
 CREATE TABLE IF NOT EXISTS runbooks (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    id SERIAL PRIMARY KEY,
     name TEXT NOT NULL,
     description TEXT NOT NULL,
     trigger_keywords TEXT NOT NULL,
@@ -39,7 +42,7 @@ CREATE TABLE IF NOT EXISTS runbooks (
 
 PATTERNS_SCHEMA = """
 CREATE TABLE IF NOT EXISTS patterns (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    id SERIAL PRIMARY KEY,
     pattern_type TEXT NOT NULL,
     description TEXT NOT NULL,
     keywords TEXT NOT NULL,
@@ -53,7 +56,7 @@ CREATE TABLE IF NOT EXISTS patterns (
 
 METRICS_SCHEMA = """
 CREATE TABLE IF NOT EXISTS metrics (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    id SERIAL PRIMARY KEY,
     timestamp TEXT NOT NULL,
     metric_name TEXT NOT NULL,
     value REAL NOT NULL,
@@ -105,7 +108,7 @@ CREATE TABLE IF NOT EXISTS investigations (
 
 CONTEXT_ENTRIES_SCHEMA = """
 CREATE TABLE IF NOT EXISTS context_entries (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    id SERIAL PRIMARY KEY,
     source TEXT NOT NULL,
     category TEXT NOT NULL,
     summary TEXT NOT NULL,
@@ -171,6 +174,7 @@ CREATE INDEX IF NOT EXISTS idx_investigations_finding ON investigations(finding_
 CREATE INDEX IF NOT EXISTS idx_context_entries_ts ON context_entries(timestamp DESC);
 CREATE INDEX IF NOT EXISTS idx_context_entries_ns ON context_entries(namespace);
 CREATE INDEX IF NOT EXISTS idx_views_owner ON views(owner);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_views_owner_title ON views(owner, title);
 CREATE INDEX IF NOT EXISTS idx_view_versions_view ON view_versions(view_id, version DESC);
 """
 
