@@ -136,6 +136,7 @@ def list_pods(namespace: str = "default", label_selector: str = "", field_select
                 "restarts": restarts,
                 "age": age(pod.metadata.creation_timestamp),
                 "node": pod.spec.node_name or "",
+                "logs": f"/logs/{ns}/{pod.metadata.name}",
             }
         )
     total = len(result.items)
@@ -153,6 +154,7 @@ def list_pods(namespace: str = "default", label_selector: str = "", field_select
                 {"id": "restarts", "header": "Restarts"},
                 {"id": "age", "header": "Age"},
                 {"id": "node", "header": "Node"},
+                {"id": "logs", "header": "Logs"},
             ],
             "rows": rows,
         }

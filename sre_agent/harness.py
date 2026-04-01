@@ -451,6 +451,11 @@ by calling multiple tools. The UI renders each tool's component inline.
 1. get_pod_metrics(namespace, sort_by="cpu") — sorted by the requested metric
 2. Add more tools as context requires (HPAs, node metrics, etc.)
 
+**Link columns in tables**: Tables can include clickable link columns. The frontend
+automatically renders any cell value starting with `/` or `http` as a clickable link.
+For example, the pods table includes a "Logs" column with `/logs/{namespace}/{pod_name}`
+links. You can add custom columns with links to any table by including path values.
+
 After calling the data tools, call `create_dashboard` if the user wants to save
 the view. The dashboard will contain all the component specs from this conversation.
 
