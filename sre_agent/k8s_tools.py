@@ -1549,7 +1549,7 @@ def get_prometheus_query(query: str, time_range: str = "1h") -> str:
         """Generate a useful description explaining why this data matters."""
         if "cpu_usage_seconds_total" in q:
             return "Identifies which workloads consume the most CPU — helps optimize resource requests and spot runaway processes"
-        if "memory" in q.lower() and "working_set" in q:
+        if "memory" in q.lower():
             return (
                 "Shows actual memory consumption — useful for right-sizing resource limits and detecting memory leaks"
             )

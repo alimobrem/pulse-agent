@@ -354,8 +354,7 @@ async def _run_agent_ws(
         # Check if a view with this title already exists — update instead of creating duplicate
         from . import db as _db
 
-        existing_views = _db.list_views(current_user) or []
-        existing = next((v for v in existing_views if v.get("title") == view_title), None)
+        existing = _db.get_view_by_title(current_user, view_title)
         if existing:
             # Update existing view with new components
             old_layout = existing.get("layout", [])
@@ -388,38 +387,33 @@ async def _run_agent_ws(
 
     # If update_view_widgets or add_widget_to_view was called, emit view_updated event
     _view_updated_ids = set()
+    # Only scan tool-result messages (role=user with tool_result blocks)
     for msg in messages:
         content = msg.get("content", "")
-        texts = []
         if isinstance(content, str):
-            texts.append(content)
+            all_text = content
         elif isinstance(content, list):
-            for block in content:
-                if isinstance(block, dict):
-                    texts.append(block.get("content", ""))
-                    texts.append(block.get("text", ""))
-        for text in texts:
-            if text and "__VIEW_UPDATED__" in text:
-                import re as _re2
+            all_text = " ".join(b.get("content", "") + " " + b.get("text", "") for b in content if isinstance(b, dict))
+        else:
+            continue
 
-                match = _re2.search(r"__VIEW_UPDATED__([^|]+)\|", text)
-                if match:
-                    _view_updated_ids.add(match.group(1))
-            if text and "__ADD_WIDGET__" in text:
-                import re as _re3
+        if "__VIEW_UPDATED__" in all_text:
+            match = re.search(r"__VIEW_UPDATED__([^|]+)\|", all_text)
+            if match:
+                _view_updated_ids.add(match.group(1))
 
-                match = _re3.search(r"__ADD_WIDGET__(.+)", text)
-                if match and session_components:
-                    vid = match.group(1).strip()
-                    _view_updated_ids.add(vid)
-                    # Add the last component to the view
-                    from . import db
+        if "__ADD_WIDGET__" in all_text and session_components:
+            match = re.search(r"__ADD_WIDGET__(\S+)", all_text)
+            if match:
+                vid = match.group(1).strip()
+                _view_updated_ids.add(vid)
+                from . import db as _db2
 
-                    latest_component = session_components[-1]
-                    view = db.get_view(vid, current_user)
-                    if view:
-                        new_layout = view.get("layout", []) + [latest_component]
-                        db.update_view(vid, current_user, layout=new_layout)
+                latest_component = session_components[-1]
+                view = _db2.get_view(vid, current_user)
+                if view:
+                    new_layout = view.get("layout", []) + [latest_component]
+                    _db2.update_view(vid, current_user, layout=new_layout)
 
     for vid in _view_updated_ids:
         try:

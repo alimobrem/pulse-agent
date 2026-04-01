@@ -304,6 +304,14 @@ def list_views(owner: str, limit: int = 50) -> list[dict]:
 
 
 @_db_safe
+def get_view_by_title(owner: str, title: str) -> dict | None:
+    """Find a view by title (lightweight — returns id and title only)."""
+    db = get_database()
+    row = db.fetchone("SELECT id, title FROM views WHERE owner = ? AND title = ? LIMIT 1", (owner, title))
+    return row
+
+
+@_db_safe
 def get_view(view_id: str, owner: str | None = None) -> dict | None:
     """Get a single view by ID. If owner is provided, checks ownership."""
     db = get_database()
