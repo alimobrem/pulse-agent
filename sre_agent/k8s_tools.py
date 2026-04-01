@@ -2886,34 +2886,114 @@ def get_resource_relationships(namespace: str, name: str, kind: str = "Pod") -> 
         pass
 
     text = "\n".join(lines)
-    items_data = []
-    if owners_chain:
-        items_data.append(
-            {
-                "name": f"Root: {current_kind}/{current_name}",
-                "status": "healthy",
-                "detail": " → ".join(reversed([o.split(" → ")[0] for o in owners_chain])),
-            }
-        )
-    for c in children[:10]:
+
+    # Build a visual relationship tree
+    _KIND_GVR_MAP = {
+        "Pod": "v1~pods",
+        "Deployment": "apps~v1~deployments",
+        "ReplicaSet": "apps~v1~replicasets",
+        "StatefulSet": "apps~v1~statefulsets",
+        "DaemonSet": "apps~v1~daemonsets",
+        "Job": "batch~v1~jobs",
+        "CronJob": "batch~v1~cronjobs",
+        "Service": "v1~services",
+        "Node": "v1~nodes",
+        "ConfigMap": "v1~configmaps",
+    }
+
+    tree_nodes = []
+    node_ids = set()
+
+    # Add the target resource
+    target_id = f"{kind}/{name}"
+    tree_nodes.append(
+        {
+            "id": target_id,
+            "label": target_id,
+            "kind": kind,
+            "name": name,
+            "namespace": namespace,
+            "status": "healthy",
+            "gvr": _KIND_GVR_MAP.get(kind, ""),
+            "children": [],
+            "detail": "",
+        }
+    )
+    node_ids.add(target_id)
+
+    # Build tree from owners_chain (walk up)
+    prev_id = target_id
+    for o in owners_chain:
+        parts = o.split(" → owned by → ")
+        if len(parts) == 2:
+            owner_str = parts[1]
+            owner_kind, owner_name = owner_str.split("/", 1) if "/" in owner_str else (owner_str, "")
+            owner_id = owner_str
+            if owner_id not in node_ids:
+                tree_nodes.append(
+                    {
+                        "id": owner_id,
+                        "label": owner_id,
+                        "kind": owner_kind,
+                        "name": owner_name,
+                        "namespace": namespace,
+                        "status": "healthy",
+                        "gvr": _KIND_GVR_MAP.get(owner_kind, ""),
+                        "children": [prev_id],
+                        "detail": "",
+                    }
+                )
+                node_ids.add(owner_id)
+            else:
+                # Add child to existing node
+                for n in tree_nodes:
+                    if n["id"] == owner_id and prev_id not in n["children"]:
+                        n["children"].append(prev_id)
+            prev_id = owner_id
+
+    root_id = prev_id  # topmost owner
+
+    # Add children (pods owned by target)
+    for c in children[:15]:
         parts = c.strip().split("(")
         cname = parts[0].strip().lstrip("→ ").strip()
-        status = parts[1].rstrip(")").split("=")[1] if len(parts) > 1 else "unknown"
-        items_data.append(
-            {
-                "name": cname,
-                "status": "healthy" if status == "Running" else "warning" if status == "Pending" else "error",
-                "detail": status,
-            }
-        )
+        status_str = parts[1].rstrip(")").split("=")[1] if len(parts) > 1 else "unknown"
+        child_kind = cname.split("/")[0] if "/" in cname else "Pod"
+        child_name = cname.split("/")[1] if "/" in cname else cname
+        child_id = cname
+        if child_id not in node_ids:
+            tree_nodes.append(
+                {
+                    "id": child_id,
+                    "label": child_id,
+                    "kind": child_kind,
+                    "name": child_name,
+                    "namespace": namespace,
+                    "status": "healthy"
+                    if status_str == "Running"
+                    else "warning"
+                    if status_str == "Pending"
+                    else "error",
+                    "gvr": _KIND_GVR_MAP.get(child_kind, ""),
+                    "children": [],
+                    "detail": status_str,
+                }
+            )
+            node_ids.add(child_id)
+        # Add to target's children
+        for n in tree_nodes:
+            if n["id"] == target_id and child_id not in n["children"]:
+                n["children"].append(child_id)
 
     component = (
         {
-            "kind": "status_list",
+            "kind": "relationship_tree",
             "title": f"Relationships — {kind}/{name}",
-            "items": items_data,
+            "description": f"Ownership hierarchy in namespace {namespace}",
+            "nodes": tree_nodes,
+            "rootId": root_id,
         }
-        if items_data
+        if tree_nodes
         else None
     )
 
