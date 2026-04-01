@@ -325,7 +325,7 @@ class TestGetClusterOperators:
                 }
             ],
         }
-        result = get_cluster_operators.call({})
+        result = _text(get_cluster_operators.call({}))
         assert "dns" in result
         assert "Available=True" in result
 

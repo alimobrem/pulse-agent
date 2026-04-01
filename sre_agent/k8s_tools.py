@@ -658,15 +658,20 @@ def get_cluster_operators() -> str:
         return f"Error ({e.status}): {e.reason}. This may not be an OpenShift cluster."
 
     lines = []
+    items = []
     for co in result.get("items", []):
         name = co["metadata"]["name"]
         conditions = {c["type"]: c["status"] for c in co.get("status", {}).get("conditions", [])}
+        available = conditions.get("Available", "?")
+        degraded = conditions.get("Degraded", "?")
         lines.append(
-            f"{name}  Available={conditions.get('Available', '?')}  "
-            f"Progressing={conditions.get('Progressing', '?')}  "
-            f"Degraded={conditions.get('Degraded', '?')}"
+            f"{name}  Available={available}  Progressing={conditions.get('Progressing', '?')}  Degraded={degraded}"
         )
-    return "\n".join(lines) or "No ClusterOperators found."
+        status = "error" if degraded == "True" else ("healthy" if available == "True" else "warning")
+        items.append({"name": name, "status": status, "detail": f"Available={available}"})
+    text = "\n".join(lines) or "No ClusterOperators found."
+    component = {"kind": "status_list", "title": f"Cluster Operators ({len(items)})", "items": items} if items else None
+    return (text, component)
 
 
 # ---------------------------------------------------------------------------
