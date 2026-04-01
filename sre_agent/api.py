@@ -1782,7 +1782,7 @@ async def rest_claim_shared_view(
 @app.get("/query")
 async def rest_query(
     q: str = Query(..., description="PromQL query string"),
-    range: str = Query("", alias="range", description="Time range, e.g. '1h', '24h'"),
+    time_range: str = Query("", alias="range", description="Time range, e.g. '1h', '24h'"),
     authorization: str | None = Header(None),
     _token: str | None = Query(None, alias="token"),
 ):
@@ -1794,7 +1794,7 @@ async def rest_query(
 
     from .k8s_tools import get_prometheus_query
 
-    result = get_prometheus_query.call({"query": q, "time_range": range})
+    result = get_prometheus_query.call({"query": q, "time_range": time_range})
 
     if isinstance(result, tuple) and len(result) == 2:
         _text_result, component = result
