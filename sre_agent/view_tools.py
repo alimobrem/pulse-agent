@@ -2,25 +2,25 @@
 
 from __future__ import annotations
 
-import threading
 import uuid
 
 from anthropic import beta_tool
 
 from .tool_registry import register_tool
 
-# Thread-local storage for the current user identity (set by API layer)
-_current_user = threading.local()
+# Module-level current user identity (set by API layer before agent runs)
+_current_user_id: str = "anonymous"
 
 
 def set_current_user(owner: str) -> None:
     """Set the current user for view tools (called by API layer per-request)."""
-    _current_user.owner = owner
+    global _current_user_id
+    _current_user_id = owner
 
 
 def get_current_user() -> str:
     """Get the current user identity."""
-    return getattr(_current_user, "owner", "anonymous")
+    return _current_user_id
 
 
 @beta_tool
