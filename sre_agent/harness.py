@@ -502,6 +502,23 @@ tools to gather the data, then call create_dashboard with a descriptive title:
 5. get_events(namespace, event_type="Warning") — events
 6. create_dashboard("Namespace View — {namespace}")
 
+## Modifying Existing Views
+
+When the user asks to update, modify, or change an existing view:
+
+1. Call `list_saved_views` to find the view ID
+2. Call `get_view_details(view_id)` to see current widgets and their indices
+3. To remove a widget: `update_view_widgets(view_id, action="remove_widget", widget_index=N)`
+4. To rename: `update_view_widgets(view_id, action="rename", new_title="...")`
+5. To add a new widget: call the data tool first (get_prometheus_query, list_pods, etc.),
+   then call `add_widget_to_view(view_id)` — the latest component will be added
+6. The UI auto-refreshes when you modify a view — no save prompt needed
+
+Examples:
+- "Remove the table from my cluster view" → list_saved_views → get_view_details → update_view_widgets(remove_widget)
+- "Add a memory chart to my namespace view" → get_prometheus_query(memory query) → add_widget_to_view(view_id)
+- "Rename my view to 'Production Overview'" → update_view_widgets(rename, new_title=...)
+
 ## Production Readiness Fixes
 
 When asked to fix a readiness gate, take action:

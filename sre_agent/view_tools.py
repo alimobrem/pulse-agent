@@ -152,6 +152,94 @@ def list_saved_views() -> str:
     return (text, component)
 
 
+@beta_tool
+def get_view_details(view_id: str) -> str:
+    """Get details of a saved view including its widget list. Use this before modifying a view to understand its current state.
+
+    Args:
+        view_id: The view ID (e.g. 'cv-abc123'). Use list_saved_views first to find IDs.
+    """
+    from . import db
+
+    owner = get_current_user()
+    view = db.get_view(view_id, owner)
+    if not view:
+        return f"View '{view_id}' not found or you don't have access to it."
+
+    widgets = view.get("layout", [])
+    lines = [f"View: {view['title']}", f"Description: {view.get('description', '')}", f"Widgets ({len(widgets)}):"]
+    for i, w in enumerate(widgets):
+        kind = w.get("kind", "unknown")
+        title = w.get("title", w.get("kind", "untitled"))
+        lines.append(f"  [{i}] {kind}: {title}")
+
+    return "\n".join(lines)
+
+
+@beta_tool
+def update_view_widgets(
+    view_id: str,
+    action: str,
+    widget_index: int = -1,
+    new_title: str = "",
+    new_description: str = "",
+) -> str:
+    """Modify an existing view — remove a widget, rename the view, or update its description. The UI will auto-refresh after changes.
+
+    Args:
+        view_id: The view ID (e.g. 'cv-abc123').
+        action: One of: 'remove_widget', 'rename', 'update_description'.
+        widget_index: Index of the widget to remove (only for 'remove_widget'). Use get_view_details to see indices.
+        new_title: New title for the view (only for 'rename').
+        new_description: New description (only for 'update_description').
+    """
+    from . import db
+
+    owner = get_current_user()
+    view = db.get_view(view_id, owner)
+    if not view:
+        return f"View '{view_id}' not found or you don't have access to it."
+
+    if action == "remove_widget":
+        layout = view.get("layout", [])
+        if widget_index < 0 or widget_index >= len(layout):
+            return f"Invalid widget index {widget_index}. View has {len(layout)} widgets (0-{len(layout) - 1})."
+        removed = layout[widget_index]
+        removed_title = removed.get("title", removed.get("kind", "widget"))
+        new_layout = [w for i, w in enumerate(layout) if i != widget_index]
+        db.update_view(view_id, owner, layout=new_layout)
+        # Return a marker so the API layer can emit a view_updated event
+        return f"__VIEW_UPDATED__{view_id}|Removed widget [{widget_index}]: {removed_title}. View now has {len(new_layout)} widgets."
+
+    elif action == "rename":
+        if not new_title:
+            return "Error: new_title is required for rename action."
+        db.update_view(view_id, owner, title=new_title)
+        return f"__VIEW_UPDATED__{view_id}|Renamed view to '{new_title}'."
+
+    elif action == "update_description":
+        db.update_view(view_id, owner, description=new_description)
+        return f"__VIEW_UPDATED__{view_id}|Updated view description."
+
+    else:
+        return f"Unknown action '{action}'. Use: remove_widget, rename, update_description."
+
+
+@beta_tool
+def add_widget_to_view(view_id: str) -> str:
+    """Add the most recent component from this conversation to an existing view. Call this AFTER calling a data tool (like get_prometheus_query, list_pods, etc.) that generated a component. The UI will auto-refresh.
+
+    Args:
+        view_id: The view ID to add the widget to (e.g. 'cv-abc123').
+    """
+    # Return a marker — the API layer will intercept this and add the latest
+    # session component to the view
+    return f"__ADD_WIDGET__{view_id}"
+
+
 register_tool(create_dashboard)
 register_tool(namespace_summary)
 register_tool(list_saved_views)
+register_tool(get_view_details)
+register_tool(update_view_widgets)
+register_tool(add_widget_to_view)

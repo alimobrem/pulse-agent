@@ -28,7 +28,14 @@ from .k8s_tools import WRITE_TOOLS
 from .predict_tools import PREDICT_TOOLS
 from .runbooks import ALERT_TRIAGE_CONTEXT, RUNBOOKS
 from .timeline_tools import TIMELINE_TOOLS
-from .view_tools import create_dashboard, list_saved_views, namespace_summary
+from .view_tools import (
+    add_widget_to_view,
+    create_dashboard,
+    get_view_details,
+    list_saved_views,
+    namespace_summary,
+    update_view_widgets,
+)
 
 ALL_TOOLS = (
     _K8S_TOOLS
@@ -37,7 +44,15 @@ ALL_TOOLS = (
     + TIMELINE_TOOLS
     + GIT_TOOLS
     + PREDICT_TOOLS
-    + [request_security_scan, create_dashboard, namespace_summary, list_saved_views]
+    + [
+        request_security_scan,
+        create_dashboard,
+        namespace_summary,
+        list_saved_views,
+        get_view_details,
+        update_view_widgets,
+        add_widget_to_view,
+    ]
 )
 
 # Add tools that require confirmation

@@ -365,6 +365,47 @@ async def _run_agent_ws(
             }
         )
 
+    # If update_view_widgets or add_widget_to_view was called, emit view_updated event
+    _view_updated_ids = set()
+    for msg in messages:
+        content = msg.get("content", "")
+        texts = []
+        if isinstance(content, str):
+            texts.append(content)
+        elif isinstance(content, list):
+            for block in content:
+                if isinstance(block, dict):
+                    texts.append(block.get("content", ""))
+                    texts.append(block.get("text", ""))
+        for text in texts:
+            if text and "__VIEW_UPDATED__" in text:
+                import re as _re2
+
+                match = _re2.search(r"__VIEW_UPDATED__([^|]+)\|", text)
+                if match:
+                    _view_updated_ids.add(match.group(1))
+            if text and "__ADD_WIDGET__" in text:
+                import re as _re3
+
+                match = _re3.search(r"__ADD_WIDGET__(.+)", text)
+                if match and session_components:
+                    vid = match.group(1).strip()
+                    _view_updated_ids.add(vid)
+                    # Add the last component to the view
+                    from . import db
+
+                    latest_component = session_components[-1]
+                    view = db.get_view(vid, current_user)
+                    if view:
+                        new_layout = view.get("layout", []) + [latest_component]
+                        db.update_view(vid, current_user, layout=new_layout)
+
+    for vid in _view_updated_ids:
+        try:
+            await websocket.send_json({"type": "view_updated", "viewId": vid})
+        except Exception:
+            pass
+
     # Evaluate the interaction for memory scoring
     if os.environ.get("PULSE_AGENT_MEMORY", "1") == "1":
         try:
