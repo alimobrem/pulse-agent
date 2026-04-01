@@ -1537,6 +1537,22 @@ def get_prometheus_query(query: str, time_range: str = "1h") -> str:
         metric = _re.search(r"([a-z_]+)\{", q) or _re.search(r"([a-z_]+)\(", q) or _re.search(r"^([a-z_]+)", q)
         return metric.group(1).replace("_", " ").title() if metric else q[:60]
 
+    def _desc_from_query(q: str, tr: str, count: int) -> str:
+        """Generate a useful description explaining why this data matters."""
+        if "cpu_usage_seconds_total" in q:
+            return "Identifies which workloads consume the most CPU — helps optimize resource requests and spot runaway processes"
+        if "memory" in q.lower() and "working_set" in q:
+            return (
+                "Shows actual memory consumption — useful for right-sizing resource limits and detecting memory leaks"
+            )
+        if "node_cpu_seconds_total" in q:
+            return "Tracks node-level CPU saturation — high utilization may require scaling or workload rebalancing"
+        if "node_memory" in q.lower():
+            return "Monitors available memory per node — low availability risks OOM kills and pod evictions"
+        if "up" in q and "up{" not in q:
+            return "Service availability — 1 means up, 0 means the target is down or unreachable"
+        return f"{'Time series' if tr else 'Snapshot'} with {count} {'series' if tr else 'results'}"
+
     lines = []
     if result_type == "matrix":
         # Range query → build a ChartSpec
@@ -1559,6 +1575,7 @@ def get_prometheus_query(query: str, time_range: str = "1h") -> str:
             "kind": "chart",
             "chartType": "line",
             "title": _title_from_query(query),
+            "description": _desc_from_query(query, time_range, len(series)),
             "series": series,
             "yAxisLabel": "",
             "height": 300,
@@ -1586,6 +1603,7 @@ def get_prometheus_query(query: str, time_range: str = "1h") -> str:
             {
                 "kind": "data_table",
                 "title": _title_from_query(query),
+                "description": _desc_from_query(query, "", len(rows)),
                 "columns": [{"id": "metric", "header": "Metric"}, {"id": "value", "header": "Value"}],
                 "rows": rows,
                 "query": query,
