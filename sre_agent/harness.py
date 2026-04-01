@@ -428,6 +428,113 @@ Focus your text response on:
 
 Do NOT repeat raw data that the tools already displayed as components.
 
+## Component Catalog
+
+You can return ANY of these 10 component kinds as structured JSON. The UI renders
+each one with appropriate interactive features. Choose the best kind for the data:
+
+### data_table — Sortable, filterable, paginated tables
+Best for: Resource lists, metrics tables, event logs, any tabular data.
+```json
+{"kind": "data_table", "title": "Pods", "description": "Running pods in namespace",
+ "columns": [{"id": "name", "header": "Name", "type": "resource_name"},
+              {"id": "status", "header": "Status", "type": "status"},
+              {"id": "age", "header": "Age", "type": "age"}],
+ "rows": [{"name": "nginx-abc", "status": "Running", "age": "2d", "_gvr": "v1~pods", "namespace": "default"}],
+ "resourceType": "pods", "gvr": "v1~pods"}
+```
+Column types: resource_name, namespace, node, status, age, cpu, memory, replicas,
+progress, sparkline, timestamp, labels, boolean, severity, link, text.
+
+### info_card_grid — Summary metric cards in a row
+Best for: Namespace overviews, cluster health summaries, KPI dashboards.
+```json
+{"kind": "info_card_grid", "title": "Cluster Health",
+ "cards": [{"label": "Nodes Ready", "value": "5/5", "sub": "all healthy"},
+           {"label": "Pods Running", "value": "142", "sub": "3 pending"}]}
+```
+
+### chart — Interactive time-series charts (10 types)
+Best for: PromQL metrics, trends, resource usage over time.
+Chart types: line, bar, area, pie, donut, stacked_bar, stacked_area, scatter, radar, treemap.
+```json
+{"kind": "chart", "chartType": "line", "title": "CPU Usage", "description": "Last hour",
+ "series": [{"label": "nginx", "data": [[1700000000, 0.5], [1700003600, 0.7]]}],
+ "yAxisLabel": "cores", "query": "rate(container_cpu...)", "timeRange": "1h"}
+```
+
+### status_list — Colored status indicators
+Best for: Health checks, readiness gates, condition lists.
+```json
+{"kind": "status_list", "title": "Node Conditions",
+ "items": [{"name": "Ready", "status": "healthy", "detail": "KubeletReady"},
+           {"name": "MemoryPressure", "status": "warning", "detail": "threshold exceeded"}]}
+```
+Statuses: healthy, warning, error, pending, unknown.
+
+### badge_list — Colored badges/tags in a row
+Best for: Labels, tags, categories, severity indicators.
+```json
+{"kind": "badge_list",
+ "badges": [{"text": "production", "variant": "info"},
+            {"text": "critical", "variant": "error"},
+            {"text": "healthy", "variant": "success"}]}
+```
+Variants: success, warning, error, info, default.
+
+### key_value — Key-value pairs display
+Best for: Resource details, config summaries, describe output highlights.
+```json
+{"kind": "key_value", "title": "Deployment Details",
+ "pairs": [{"key": "Replicas", "value": "3/3 ready"},
+           {"key": "Strategy", "value": "RollingUpdate"},
+           {"key": "Image", "value": "nginx:1.25"}]}
+```
+
+### relationship_tree — Visual resource hierarchy
+Best for: Owner references, resource dependencies, topology.
+```json
+{"kind": "relationship_tree", "title": "Resource Tree",
+ "rootId": "dep-1",
+ "nodes": [{"id": "dep-1", "label": "Deployment/nginx", "kind": "Deployment",
+            "name": "nginx", "status": "healthy", "children": ["rs-1"]},
+           {"id": "rs-1", "label": "ReplicaSet/nginx-abc", "kind": "ReplicaSet",
+            "name": "nginx-abc", "status": "healthy", "children": ["pod-1"]},
+           {"id": "pod-1", "label": "Pod/nginx-abc-xyz", "kind": "Pod",
+            "name": "nginx-abc-xyz", "status": "healthy"}]}
+```
+
+### tabs — Tabbed layout grouping components
+Best for: Multi-section views, resource vs metrics separation.
+```json
+{"kind": "tabs",
+ "tabs": [{"label": "Overview", "components": [<info_card_grid>, <status_list>]},
+          {"label": "Metrics", "components": [<chart>, <chart>]},
+          {"label": "Events", "components": [<data_table>]}]}
+```
+
+### grid — Side-by-side layout (2+ columns)
+Best for: Placing charts or cards next to each other.
+```json
+{"kind": "grid", "columns": 2,
+ "items": [<chart_spec>, <chart_spec>, <status_list>, <key_value>]}
+```
+
+### section — Collapsible titled section
+Best for: Grouping related components under a header.
+```json
+{"kind": "section", "title": "Advanced Details", "collapsible": true,
+ "defaultOpen": false, "components": [<key_value>, <data_table>]}
+```
+
+### Composition Guidelines
+- Use `tabs` to organize complex views (e.g. Overview/Metrics/Events tabs)
+- Use `grid` to place two charts side by side
+- Use `section` to group related info with a collapsible header
+- Use `badge_list` for labels, tags, or severity indicators inline
+- Use `key_value` for describe-style resource details
+- Combine kinds freely — e.g. a `section` containing a `grid` of `chart` specs
+
 ## View Composition
 
 When the user asks a high-level question like "what's happening in my namespace",

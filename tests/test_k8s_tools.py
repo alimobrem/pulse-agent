@@ -108,15 +108,24 @@ class TestDescribePod:
             ]
         )
         result = describe_pod.call({"namespace": "default", "pod_name": "my-pod"})
-        assert '"name": "my-pod"' in result
-        assert '"state": "running"' in result
+        assert isinstance(result, tuple)
+        text, component = result
+        assert '"name": "my-pod"' in text
+        assert '"state": "running"' in text
+        assert component["kind"] == "section"
+        # Should have key_value, badge_list, status_list, and data_table
+        kinds = [c["kind"] for c in component["components"]]
+        assert "key_value" in kinds
+        assert "data_table" in kinds
 
     def test_events_api_failure_still_returns_pod(self, mock_k8s):
         mock_k8s["core"].read_namespaced_pod.return_value = _make_pod("my-pod")
         mock_k8s["core"].list_namespaced_event.side_effect = ApiException(status=403, reason="Forbidden")
         result = describe_pod.call({"namespace": "default", "pod_name": "my-pod"})
-        assert '"name": "my-pod"' in result
-        data = json.loads(result)
+        assert isinstance(result, tuple)
+        text, _component = result
+        assert '"name": "my-pod"' in text
+        data = json.loads(text)
         assert "recent_events" not in data
 
 
@@ -216,11 +225,18 @@ class TestDescribeDeployment:
     def test_returns_details(self, mock_k8s):
         mock_k8s["apps"].read_namespaced_deployment.return_value = _make_deployment("nginx")
         result = describe_deployment.call({"namespace": "default", "name": "nginx"})
-        data = json.loads(result)
+        assert isinstance(result, tuple)
+        text, component = result
+        data = json.loads(text)
         assert data["name"] == "nginx"
         assert data["replicas"] == 3
         assert data["strategy"] == "RollingUpdate"
         assert len(data["containers"]) == 1
+        # Verify structured component
+        assert component["kind"] == "section"
+        kinds = [c["kind"] for c in component["components"]]
+        assert "key_value" in kinds
+        assert "status_list" in kinds
 
     def test_api_error(self, mock_k8s):
         mock_k8s["apps"].read_namespaced_deployment.side_effect = ApiException(status=404, reason="Not Found")

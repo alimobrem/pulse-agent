@@ -241,7 +241,78 @@ def describe_pod(namespace: str, pod_name: str) -> str:
             )[:10]
         ]
 
-    return json.dumps(info, indent=2, default=str)
+    text = json.dumps(info, indent=2, default=str)
+
+    # Build structured components for rich UI rendering
+    details_component = {
+        "kind": "key_value",
+        "title": f"Pod — {pod_name}",
+        "pairs": [
+            {"key": "Namespace", "value": str(info["namespace"])},
+            {"key": "Node", "value": str(info.get("node", ""))},
+            {"key": "Status", "value": str(info["status"])},
+            {"key": "IP", "value": str(info.get("ip", ""))},
+            {"key": "QoS Class", "value": str(info.get("qos_class", ""))},
+        ],
+    }
+
+    components: list[dict] = [details_component]
+
+    # Labels as badges
+    labels = info.get("labels") or {}
+    if labels:
+        components.append(
+            {
+                "kind": "badge_list",
+                "badges": [{"text": f"{k}={v}", "variant": "info"} for k, v in list(labels.items())[:10]],
+            }
+        )
+
+    # Conditions as status list
+    if info["conditions"]:
+        components.append(
+            {
+                "kind": "status_list",
+                "title": "Conditions",
+                "items": [
+                    {
+                        "name": c["type"],
+                        "status": "healthy" if c["status"] == "True" else "error",
+                        "detail": c.get("reason") or c.get("message") or "",
+                    }
+                    for c in info["conditions"]
+                ],
+            }
+        )
+
+    # Containers as table
+    if info["containers"]:
+        components.append(
+            {
+                "kind": "data_table",
+                "title": "Containers",
+                "columns": [
+                    {"id": "name", "header": "Name"},
+                    {"id": "image", "header": "Image"},
+                    {"id": "state", "header": "State", "type": "status"},
+                    {"id": "ready", "header": "Ready", "type": "boolean"},
+                    {"id": "restarts", "header": "Restarts"},
+                    {"id": "reason", "header": "Reason"},
+                ],
+                "rows": info["containers"],
+            }
+        )
+
+    # Wrap in a section
+    component = {
+        "kind": "section",
+        "title": f"Pod Details — {pod_name}",
+        "collapsible": False,
+        "defaultOpen": True,
+        "components": components,
+    }
+
+    return (text, component)
 
 
 @beta_tool
@@ -537,6 +608,10 @@ def describe_deployment(namespace: str, name: str) -> str:
             }
         )
 
+    s = dep.status
+    ready = s.ready_replicas or 0
+    desired = s.replicas or 0
+
     info = {
         "name": dep.metadata.name,
         "namespace": dep.metadata.namespace,
@@ -550,7 +625,71 @@ def describe_deployment(namespace: str, name: str) -> str:
         ],
         "containers": containers,
     }
-    return json.dumps(info, indent=2, default=str)
+    text = json.dumps(info, indent=2, default=str)
+
+    components: list[dict] = [
+        {
+            "kind": "key_value",
+            "title": f"Deployment — {name}",
+            "pairs": [
+                {"key": "Namespace", "value": str(dep.metadata.namespace)},
+                {"key": "Replicas", "value": f"{ready}/{desired} ready"},
+                {"key": "Strategy", "value": info["strategy"]},
+                {
+                    "key": "Selector",
+                    "value": ", ".join(f"{k}={v}" for k, v in (dep.spec.selector.match_labels or {}).items()),
+                },
+                {"key": "Age", "value": age(dep.metadata.creation_timestamp)},
+            ],
+        },
+    ]
+
+    labels = info.get("labels") or {}
+    if labels:
+        components.append(
+            {
+                "kind": "badge_list",
+                "badges": [{"text": f"{k}={v}", "variant": "info"} for k, v in list(labels.items())[:10]],
+            }
+        )
+
+    if info["conditions"]:
+        components.append(
+            {
+                "kind": "status_list",
+                "title": "Conditions",
+                "items": [
+                    {
+                        "name": c["type"],
+                        "status": "healthy" if c["status"] == "True" else "warning",
+                        "detail": c.get("reason") or c.get("message") or "",
+                    }
+                    for c in info["conditions"]
+                ],
+            }
+        )
+
+    if containers:
+        components.append(
+            {
+                "kind": "data_table",
+                "title": "Containers",
+                "columns": [
+                    {"id": "name", "header": "Name"},
+                    {"id": "image", "header": "Image"},
+                ],
+                "rows": [{"name": c["name"], "image": c["image"]} for c in containers],
+            }
+        )
+
+    component = {
+        "kind": "section",
+        "title": f"Deployment Details — {name}",
+        "collapsible": False,
+        "defaultOpen": True,
+        "components": components,
+    }
+    return (text, component)
 
 
 @beta_tool

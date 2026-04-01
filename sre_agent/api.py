@@ -9,6 +9,7 @@ with the OpenShift Pulse web UI. V2 adds /ws/monitor for autonomous scanning.
 from __future__ import annotations
 
 import asyncio
+import collections
 import concurrent.futures
 import json
 import logging
@@ -617,16 +618,14 @@ async def websocket_agent(websocket: WebSocket, mode: str):
     # Rate limiting state
     message_timestamps: list[float] = []
 
-    # Extract user identity for view tools (best-effort, fall back to token hash)
+    # Extract user identity for view tools
     try:
         ws_user = _get_current_user(
-            authorization=websocket.headers.get("authorization"),
             x_forwarded_access_token=websocket.headers.get("x-forwarded-access-token"),
         )
     except HTTPException:
-        import hashlib
-
-        ws_user = f"user-{hashlib.sha256(client_token.encode()).hexdigest()[:16]}"
+        logger.warning("WebSocket session %s: no valid user token, view operations will be unavailable", session_id)
+        ws_user = "anonymous"
 
     if mode == "sre":
         system_prompt = SRE_SYSTEM_PROMPT
@@ -830,13 +829,11 @@ async def websocket_auto_agent(websocket: WebSocket):
     # Extract user identity for view tools
     try:
         ws_user = _get_current_user(
-            authorization=websocket.headers.get("authorization"),
             x_forwarded_access_token=websocket.headers.get("x-forwarded-access-token"),
         )
     except HTTPException:
-        import hashlib
-
-        ws_user = f"user-{hashlib.sha256(client_token.encode()).hexdigest()[:16]}"
+        logger.warning("WebSocket session %s: no valid user token, view operations will be unavailable", session_id)
+        ws_user = "anonymous"
 
     # Message queue for incoming messages while agent is running
     incoming: asyncio.Queue = asyncio.Queue()
@@ -1527,24 +1524,25 @@ async def eval_status(
 # ---------------------------------------------------------------------------
 
 
-_user_cache: dict[str, tuple[str, float]] = {}
+_user_cache: collections.OrderedDict[str, tuple[str, float]] = collections.OrderedDict()
 _USER_CACHE_TTL = 60  # seconds
 _USER_CACHE_MAX = 500  # evict oldest entries beyond this
 
 
 def _get_current_user(
-    authorization: str | None = None,
     x_forwarded_access_token: str | None = None,
 ) -> str:
-    """Extract username from OpenShift OAuth token or fall back to dev user.
+    """Extract username from OpenShift OAuth token via X-Forwarded-Access-Token.
 
     In production, the OAuth proxy sets X-Forwarded-Access-Token. We use the
     Kubernetes TokenReview API to resolve it to a username. Results are cached
     for 60 seconds to avoid per-request K8s API calls. In local dev,
     PULSE_AGENT_DEV_USER overrides this.
 
-    Raises HTTPException(401) if no token is provided — anonymous access is
-    not allowed for view operations.
+    Tokens that fail TokenReview are REJECTED with 401 — no fallback identity
+    is generated, to prevent identity spoofing via forged tokens.
+
+    Raises HTTPException(401) if token is missing or unverifiable.
     """
     import hashlib
 
@@ -1553,19 +1551,23 @@ def _get_current_user(
         return dev_user
 
     token = x_forwarded_access_token or ""
-    if not token and authorization and authorization.startswith("Bearer "):
-        token = authorization[7:]
 
     if not token:
-        raise HTTPException(status_code=401, detail="User identity required for view operations")
+        raise HTTPException(
+            status_code=401, detail="User identity required. X-Forwarded-Access-Token header is missing."
+        )
 
-    # Check cache
-    token_hash = hashlib.sha256(token.encode()).hexdigest()[:16]
+    # Use full hash to prevent collision attacks (was [:16])
+    token_hash = hashlib.sha256(token.encode()).hexdigest()
+
+    # Check cache (evict if expired)
     cached = _user_cache.get(token_hash)
-    if cached and (time.time() - cached[1]) < _USER_CACHE_TTL:
-        return cached[0]
+    if cached:
+        if (time.time() - cached[1]) < _USER_CACHE_TTL:
+            return cached[0]
+        _user_cache.pop(token_hash, None)
 
-    # Try to resolve via Kubernetes TokenReview
+    # Resolve via Kubernetes TokenReview — reject if unverifiable
     try:
         from kubernetes import client as k8s_client
 
@@ -1580,20 +1582,17 @@ def _get_current_user(
             _cache_user(token_hash, username)
             return username
     except Exception:
-        logger.debug("TokenReview failed, using token hash as user identity")
+        logger.warning("TokenReview API unavailable, rejecting token")
 
-    # Fallback: use a hash of the token as a stable user identifier
-    fallback = f"user-{token_hash}"
-    _cache_user(token_hash, fallback)
-    return fallback
+    raise HTTPException(status_code=401, detail="Token could not be verified. TokenReview rejected or unavailable.")
 
 
 def _cache_user(token_hash: str, username: str) -> None:
-    """Cache a user identity with bounded eviction."""
+    """Cache a user identity with O(1) LRU eviction."""
     _user_cache[token_hash] = (username, time.time())
-    if len(_user_cache) > _USER_CACHE_MAX:
-        oldest = min(_user_cache, key=lambda k: _user_cache[k][1])
-        _user_cache.pop(oldest, None)
+    _user_cache.move_to_end(token_hash)
+    while len(_user_cache) > _USER_CACHE_MAX:
+        _user_cache.popitem(last=False)
 
 
 @app.get("/views")
@@ -1606,7 +1605,7 @@ async def rest_list_views(
     _verify_rest_token(authorization, token)
     from . import db
 
-    owner = _get_current_user(authorization, x_forwarded_access_token)
+    owner = _get_current_user(x_forwarded_access_token)
     views = db.list_views(owner)
     return {"views": views or [], "owner": owner}
 
@@ -1624,7 +1623,7 @@ async def rest_get_view(
 
     from . import db
 
-    owner = _get_current_user(authorization, x_forwarded_access_token)
+    owner = _get_current_user(x_forwarded_access_token)
     view = db.get_view(view_id, owner)
     if view is None:
         return JSONResponse(status_code=404, content={"error": "View not found"})
@@ -1644,7 +1643,7 @@ async def rest_create_view(
 
     from . import db
 
-    owner = _get_current_user(authorization, x_forwarded_access_token)
+    owner = _get_current_user(x_forwarded_access_token)
     body = await request.json()
 
     view_id = body.get("id", f"cv-{uuid.uuid4().hex[:12]}")
@@ -1686,7 +1685,7 @@ async def rest_update_view(
 
     from . import db
 
-    owner = _get_current_user(authorization, x_forwarded_access_token)
+    owner = _get_current_user(x_forwarded_access_token)
     body = await request.json()
 
     # Extract only allowed fields — never pass raw body as **kwargs
@@ -1714,7 +1713,7 @@ async def rest_delete_view(
 
     from . import db
 
-    owner = _get_current_user(authorization, x_forwarded_access_token)
+    owner = _get_current_user(x_forwarded_access_token)
     deleted = db.delete_view(view_id, owner)
     if not deleted:
         return JSONResponse(status_code=404, content={"error": "View not found or not owned by you"})
@@ -1735,7 +1734,7 @@ async def rest_clone_view(
 
     from . import db
 
-    owner = _get_current_user(authorization, x_forwarded_access_token)
+    owner = _get_current_user(x_forwarded_access_token)
     # Verify the caller owns the source view
     source = db.get_view(view_id, owner)
     if source is None:
@@ -1762,7 +1761,7 @@ async def rest_share_view(
 
     from . import db
 
-    owner = _get_current_user(authorization, x_forwarded_access_token)
+    owner = _get_current_user(x_forwarded_access_token)
     view = db.get_view(view_id, owner)
     if view is None:
         return JSONResponse(status_code=404, content={"error": "View not found or not owned by you"})
@@ -1816,7 +1815,7 @@ async def rest_claim_shared_view(
     if not hmac.compare_digest(signature, expected_sig):
         return JSONResponse(status_code=400, content={"error": "Invalid share token"})
 
-    owner = _get_current_user(authorization, x_forwarded_access_token)
+    owner = _get_current_user(x_forwarded_access_token)
     new_id = db.clone_view(view_id, owner)
     if new_id is None:
         return JSONResponse(status_code=404, content={"error": "Source view not found"})
@@ -1839,7 +1838,7 @@ async def rest_view_versions(
     _verify_rest_token(authorization, token)
     from . import db
 
-    owner = _get_current_user(authorization, x_forwarded_access_token)
+    owner = _get_current_user(x_forwarded_access_token)
     # Verify ownership
     view = db.get_view(view_id, owner)
     if not view:
@@ -1864,7 +1863,7 @@ async def rest_undo_view(
 
     from . import db
 
-    owner = _get_current_user(authorization, x_forwarded_access_token)
+    owner = _get_current_user(x_forwarded_access_token)
     body = await request.json()
     version = body.get("version")
 

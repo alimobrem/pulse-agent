@@ -219,32 +219,177 @@ class TestGetCurrentUser:
 
         os.environ.pop("PULSE_AGENT_DEV_USER", None)
         with pytest.raises(HTTPException) as exc_info:
-            _get_current_user(authorization=None, x_forwarded_access_token=None)
+            _get_current_user(x_forwarded_access_token=None)
         assert exc_info.value.status_code == 401
 
-    def test_bearer_token_fallback(self):
+    def test_no_authorization_parameter(self):
+        """Regression: _get_current_user must NOT accept an authorization param.
+
+        The authorization header contains the shared WS agent token, not a
+        per-user OAuth token. Accepting it would risk all REST users sharing
+        the same identity (hash of the shared token), breaking view isolation.
+        """
+        import inspect
+
+        from sre_agent.api import _get_current_user
+
+        sig = inspect.signature(_get_current_user)
+        assert "authorization" not in sig.parameters, (
+            "_get_current_user must not accept 'authorization' — "
+            "it contains the shared WS token, not the user's OAuth token"
+        )
+
+    def test_different_tokens_get_different_identities(self):
+        """Two different OAuth tokens must produce different user identities."""
+        from unittest.mock import MagicMock, patch
+
+        from sre_agent.api import _get_current_user, _user_cache
+
+        os.environ.pop("PULSE_AGENT_DEV_USER", None)
+        _user_cache.clear()
+
+        mock_result = MagicMock()
+        mock_result.status.authenticated = True
+        with patch("sre_agent.k8s_client._load_k8s"), patch("kubernetes.client") as mock_k8s:
+            mock_k8s.AuthenticationV1Api.return_value.create_token_review.return_value = mock_result
+
+            mock_result.status.user.username = "alice"
+            alice = _get_current_user(x_forwarded_access_token="alice-oauth-token")
+
+            mock_result.status.user.username = "bob"
+            bob = _get_current_user(x_forwarded_access_token="bob-oauth-token")
+
+        assert alice == "alice"
+        assert bob == "bob"
+        assert alice != bob
+        _user_cache.clear()
+
+    def test_same_token_returns_cached_user(self):
+        """Same token should return the cached user on second call."""
+        from unittest.mock import MagicMock, patch
+
+        from sre_agent.api import _get_current_user, _user_cache
+
+        os.environ.pop("PULSE_AGENT_DEV_USER", None)
+        _user_cache.clear()
+
+        mock_result = MagicMock()
+        mock_result.status.authenticated = True
+        mock_result.status.user.username = "alice"
+        with patch("sre_agent.k8s_client._load_k8s"), patch("kubernetes.client") as mock_k8s:
+            mock_k8s.AuthenticationV1Api.return_value.create_token_review.return_value = mock_result
+            user1 = _get_current_user(x_forwarded_access_token="same-token")
+            user2 = _get_current_user(x_forwarded_access_token="same-token")
+
+        assert user1 == user2 == "alice"
+        _user_cache.clear()
+
+    def test_unverifiable_token_raises_401(self):
+        """Tokens that fail TokenReview must be rejected, not given fallback identity."""
+        from unittest.mock import MagicMock, patch
+
+        from fastapi import HTTPException
+
+        from sre_agent.api import _get_current_user, _user_cache
+
+        os.environ.pop("PULSE_AGENT_DEV_USER", None)
+        _user_cache.clear()
+
+        mock_result = MagicMock()
+        mock_result.status.authenticated = False
+        with patch("sre_agent.k8s_client._load_k8s"), patch("kubernetes.client") as mock_k8s:
+            mock_k8s.AuthenticationV1Api.return_value.create_token_review.return_value = mock_result
+            with pytest.raises(HTTPException) as exc_info:
+                _get_current_user(x_forwarded_access_token="forged-token")
+            assert exc_info.value.status_code == 401
+        _user_cache.clear()
+
+    def test_empty_forwarded_token_raises_401(self):
+        """Empty string token should be rejected, not treated as valid."""
+        from fastapi import HTTPException
+
         from sre_agent.api import _get_current_user
 
         os.environ.pop("PULSE_AGENT_DEV_USER", None)
-        user = _get_current_user(authorization="Bearer some-token-123")
-        assert user.startswith("user-")
-        assert len(user) > 5
+        with pytest.raises(HTTPException) as exc_info:
+            _get_current_user(x_forwarded_access_token="")
+        assert exc_info.value.status_code == 401
 
-    def test_forwarded_token_preferred(self):
-        from sre_agent.api import _get_current_user
+    def test_no_fallback_identity_on_token_review_error(self):
+        """Regression: if TokenReview API is unavailable, must NOT create fallback identity."""
+        from unittest.mock import patch
 
-        os.environ.pop("PULSE_AGENT_DEV_USER", None)
-        user1 = _get_current_user(x_forwarded_access_token="token-a")
-        user2 = _get_current_user(x_forwarded_access_token="token-b")
-        assert user1 != user2
+        from fastapi import HTTPException
 
-    def test_same_token_returns_same_user(self):
-        from sre_agent.api import _get_current_user
+        from sre_agent.api import _get_current_user, _user_cache
 
         os.environ.pop("PULSE_AGENT_DEV_USER", None)
-        user1 = _get_current_user(x_forwarded_access_token="consistent-token")
-        user2 = _get_current_user(x_forwarded_access_token="consistent-token")
-        assert user1 == user2
+        _user_cache.clear()
+
+        with patch("sre_agent.k8s_client._load_k8s"), patch("kubernetes.client") as mock_k8s:
+            mock_k8s.AuthenticationV1Api.side_effect = Exception("K8s unavailable")
+            with pytest.raises(HTTPException) as exc_info:
+                _get_current_user(x_forwarded_access_token="any-token")
+            assert exc_info.value.status_code == 401
+        _user_cache.clear()
+
+
+# ---------------------------------------------------------------------------
+# User cache behavior
+# ---------------------------------------------------------------------------
+
+
+class TestUserCache:
+    def test_stale_entries_evicted_on_read(self):
+        """Expired cache entries should be removed, not served."""
+        import hashlib
+        import time as time_mod
+        from unittest.mock import MagicMock, patch
+
+        from sre_agent.api import _get_current_user, _user_cache
+
+        os.environ.pop("PULSE_AGENT_DEV_USER", None)
+        _user_cache.clear()
+
+        # Seed a cache entry that's already expired (use full hash)
+        token_hash = hashlib.sha256(b"stale-token").hexdigest()
+        _user_cache[token_hash] = ("old-user", time_mod.time() - 120)
+
+        # Mock TokenReview to return a fresh user
+        mock_result = MagicMock()
+        mock_result.status.authenticated = True
+        mock_result.status.user.username = "fresh-user"
+        with patch("sre_agent.k8s_client._load_k8s"), patch("kubernetes.client") as mock_k8s:
+            mock_k8s.AuthenticationV1Api.return_value.create_token_review.return_value = mock_result
+            user = _get_current_user(x_forwarded_access_token="stale-token")
+
+        assert user == "fresh-user"
+        assert _user_cache[token_hash][0] == "fresh-user"
+        _user_cache.clear()
+
+    def test_cache_bounded_at_max(self):
+        """Cache should not grow beyond _USER_CACHE_MAX entries."""
+        from sre_agent.api import _USER_CACHE_MAX, _cache_user, _user_cache
+
+        _user_cache.clear()
+        for i in range(_USER_CACHE_MAX + 50):
+            _cache_user(f"hash-{i}", f"user-{i}")
+        assert len(_user_cache) <= _USER_CACHE_MAX
+        _user_cache.clear()
+
+    def test_lru_eviction_removes_oldest(self):
+        """LRU eviction should remove the least recently used entry."""
+        from sre_agent.api import _USER_CACHE_MAX, _cache_user, _user_cache
+
+        _user_cache.clear()
+        # Fill to max
+        for i in range(_USER_CACHE_MAX):
+            _cache_user(f"hash-{i}", f"user-{i}")
+        # Add one more — should evict hash-0 (oldest)
+        _cache_user("new-hash", "new-user")
+        assert "hash-0" not in _user_cache
+        assert "new-hash" in _user_cache
+        _user_cache.clear()
 
 
 # ---------------------------------------------------------------------------
