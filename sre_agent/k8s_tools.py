@@ -2456,6 +2456,123 @@ def record_audit_entry(action: str, details: str, namespace: str = "pulse-agent"
     return f"Audit entry recorded: {entry_key}"
 
 
+@beta_tool
+def list_resources(
+    resource: str, namespace: str = "", group: str = "", version: str = "v1", label_selector: str = ""
+) -> str:
+    """List any Kubernetes resource type including CRDs. Returns a dynamic table with auto-detected columns.
+
+    This is a generic tool that works for ANY resource type — pods, configmaps, secrets,
+    deployments, custom CRDs, etc. Use this when no specialized list tool exists.
+
+    Args:
+        resource: Resource type plural name (e.g. 'configmaps', 'secrets', 'pods', 'subscriptions', 'virtualmachines').
+        namespace: Kubernetes namespace. Use 'ALL' for all namespaces. Leave empty for cluster-scoped resources.
+        group: API group (e.g. 'apps', 'operators.coreos.com', 'kubevirt.io'). Leave empty for core API resources.
+        version: API version (default 'v1'). Use 'v1beta1', 'v1alpha1' for CRDs.
+        label_selector: Optional label selector (e.g. 'app=nginx').
+    """
+    custom = get_custom_client()
+    gvr = f"{group}~{version}~{resource}" if group else f"{version}~{resource}"
+
+    try:
+        kwargs = {}
+        if label_selector:
+            kwargs["label_selector"] = label_selector
+
+        if namespace and namespace.upper() != "ALL":
+            if group:
+                result = custom.list_namespaced_custom_object(group, version, namespace, resource, **kwargs)
+            else:
+                result = custom.list_namespaced_custom_object("", version, namespace, resource, **kwargs)
+        else:
+            if group:
+                result = custom.list_cluster_custom_object(group, version, resource, **kwargs)
+            else:
+                result = custom.list_cluster_custom_object("", version, resource, **kwargs)
+    except ApiException as e:
+        if e.status == 404:
+            return f"Resource type '{resource}' not found. Check the group ({group}) and version ({version})."
+        return f"Error ({e.status}): {e.reason}"
+
+    items = result.get("items", [])
+    if not items:
+        return f"No {resource} found."
+
+    # Auto-detect columns from the first item's metadata + spec
+    rows = []
+    for item in items[:MAX_RESULTS]:
+        meta = item.get("metadata", {})
+        ns = meta.get("namespace", "")
+        name = meta.get("name", "?")
+        row = {
+            "_gvr": gvr,
+            "name": name,
+            "age": age(meta.get("creationTimestamp")),
+        }
+        if ns:
+            row["namespace"] = ns
+
+        # Extract useful spec/status fields dynamically
+        status = item.get("status", {})
+        spec = item.get("spec", {})
+
+        # Common status patterns
+        if "phase" in status:
+            row["status"] = status["phase"]
+        elif "conditions" in status:
+            conditions = status["conditions"]
+            if conditions:
+                latest = conditions[-1] if isinstance(conditions, list) else {}
+                row["status"] = latest.get("type", latest.get("status", ""))
+
+        # Resource-specific useful fields
+        if resource == "configmaps":
+            data = item.get("data", {})
+            row["keys"] = ", ".join(sorted(data.keys())[:5]) if data else "(empty)"
+            row["key_count"] = len(data) if data else 0
+        elif resource == "secrets":
+            data = item.get("data", {})
+            row["keys"] = ", ".join(sorted(data.keys())[:5]) if data else "(empty)"
+            row["type"] = item.get("type", "Opaque")
+        elif resource in ("services", "svc"):
+            row["type"] = spec.get("type", "")
+            ports = spec.get("ports", [])
+            row["ports"] = ", ".join(f"{p.get('port')}/{p.get('protocol', 'TCP')}" for p in ports[:3])
+            row["clusterIP"] = spec.get("clusterIP", "")
+        elif "replicas" in spec:
+            row["replicas"] = f"{status.get('readyReplicas', 0)}/{spec.get('replicas', 0)}"
+
+        # Add labels if few enough
+        labels = meta.get("labels", {})
+        if labels and len(labels) <= 3:
+            row["labels"] = ", ".join(f"{k}={v}" for k, v in list(labels.items())[:3])
+
+        rows.append(row)
+
+    # Build columns from the first row's keys (excluding hidden fields)
+    if rows:
+        col_ids = [k for k in rows[0] if not k.startswith("_")]
+        columns = [{"id": c, "header": c.replace("_", " ").title()} for c in col_ids]
+    else:
+        columns = [{"id": "name", "header": "Name"}]
+
+    text_lines = [f"{r.get('namespace', '')}/{r['name']}" if r.get("namespace") else r["name"] for r in rows[:20]]
+    text = f"{resource} ({len(rows)}):\n" + "\n".join(text_lines)
+    if len(rows) > 20:
+        text += f"\n... and {len(rows) - 20} more"
+
+    component = {
+        "kind": "data_table",
+        "title": f"{resource.title()} ({len(rows)})",
+        "description": f"All {resource} in {namespace or 'cluster'}"
+        + (f" with {label_selector}" if label_selector else ""),
+        "columns": columns,
+        "rows": rows,
+    }
+    return (text, component)
+
+
 ALL_TOOLS = [
     # Read diagnostics
     list_namespaces,
@@ -2486,6 +2603,8 @@ ALL_TOOLS = [
     list_operator_subscriptions,
     get_firing_alerts,
     get_prometheus_query,
+    # Generic resource listing (any type including CRDs)
+    list_resources,
     # Sysadmin-requested diagnostics
     describe_service,
     get_endpoint_slices,
