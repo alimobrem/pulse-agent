@@ -229,6 +229,10 @@ def run_repl(mode: str):
 
 
 def main():
+    from .logging_config import configure_logging
+
+    configure_logging()
+
     mode = "sre"
     if len(sys.argv) > 1 and sys.argv[1] in MODES:
         mode = sys.argv[1]

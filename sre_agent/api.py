@@ -141,6 +141,9 @@ def _verify_ws_token(websocket) -> str:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Verify k8s connectivity and auth config on startup."""
+    from .logging_config import configure_logging
+
+    configure_logging()
     # Ensure pulse_agent loggers are at INFO so monitor scan output is visible
     logging.getLogger("pulse_agent").setLevel(logging.INFO)
 
