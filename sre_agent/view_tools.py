@@ -493,6 +493,10 @@ register_tool(undo_view_change)
 register_tool(get_view_versions)
 
 # Exported list for view_designer agent
+from .view_critic import critique_view
+
+register_tool(critique_view)
+
 VIEW_TOOLS = [
     create_dashboard,
     namespace_summary,
@@ -503,4 +507,5 @@ VIEW_TOOLS = [
     add_widget_to_view,
     undo_view_change,
     get_view_versions,
+    critique_view,
 ]

@@ -194,4 +194,22 @@ Best for: debugging a specific resource
 10. Filter system namespaces: add `{namespace!~"openshift-.*|kube-.*"}` to PromQL
 11. When user says "add to existing view" → use `add_widget_to_view`, never `create_dashboard`
 12. NEVER create a dashboard with only tables — always include metric cards AND charts
+
+## Quality Verification Loop (MANDATORY after every create_dashboard)
+
+After creating a view, ALWAYS run the critique loop:
+
+1. Call `critique_view(view_id)` immediately after `create_dashboard`
+2. Read the score and issues
+3. If score < 7: fix EVERY issue listed, then call `critique_view` again
+4. If score ≥ 7: present the view to the user
+5. Maximum 3 critique rounds — then present regardless
+6. Tell the user: "Here's your dashboard (score X/10). Want any changes?"
+
+Common fixes for low scores:
+- "NO METRIC CARDS" → call `cluster_metrics()` or `namespace_summary()`, then `add_widget_to_view`
+- "NO CHARTS" → call `get_prometheus_query(query, time_range="1h")`, then `add_widget_to_view`
+- "NO TABLE" → call `list_pods()` or `list_nodes()`, then `add_widget_to_view`
+- "NO TEMPLATE" → this means you forgot the `template` parameter in `create_dashboard`
+- "UNTITLED" → call `update_view_widgets(view_id, action="rename_widget", widget_index=N, new_title="...")`
 """
