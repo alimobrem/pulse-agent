@@ -3367,34 +3367,40 @@ def search_logs(namespace: str, label_selector: str, pattern: str, tail_lines: i
         return f"No pods found matching label selector '{label_selector}' in namespace '{namespace}'."
 
     pattern_lower = pattern.lower()
-    matches: list[str] = []
-    pods_searched = 0
-    pods_with_matches = 0
+    pods_to_search = pods_result.items[:20]  # Cap at 20 pods
+    pods_searched = len(pods_to_search)
 
-    for pod in pods_result.items[:20]:  # Cap at 20 pods
+    def _fetch_pod_logs(pod):
+        """Fetch and filter logs for a single pod."""
         pod_name = pod.metadata.name
-        pods_searched += 1
-
         kwargs: dict = {"name": pod_name, "namespace": namespace, "tail_lines": tail_lines}
         if container:
             kwargs["container"] = container
 
         logs = safe(lambda: core.read_namespaced_pod_log(**kwargs))
         if isinstance(logs, ToolError):
-            matches.append(f"[{pod_name}] Error reading logs: {logs}")
-            continue
+            return [f"[{pod_name}] Error reading logs: {logs}"], False
 
         if not logs:
-            continue
+            return [], False
 
         pod_matches = []
         for line in logs.split("\n"):
             if pattern_lower in line.lower():
                 pod_matches.append(f"[{pod_name}] {line}")
 
-        if pod_matches:
-            pods_with_matches += 1
-            matches.extend(pod_matches[:50])  # Cap per pod
+        return pod_matches[:50], bool(pod_matches)  # Cap per pod
+
+    from concurrent.futures import ThreadPoolExecutor
+
+    matches: list[str] = []
+    pods_with_matches = 0
+    with ThreadPoolExecutor(max_workers=5) as executor:
+        results = executor.map(_fetch_pod_logs, pods_to_search)
+        for pod_matches, had_matches in results:
+            matches.extend(pod_matches)
+            if had_matches:
+                pods_with_matches += 1
 
     if not matches:
         return f"No matches for '{pattern}' in logs of {pods_searched} pods matching '{label_selector}'."
@@ -3559,10 +3565,18 @@ def get_resource_recommendations(namespace: str, time_range: str = "24h") -> str
             pass
         return []
 
-    cpu_usage = _instant_query(cpu_query)
-    mem_usage = _instant_query(mem_query)
-    cpu_requests = _instant_query(cpu_req_query)
-    mem_requests = _instant_query(mem_req_query)
+    from concurrent.futures import ThreadPoolExecutor
+
+    with ThreadPoolExecutor(max_workers=4) as executor:
+        cpu_usage_f = executor.submit(_instant_query, cpu_query)
+        mem_usage_f = executor.submit(_instant_query, mem_query)
+        cpu_requests_f = executor.submit(_instant_query, cpu_req_query)
+        mem_requests_f = executor.submit(_instant_query, mem_req_query)
+
+    cpu_usage = cpu_usage_f.result()
+    mem_usage = mem_usage_f.result()
+    cpu_requests = cpu_requests_f.result()
+    mem_requests = mem_requests_f.result()
 
     if not cpu_usage and not mem_usage and not cpu_requests:
         return (

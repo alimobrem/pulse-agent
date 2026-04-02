@@ -93,6 +93,42 @@ def _sanitize_context_field(value: str) -> str:
     return value
 
 
+def _build_context_prefix(data: dict) -> str:
+    """Build a context prefix string from Pulse UI context fields.
+
+    Extracts kind/namespace/name from data["context"], sanitizes them,
+    and returns a prefix string to prepend to user content.
+    Returns empty string if no valid context is present.
+    """
+    context = data.get("context")
+    if not context or not isinstance(context, dict) or len(str(context)) > 2000:
+        return ""
+
+    kind = _sanitize_context_field(context.get("kind", ""))
+    ns = _sanitize_context_field(context.get("namespace", ""))
+    name = _sanitize_context_field(context.get("name", ""))
+
+    if not (kind or name or ns):
+        return ""
+
+    context_parts = []
+    if kind and name:
+        context_parts.append(f"Resource: {kind}/{name}")
+    elif name:
+        context_parts.append(f"Resource: {name}")
+    if ns:
+        context_parts.append(f"Namespace: {ns}")
+    context_str = ", ".join(context_parts)
+
+    if ns:
+        return (
+            f"[UI Context: {context_str}]\n"
+            f"IMPORTANT: Use namespace='{ns}' for any operations on this resource. "
+            f"Do NOT default to 'default' namespace.\n\n"
+        )
+    return f"[UI Context: {context_str}]\n\n"
+
+
 def _verify_ws_token(websocket) -> str:
     """Verify WebSocket token and return the client token. Closes with 4001 if invalid."""
     client_token = websocket.query_params.get("token", "")
@@ -681,29 +717,10 @@ async def websocket_agent(websocket: WebSocket, mode: str):
                     + content
                 )
 
-            # Context from Pulse UI — cap size, sanitize fields
-            context = data.get("context")
-            if context and isinstance(context, dict) and len(str(context)) <= 2000:
-                kind = _sanitize_context_field(context.get("kind", ""))
-                ns = _sanitize_context_field(context.get("namespace", ""))
-                name = _sanitize_context_field(context.get("name", ""))
-                if kind or name or ns:
-                    context_parts = []
-                    if kind and name:
-                        context_parts.append(f"Resource: {kind}/{name}")
-                    elif name:
-                        context_parts.append(f"Resource: {name}")
-                    if ns:
-                        context_parts.append(f"Namespace: {ns}")
-                    context_str = ", ".join(context_parts)
-                    if ns:
-                        content = (
-                            f"[UI Context: {context_str}]\n"
-                            f"IMPORTANT: Use namespace='{ns}' for any operations on this resource. "
-                            f"Do NOT default to 'default' namespace.\n\n{content}"
-                        )
-                    else:
-                        content = f"[UI Context: {context_str}]\n\n{content}"
+            # Context from Pulse UI — sanitize and prefix
+            ctx_prefix = _build_context_prefix(data)
+            if ctx_prefix:
+                content = ctx_prefix + content
 
             messages.append({"role": "user", "content": content})
 
@@ -884,29 +901,10 @@ async def websocket_auto_agent(websocket: WebSocket):
             tool_map = config["tool_map"]
             write_tools = config["write_tools"]
 
-            # Context from Pulse UI — cap size, sanitize fields
-            context = data.get("context")
-            if context and isinstance(context, dict) and len(str(context)) <= 2000:
-                kind = _sanitize_context_field(context.get("kind", ""))
-                ns = _sanitize_context_field(context.get("namespace", ""))
-                name = _sanitize_context_field(context.get("name", ""))
-                if kind or name or ns:
-                    context_parts = []
-                    if kind and name:
-                        context_parts.append(f"Resource: {kind}/{name}")
-                    elif name:
-                        context_parts.append(f"Resource: {name}")
-                    if ns:
-                        context_parts.append(f"Namespace: {ns}")
-                    context_str = ", ".join(context_parts)
-                    if ns:
-                        content = (
-                            f"[UI Context: {context_str}]\n"
-                            f"IMPORTANT: Use namespace='{ns}' for any operations on this resource. "
-                            f"Do NOT default to 'default' namespace.\n\n{content}"
-                        )
-                    else:
-                        content = f"[UI Context: {context_str}]\n\n{content}"
+            # Context from Pulse UI — sanitize and prefix
+            ctx_prefix = _build_context_prefix(data)
+            if ctx_prefix:
+                content = ctx_prefix + content
 
             messages.append({"role": "user", "content": content})
 

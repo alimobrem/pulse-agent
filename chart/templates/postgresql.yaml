@@ -15,6 +15,12 @@ metadata:
     "helm.sh/resource-policy": keep
 type: Opaque
 data:
+  {{- /* lookup reads any existing Secret so we reuse the same password across
+         Helm upgrades instead of generating a new random value each time.
+         During `helm template` or dry-run, lookup returns an empty dict so the
+         else branch generates a fresh password. The "helm.sh/resource-policy: keep"
+         annotation above prevents Helm from deleting this Secret on uninstall/upgrade,
+         providing a second layer of protection for the database credentials. */}}
   {{- $existingPg := (lookup "v1" "Secret" .Release.Namespace $pgSecretName) }}
   {{- $pgKey := .Values.database.postgresql.auth.secretKey }}
   {{- if and $existingPg (index $existingPg.data $pgKey) }}
