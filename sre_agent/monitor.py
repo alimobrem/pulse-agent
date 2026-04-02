@@ -1749,7 +1749,7 @@ class MonitorSession:
         for finding in findings:
             if investigations_run >= max_per_scan:
                 break
-            if finding.get("severity") != SEVERITY_CRITICAL:
+            if finding.get("severity") not in (SEVERITY_CRITICAL, SEVERITY_WARNING):
                 continue
             if finding.get("category") not in allowed_categories:
                 continue
