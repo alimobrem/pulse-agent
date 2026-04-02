@@ -1,10 +1,10 @@
 # Pulse Agent
 
 <p>
-  <a href="https://github.com/alimobrem/pulse-agent/releases/tag/v1.12.0"><img src="https://img.shields.io/badge/release-v1.12.0-2563eb?style=for-the-badge" alt="Version"></a>
-  <img src="https://img.shields.io/badge/tools-113-10b981?style=for-the-badge" alt="Tools">
+  <a href="https://github.com/alimobrem/pulse-agent/releases/tag/v1.13.0"><img src="https://img.shields.io/badge/release-v1.13.0-2563eb?style=for-the-badge" alt="Version"></a>
+  <img src="https://img.shields.io/badge/tools-73-10b981?style=for-the-badge" alt="Tools">
   <img src="https://img.shields.io/badge/scanners-11-10b981?style=for-the-badge" alt="Scanners">
-  <img src="https://img.shields.io/badge/tests-627-10b981?style=for-the-badge" alt="Tests">
+  <img src="https://img.shields.io/badge/tests-658-10b981?style=for-the-badge" alt="Tests">
   <img src="https://img.shields.io/badge/license-MIT-6366f1?style=for-the-badge" alt="License">
 </p>
 
@@ -21,6 +21,9 @@ Pulse Agent connects directly to your cluster's Kubernetes API and uses Claude O
 - **Runbook Execution** — Scale deployments, restart pods, cordon/drain nodes, apply YAML manifests (with confirmation)
 - **Alerting** — Query firing alerts from Alertmanager and run PromQL queries
 - **Cluster Operations** — Inspect StatefulSets, DaemonSets, Jobs, CronJobs, Ingresses, Routes, and OLM operators
+- **Generic Resource Tools** — `list_resources` and `describe_resource` work with any K8s resource type including CRDs via the Table API
+- **Interactive Debugging** — `exec_command` for kubectl exec, `search_logs` for multi-pod log search, `test_connectivity` for network testing
+- **Right-Sizing** — `get_resource_recommendations` compares actual CPU/memory usage to requests/limits via Prometheus
 
 ### Security Scanner
 - **Pod Security** — Detect privileged containers, root execution, missing security contexts, dangerous capabilities
@@ -66,8 +69,9 @@ Pulse Agent connects directly to your cluster's Kubernetes API and uses Claude O
 - **Confirmation Gate** — Write operations still require the programmatic confirmation round-trip at all trust levels; auto-fix pre-approves on behalf of the user
 
 ### Database
-- **PostgreSQL** — Production database for fix history, incident memory, learned runbooks, and patterns. Configured via `PULSE_AGENT_DATABASE_URL`. Auto-generated password as K8s Secret.
-- **Local Dev Fallback** — SQLite fallback for local development when no PostgreSQL URL is configured. Not recommended for production.
+- **PostgreSQL Only** — All data stored in PostgreSQL (fix history, incident memory, runbooks, patterns, views). Configured via `PULSE_AGENT_DATABASE_URL`.
+- **Connection Pooling** — `ThreadedConnectionPool` with configurable min/max connections (`PULSE_AGENT_DB_POOL_MIN/MAX`). Thread-local connection tracking for write sequences.
+- **Schema Migrations** — Version-tracked forward-only migrations via `db_migrations.py`. Applied automatically on startup.
 
 ### Pydantic Configuration
 - **`PulseAgentSettings`** — All configuration via `pydantic-settings` with `PULSE_AGENT_` env prefix, `.env` file support, and type validation at startup (`config.py`)
