@@ -124,18 +124,45 @@ def namespace_summary(namespace: str) -> str:
         f"  Warning events: {warning_count}"
     )
 
-    # Build info_card_grid component
+    # Build metric cards with PromQL sparklines
+    ns_filter = f'{{namespace="{namespace}"}}'
     cards = [
-        {"label": "Pods Running", "value": str(running), "sub": f"of {total_pods} total"},
-        {"label": "Pods Failing", "value": str(failed + crashloop), "sub": f"{crashloop} crashlooping"},
-        {"label": "Deployments", "value": f"{healthy_deps}/{total_deps}", "sub": "healthy"},
-        {"label": "Warnings", "value": str(warning_count), "sub": "active events"},
+        {
+            "kind": "metric_card",
+            "title": "Pods Running",
+            "value": str(running),
+            "status": "healthy" if failed + crashloop == 0 else "warning",
+            "description": f"of {total_pods} total",
+            "query": f"count(kube_pod_status_phase{ns_filter}{{phase='Running'}})",
+            "color": "#10b981",
+        },
+        {
+            "kind": "metric_card",
+            "title": "Pod Restarts",
+            "value": str(crashloop),
+            "status": "healthy" if crashloop == 0 else "error",
+            "description": f"{failed} failed",
+            "query": f"sum(rate(kube_pod_container_status_restarts_total{ns_filter}[5m]))",
+            "color": "#ef4444" if crashloop > 0 else "#10b981",
+        },
+        {
+            "kind": "metric_card",
+            "title": "Deployments",
+            "value": f"{healthy_deps}/{total_deps}",
+            "status": "healthy" if degraded_deps == 0 else "warning",
+            "description": "healthy",
+        },
+        {
+            "kind": "metric_card",
+            "title": "Warnings",
+            "value": str(warning_count),
+            "status": "healthy" if warning_count == 0 else "warning",
+            "description": "active events",
+            "query": f"count(kube_event_count{ns_filter}{{type='Warning'}}) or vector(0)",
+            "color": "#f59e0b" if warning_count > 0 else "#10b981",
+        },
     ]
-    component = {
-        "kind": "info_card_grid",
-        "title": f"Namespace Summary — {namespace}",
-        "cards": cards,
-    }
+    component = {"kind": "grid", "columns": 4, "items": cards}
     return (text, component)
 
 

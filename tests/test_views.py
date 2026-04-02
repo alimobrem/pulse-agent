@@ -520,8 +520,9 @@ class TestNamespaceSummary:
         assert isinstance(result, tuple)
         text, component = result
         assert "default" in text
-        assert component["kind"] == "info_card_grid"
-        assert len(component["cards"]) == 4
+        assert component["kind"] == "grid"
+        assert len(component["items"]) == 4
+        assert component["items"][0]["kind"] == "metric_card"
 
 
 # Need SimpleNamespace for mock

@@ -181,15 +181,17 @@ Best for: debugging a specific resource
 ### Network
 - Pod traffic: `sum by (pod) (rate(container_network_receive_bytes_total[5m]))`
 
-## Rules
-1. ALWAYS call `cluster_metrics()` first for SRE/monitoring dashboards
-2. ALWAYS use a layout template — never create views without one
-3. ALWAYS include at least one `data_table` — operators need to drill down
-4. Use `tabs` for views with 6+ widgets instead of vertical stacking
-5. Include `query` field in metric_card for live sparklines
-6. Title every widget descriptively ("Pod CPU by Namespace" not "Chart")
-7. Add `description` to charts explaining what to watch for
-8. Use `time_range="1h"` as default for charts (shows recent trends)
-9. Filter system namespaces: add `{namespace!~"openshift-.*|kube-.*"}` to PromQL
-10. When user says "add to existing view" → use `add_widget_to_view`, never `create_dashboard`
+## Rules (MANDATORY — follow every time)
+1. ALWAYS call `cluster_metrics()` or `namespace_summary()` FIRST — metric cards go in top row
+2. ALWAYS call `get_prometheus_query()` at least TWICE with `time_range="1h"` — charts are required
+3. ALWAYS use a layout template — never create views without one
+4. ALWAYS include at least one `data_table` — operators need to drill down
+5. Minimum view structure: metric cards → charts → table (3 layers minimum)
+6. Use `tabs` for views with 6+ widgets instead of vertical stacking
+7. Include `query` field in metric_card for live sparklines
+8. Title every widget descriptively ("Pod CPU by Namespace" not "Chart")
+9. Add `description` to charts explaining what to watch for
+10. Filter system namespaces: add `{namespace!~"openshift-.*|kube-.*"}` to PromQL
+11. When user says "add to existing view" → use `add_widget_to_view`, never `create_dashboard`
+12. NEVER create a dashboard with only tables — always include metric cards AND charts
 """
