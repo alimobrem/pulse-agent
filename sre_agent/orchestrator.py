@@ -127,7 +127,9 @@ def classify_intent(query: str) -> AgentMode:
         return "both"
 
     # Check view designer (dashboard/view creation requests)
-    if any(kw in q for kw in VIEW_DESIGNER_KEYWORDS):
+    # Match exact phrases OR single trigger words
+    VIEW_TRIGGER_WORDS = {"dashboard", "widget", "sparkline", "metric card", "layout"}
+    if any(kw in q for kw in VIEW_DESIGNER_KEYWORDS) or any(w in q for w in VIEW_TRIGGER_WORDS):
         return "view_designer"
 
     sre_score = _keyword_score(q, SRE_KEYWORDS)
