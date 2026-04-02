@@ -209,6 +209,7 @@ def mock_k8s():
         patch("sre_agent.k8s_tools.get_apps_client") as apps,
         patch("sre_agent.k8s_tools.get_custom_client") as custom,
         patch("sre_agent.k8s_tools.get_version_client") as version,
+        patch("sre_agent.k8s_tools.k8s_stream") as stream,
     ):
         core_mock = MagicMock()
         apps_mock = MagicMock()
@@ -225,6 +226,7 @@ def mock_k8s():
             "apps": apps_mock,
             "custom": custom_mock,
             "version": version_mock,
+            "stream": stream,
         }
 
 

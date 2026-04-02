@@ -13,6 +13,7 @@ from datetime import UTC, datetime
 from anthropic import beta_tool
 from kubernetes import client
 from kubernetes.client.rest import ApiException
+from kubernetes.stream import stream as k8s_stream
 
 # RFC 1123 name validation for K8s resources
 _K8S_NAME_RE = re.compile(r"^[a-z0-9]([a-z0-9\-\.]{0,251}[a-z0-9])?$")
@@ -69,6 +70,8 @@ WRITE_TOOLS = {
     "create_network_policy",
     "rollback_deployment",
     "drain_node",
+    "exec_command",
+    "test_connectivity",
 }
 
 MAX_TAIL_LINES = 1000
@@ -3062,20 +3065,612 @@ def get_resource_relationships(namespace: str, name: str, kind: str = "Pod") -> 
     return (text, component) if component else text
 
 
+# ---------------------------------------------------------------------------
+# Kind → plural mapping for generic resource access
+# ---------------------------------------------------------------------------
+
+_KIND_PLURAL_MAP: dict[str, str] = {
+    "ConfigMap": "configmaps",
+    "Service": "services",
+    "Pod": "pods",
+    "Secret": "secrets",
+    "Namespace": "namespaces",
+    "Node": "nodes",
+    "ServiceAccount": "serviceaccounts",
+    "PersistentVolumeClaim": "persistentvolumeclaims",
+    "PersistentVolume": "persistentvolumes",
+    "Endpoints": "endpoints",
+    "Event": "events",
+    "ResourceQuota": "resourcequotas",
+    "LimitRange": "limitranges",
+    "Deployment": "deployments",
+    "StatefulSet": "statefulsets",
+    "DaemonSet": "daemonsets",
+    "ReplicaSet": "replicasets",
+    "Job": "jobs",
+    "CronJob": "cronjobs",
+    "Ingress": "ingresses",
+    "NetworkPolicy": "networkpolicies",
+    "HorizontalPodAutoscaler": "horizontalpodautoscalers",
+    "Role": "roles",
+    "RoleBinding": "rolebindings",
+    "ClusterRole": "clusterroles",
+    "ClusterRoleBinding": "clusterrolebindings",
+}
+
+
+def _resolve_plural(kind: str) -> str:
+    """Convert a Kind to its plural resource name."""
+    if kind in _KIND_PLURAL_MAP:
+        return _KIND_PLURAL_MAP[kind]
+    # Fallback: lowercase + 's', handling common suffixes
+    lower = kind.lower()
+    if lower.endswith("s"):
+        return lower + "es"
+    if lower.endswith("y"):
+        return lower[:-1] + "ies"
+    return lower + "s"
+
+
+# ---------------------------------------------------------------------------
+# Generic describe_resource — works for any K8s resource
+# ---------------------------------------------------------------------------
+
+
+@beta_tool
+def describe_resource(namespace: str, name: str, kind: str, group: str = "", version: str = "v1") -> str:
+    """Get detailed information about any Kubernetes resource including metadata, status, conditions, and events. Use this for resources that don't have a specialized describe tool.
+
+    Args:
+        namespace: Kubernetes namespace. Use '_' for cluster-scoped resources.
+        name: Name of the resource.
+        kind: Resource kind (e.g. 'ConfigMap', 'Service', 'StatefulSet').
+        group: API group (e.g. 'apps', 'batch'). Empty for core resources.
+        version: API version (default 'v1').
+    """
+    if err := _validate_k8s_name(name):
+        return err
+
+    plural = _resolve_plural(kind)
+
+    # Build API URL path
+    if group:
+        api_base = f"/apis/{group}/{version}"
+    else:
+        api_base = f"/api/{version}"
+
+    if namespace and namespace != "_":
+        path = f"{api_base}/namespaces/{namespace}/{plural}/{name}"
+    else:
+        path = f"{api_base}/{plural}/{name}"
+
+    # Use the kubernetes client's ApiClient to make the request
+    from kubernetes import client as k8s_client
+
+    api = k8s_client.ApiClient()
+
+    try:
+        resp = api.call_api(
+            path,
+            "GET",
+            auth_settings=["BearerToken"],
+            response_type="object",
+            _return_http_data_only=True,
+        )
+        # resp is a tuple (data, status, headers) or just data depending on version
+        obj = resp if isinstance(resp, dict) else resp[0] if isinstance(resp, tuple) else resp
+    except ApiException as e:
+        return f"Error ({e.status}): {e.reason}"
+    except Exception as e:
+        return f"Error fetching {kind}/{name}: {type(e).__name__}: {e}"
+
+    if not isinstance(obj, dict):
+        return f"Unexpected response type: {type(obj).__name__}"
+
+    # Extract key sections for structured display
+    metadata = obj.get("metadata", {})
+    status = obj.get("status", {})
+    labels = metadata.get("labels", {}) or {}
+    annotations = metadata.get("annotations", {}) or {}
+    owner_refs = metadata.get("ownerReferences", [])
+
+    # Build key-value component
+    pairs = [
+        {"key": "Name", "value": str(metadata.get("name", ""))},
+        {"key": "Namespace", "value": str(metadata.get("namespace", "cluster-scoped"))},
+        {"key": "Kind", "value": kind},
+        {"key": "Labels", "value": str(len(labels))},
+        {"key": "Annotations", "value": str(len(annotations))},
+        {
+            "key": "Age",
+            "value": age(datetime.fromisoformat(metadata["creationTimestamp"].replace("Z", "+00:00")))
+            if metadata.get("creationTimestamp")
+            else "unknown",
+        },
+    ]
+    if owner_refs:
+        owners = ", ".join(f"{r.get('kind', '?')}/{r.get('name', '?')}" for r in owner_refs)
+        pairs.append({"key": "Owned By", "value": owners})
+
+    components: list[dict] = [
+        {"kind": "key_value", "title": f"{kind} — {name}", "pairs": pairs},
+    ]
+
+    # Labels as badges
+    if labels:
+        components.append(
+            {
+                "kind": "badge_list",
+                "badges": [{"text": f"{k}={v}", "variant": "info"} for k, v in list(labels.items())[:10]],
+            }
+        )
+
+    # Status conditions
+    conditions = status.get("conditions", [])
+    if conditions:
+        components.append(
+            {
+                "kind": "status_list",
+                "title": "Conditions",
+                "items": [
+                    {
+                        "name": c.get("type", "?"),
+                        "status": "healthy" if c.get("status") == "True" else "error",
+                        "detail": c.get("reason") or c.get("message") or "",
+                    }
+                    for c in conditions
+                ],
+            }
+        )
+
+    # Fetch related events
+    if namespace and namespace != "_":
+        core = get_core_client()
+        events = safe(
+            lambda: core.list_namespaced_event(
+                namespace,
+                field_selector=f"involvedObject.name={name},involvedObject.kind={kind}",
+            )
+        )
+        if not isinstance(events, ToolError) and events.items:
+            sorted_events = sorted(
+                events.items,
+                key=lambda e: e.last_timestamp or datetime.min.replace(tzinfo=UTC),
+                reverse=True,
+            )[:10]
+            event_rows = [
+                {
+                    "age": age(e.last_timestamp),
+                    "type": e.type or "Normal",
+                    "reason": e.reason or "",
+                    "message": (e.message or "")[:120],
+                }
+                for e in sorted_events
+            ]
+            components.append(
+                {
+                    "kind": "data_table",
+                    "title": f"Events ({len(event_rows)})",
+                    "columns": [
+                        {"id": "age", "header": "Age"},
+                        {"id": "type", "header": "Type"},
+                        {"id": "reason", "header": "Reason"},
+                        {"id": "message", "header": "Message"},
+                    ],
+                    "rows": event_rows,
+                }
+            )
+
+    text = json.dumps(obj, indent=2, default=str)
+    component = {
+        "kind": "section",
+        "title": f"{kind} Details — {name}",
+        "collapsible": False,
+        "defaultOpen": True,
+        "components": components,
+    }
+    return (text, component)
+
+
+# ---------------------------------------------------------------------------
+# exec_command — run a command inside a pod container
+# ---------------------------------------------------------------------------
+
+# Characters that indicate shell metacharacters (security risk)
+_DANGEROUS_CHARS = set(";|&$><`")
+
+MAX_EXEC_OUTPUT = 10 * 1024  # 10KB cap
+
+
+@beta_tool
+def exec_command(namespace: str, pod_name: str, command: str, container: str = "") -> str:
+    """Execute a command inside a running pod container. Use this for debugging, checking environment variables, testing connectivity, or inspecting files.
+
+    Args:
+        namespace: Kubernetes namespace.
+        pod_name: Name of the pod.
+        command: Command to run (e.g. 'env', 'cat /etc/config/app.yaml', 'whoami'). Shell metacharacters are not allowed.
+        container: Container name. Optional if pod has only one container.
+    """
+    if err := _validate_k8s_namespace(namespace):
+        return err
+    if err := _validate_k8s_name(pod_name, "pod_name"):
+        return err
+    if not command or not command.strip():
+        return "Error: command is required."
+
+    # Reject shell metacharacters
+    if any(c in command for c in _DANGEROUS_CHARS):
+        return "Error: Shell metacharacters (;|&$><`) are not allowed in commands for security reasons."
+
+    cmd_parts = command.split()
+    core = get_core_client()
+
+    kwargs: dict = {
+        "name": pod_name,
+        "namespace": namespace,
+        "command": cmd_parts,
+        "stderr": True,
+        "stdout": True,
+        "stdin": False,
+        "tty": False,
+    }
+    if container:
+        kwargs["container"] = container
+
+    try:
+        output = k8s_stream(core.connect_get_namespaced_pod_exec, **kwargs)
+    except ApiException as e:
+        return f"Error ({e.status}): {e.reason}"
+    except Exception as e:
+        return f"Error executing command: {type(e).__name__}: {e}"
+
+    if not output:
+        return "(no output)"
+
+    if len(output) > MAX_EXEC_OUTPUT:
+        output = output[:MAX_EXEC_OUTPUT] + f"\n\n... (truncated, {len(output)} total bytes)"
+
+    return output
+
+
+# ---------------------------------------------------------------------------
+# search_logs — search logs across pods matching a label selector
+# ---------------------------------------------------------------------------
+
+
+@beta_tool
+def search_logs(namespace: str, label_selector: str, pattern: str, tail_lines: int = 100, container: str = "") -> str:
+    """Search logs across multiple pods matching a label selector. Returns matching lines with pod name prefix.
+
+    Args:
+        namespace: Kubernetes namespace.
+        label_selector: Label selector (e.g. 'app=nginx').
+        pattern: Text pattern to search for in logs (case-insensitive).
+        tail_lines: Number of recent lines to search per pod (default 100, max 500).
+        container: Container name. Optional.
+    """
+    if err := _validate_k8s_namespace(namespace):
+        return err
+    if not label_selector:
+        return "Error: label_selector is required."
+    if not pattern:
+        return "Error: pattern is required."
+
+    tail_lines = min(max(1, tail_lines), 500)
+    core = get_core_client()
+
+    # List pods matching the label selector
+    pods_result = safe(lambda: core.list_namespaced_pod(namespace, label_selector=label_selector))
+    if isinstance(pods_result, ToolError):
+        return str(pods_result)
+
+    if not pods_result.items:
+        return f"No pods found matching label selector '{label_selector}' in namespace '{namespace}'."
+
+    pattern_lower = pattern.lower()
+    matches: list[str] = []
+    pods_searched = 0
+    pods_with_matches = 0
+
+    for pod in pods_result.items[:20]:  # Cap at 20 pods
+        pod_name = pod.metadata.name
+        pods_searched += 1
+
+        kwargs: dict = {"name": pod_name, "namespace": namespace, "tail_lines": tail_lines}
+        if container:
+            kwargs["container"] = container
+
+        logs = safe(lambda: core.read_namespaced_pod_log(**kwargs))
+        if isinstance(logs, ToolError):
+            matches.append(f"[{pod_name}] Error reading logs: {logs}")
+            continue
+
+        if not logs:
+            continue
+
+        pod_matches = []
+        for line in logs.split("\n"):
+            if pattern_lower in line.lower():
+                pod_matches.append(f"[{pod_name}] {line}")
+
+        if pod_matches:
+            pods_with_matches += 1
+            matches.extend(pod_matches[:50])  # Cap per pod
+
+    if not matches:
+        return f"No matches for '{pattern}' in logs of {pods_searched} pods matching '{label_selector}'."
+
+    header = f"Found {len(matches)} matching lines across {pods_with_matches}/{pods_searched} pods:\n\n"
+    return header + "\n".join(matches[:200])  # Overall cap
+
+
+# ---------------------------------------------------------------------------
+# test_connectivity — test network connectivity from a pod
+# ---------------------------------------------------------------------------
+
+
+@beta_tool
+def test_connectivity(source_namespace: str, source_pod: str, target_host: str, target_port: int) -> str:
+    """Test network connectivity from a pod to a target host and port. Useful for debugging service discovery, network policies, and DNS issues.
+
+    Args:
+        source_namespace: Namespace of the source pod.
+        source_pod: Name of the source pod.
+        target_host: Target hostname or IP (e.g. 'my-service.default.svc', '10.0.0.1').
+        target_port: Target port number.
+    """
+    if err := _validate_k8s_namespace(source_namespace):
+        return err
+    if err := _validate_k8s_name(source_pod, "source_pod"):
+        return err
+    if not target_host:
+        return "Error: target_host is required."
+    # Sanitize target_host — only allow alphanumeric, dots, dashes, colons (IPv6)
+    if not re.match(r"^[a-zA-Z0-9.\-:]+$", target_host):
+        return "Error: target_host contains invalid characters."
+    if not (1 <= target_port <= 65535):
+        return f"Error: target_port must be between 1 and 65535, got {target_port}."
+
+    core = get_core_client()
+
+    # Try multiple connectivity check methods (not all containers have all tools)
+    methods = [
+        # nc (netcat) — most common
+        ["nc", "-zv", "-w", "5", target_host, str(target_port)],
+        # bash built-in /dev/tcp (works on most containers with bash)
+        ["timeout", "5", "bash", "-c", f"echo > /dev/tcp/{target_host}/{target_port}"],
+        # wget — available in many alpine-based images
+        ["wget", "--spider", "--timeout=5", f"http://{target_host}:{target_port}/", "-O", "/dev/null"],
+    ]
+
+    import time as _time
+
+    for cmd in methods:
+        start = _time.monotonic()
+        try:
+            output = k8s_stream(
+                core.connect_get_namespaced_pod_exec,
+                name=source_pod,
+                namespace=source_namespace,
+                command=cmd,
+                stderr=True,
+                stdout=True,
+                stdin=False,
+                tty=False,
+            )
+            elapsed_ms = int((_time.monotonic() - start) * 1000)
+            # If we got here without exception, connection likely succeeded
+            return (
+                f"Connection to {target_host}:{target_port} succeeded.\n"
+                f"Latency: {elapsed_ms}ms\n"
+                f"Method: {cmd[0]}\n"
+                f"Output: {(output or '').strip()[:500]}"
+            )
+        except ApiException as e:
+            if e.status == 404:
+                return f"Error: Pod '{source_pod}' not found in namespace '{source_namespace}'."
+            # Command failed — try next method
+            elapsed_ms = int((_time.monotonic() - start) * 1000)
+            if cmd == methods[-1]:
+                # Last method — report failure
+                return (
+                    f"Connection to {target_host}:{target_port} FAILED.\n"
+                    f"Latency: {elapsed_ms}ms\n"
+                    f"All connectivity methods failed. The target may be unreachable, "
+                    f"blocked by a NetworkPolicy, or the container lacks network tools.\n"
+                    f"Last error: {e.reason}"
+                )
+            continue
+        except Exception as e:
+            elapsed_ms = int((_time.monotonic() - start) * 1000)
+            if cmd == methods[-1]:
+                return (
+                    f"Connection to {target_host}:{target_port} FAILED.\n"
+                    f"Latency: {elapsed_ms}ms\n"
+                    f"Error: {type(e).__name__}: {e}"
+                )
+            continue
+
+    return f"Connection to {target_host}:{target_port} FAILED. No connectivity tools available in the container."
+
+
+# ---------------------------------------------------------------------------
+# get_resource_recommendations — right-sizing analysis
+# ---------------------------------------------------------------------------
+
+
+@beta_tool
+def get_resource_recommendations(namespace: str, time_range: str = "24h") -> str:
+    """Analyze resource usage vs requests/limits and recommend right-sizing. Shows over-provisioned and under-provisioned workloads.
+
+    Args:
+        namespace: Kubernetes namespace.
+        time_range: Time window for usage analysis (default '24h').
+    """
+    import os
+    import ssl
+    import urllib.parse
+    import urllib.request
+
+    if err := _validate_k8s_namespace(namespace):
+        return err
+
+    base_url = os.environ.get("THANOS_URL", "")
+    if not base_url:
+        base_url = "https://thanos-querier.openshift-monitoring.svc:9091"
+
+    # Build Prometheus queries for CPU and memory P95
+    cpu_query = (
+        f"quantile_over_time(0.95, rate(container_cpu_usage_seconds_total"
+        f'{{namespace="{namespace}",container!="",container!="POD"}}[5m])[{time_range}:])'
+    )
+    mem_query = (
+        f"quantile_over_time(0.95, container_memory_working_set_bytes"
+        f'{{namespace="{namespace}",container!="",container!="POD"}}[{time_range}:])'
+    )
+
+    # Also get current requests/limits from kube_state_metrics
+    cpu_req_query = f'kube_pod_container_resource_requests{{namespace="{namespace}",resource="cpu"}}'
+    mem_req_query = f'kube_pod_container_resource_requests{{namespace="{namespace}",resource="memory"}}'
+
+    # Read SA token
+    try:
+        with open("/var/run/secrets/kubernetes.io/serviceaccount/token") as f:
+            token = f.read().strip()
+    except FileNotFoundError:
+        token = ""
+
+    ctx = ssl.create_default_context()
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE
+
+    def _instant_query(query: str) -> list[dict]:
+        params = urllib.parse.urlencode({"query": query})
+        url = f"{base_url}/api/v1/query?{params}"
+        headers = {}
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
+        req = urllib.request.Request(url, headers=headers)
+        try:
+            resp = urllib.request.urlopen(req, context=ctx, timeout=30)
+            data = json.loads(resp.read())
+            if data.get("status") == "success":
+                return data.get("data", {}).get("result", [])
+        except Exception:
+            pass
+        return []
+
+    cpu_usage = _instant_query(cpu_query)
+    mem_usage = _instant_query(mem_query)
+    cpu_requests = _instant_query(cpu_req_query)
+    mem_requests = _instant_query(mem_req_query)
+
+    if not cpu_usage and not mem_usage and not cpu_requests:
+        return (
+            f"No resource metrics available for namespace '{namespace}'. "
+            "Ensure Prometheus/Thanos and kube-state-metrics are running."
+        )
+
+    # Index requests by pod+container
+    def _key(r: dict) -> str:
+        m = r.get("metric", {})
+        return f"{m.get('pod', '')}:{m.get('container', '')}"
+
+    cpu_req_map = {_key(r): float(r["value"][1]) for r in cpu_requests if r.get("value")}
+    mem_req_map = {_key(r): float(r["value"][1]) for r in mem_requests if r.get("value")}
+    cpu_use_map = {_key(r): float(r["value"][1]) for r in cpu_usage if r.get("value")}
+    mem_use_map = {_key(r): float(r["value"][1]) for r in mem_usage if r.get("value")}
+
+    # Merge all keys
+    all_keys = set(cpu_req_map) | set(mem_req_map) | set(cpu_use_map) | set(mem_use_map)
+
+    rows = []
+    for key in sorted(all_keys):
+        pod, container = key.split(":", 1) if ":" in key else (key, "")
+        if not pod or not container:
+            continue
+
+        cpu_req = cpu_req_map.get(key, 0)
+        cpu_p95 = cpu_use_map.get(key, 0)
+        mem_req = mem_req_map.get(key, 0)
+        mem_p95 = mem_use_map.get(key, 0)
+
+        # Recommend: 20% headroom above P95, rounded to nearest 50m/50Mi
+        cpu_rec = max(0.05, round((cpu_p95 * 1.2) * 20) / 20)  # Round to nearest 50m
+        mem_rec = max(64 * 1024 * 1024, int((mem_p95 * 1.2) / (50 * 1024 * 1024)) * 50 * 1024 * 1024)  # Round 50Mi
+
+        def _fmt_cpu(cores: float) -> str:
+            if cores < 1:
+                return f"{int(cores * 1000)}m"
+            return f"{cores:.2f}"
+
+        def _fmt_mem(b: float) -> str:
+            mi = b / (1024 * 1024)
+            if mi < 1024:
+                return f"{int(mi)}Mi"
+            return f"{mi / 1024:.1f}Gi"
+
+        rows.append(
+            {
+                "pod": pod,
+                "container": container,
+                "cpu_request": _fmt_cpu(cpu_req),
+                "cpu_p95": _fmt_cpu(cpu_p95),
+                "cpu_recommendation": _fmt_cpu(cpu_rec),
+                "mem_request": _fmt_mem(mem_req),
+                "mem_p95": _fmt_mem(mem_p95),
+                "mem_recommendation": _fmt_mem(mem_rec),
+            }
+        )
+
+    if not rows:
+        return f"No workload resource data found for namespace '{namespace}'."
+
+    # Text summary
+    lines = [f"Resource recommendations for namespace '{namespace}' (P95 over {time_range}):"]
+    for r in rows[:30]:
+        lines.append(
+            f"  {r['pod']}/{r['container']}: "
+            f"CPU {r['cpu_request']}→{r['cpu_recommendation']} (P95={r['cpu_p95']})  "
+            f"Mem {r['mem_request']}→{r['mem_recommendation']} (P95={r['mem_p95']})"
+        )
+    text = "\n".join(lines)
+
+    component = {
+        "kind": "data_table",
+        "title": f"Resource Recommendations — {namespace}",
+        "description": f"Right-sizing based on P95 usage over {time_range} with 20% headroom",
+        "columns": [
+            {"id": "pod", "header": "Pod"},
+            {"id": "container", "header": "Container"},
+            {"id": "cpu_request", "header": "CPU Request"},
+            {"id": "cpu_p95", "header": "CPU P95"},
+            {"id": "cpu_recommendation", "header": "CPU Rec."},
+            {"id": "mem_request", "header": "Mem Request"},
+            {"id": "mem_p95", "header": "Mem P95"},
+            {"id": "mem_recommendation", "header": "Mem Rec."},
+        ],
+        "rows": rows[:50],
+    }
+    return (text, component)
+
+
 ALL_TOOLS = [
     # Universal resource listing + relationships
     get_resource_relationships,
     # Universal resource listing — replaces list_namespaces, list_nodes, list_deployments,
     # list_statefulsets, list_daemonsets, get_services, get_persistent_volume_claims,
-    # get_resource_quotas, list_limit_ranges. Works for any resource including CRDs.
+    # get_resource_quotas, list_limit_ranges, list_replicasets, get_pod_disruption_budgets.
+    # Works for any resource including CRDs.
     list_resources,
+    # Generic describe — works for any resource kind
+    describe_resource,
     # Specialized tools with unique logic (can't be replaced by list_resources)
     list_pods,  # field_selector, logs link, restart count
     describe_pod,
     get_pod_logs,
-    describe_node,
     get_events,  # field_selector filtering by kind/name/type
-    describe_deployment,
     get_cluster_version,
     get_cluster_operators,  # OpenShift condition→status mapping
     get_configmap,
@@ -3092,11 +3687,11 @@ ALL_TOOLS = [
     # Diagnostics
     describe_service,
     get_endpoint_slices,
-    list_replicasets,
-    get_pod_disruption_budgets,
     top_pods_by_restarts,
     get_recent_changes,
     get_tls_certificates,
+    search_logs,  # search across pods by label
+    get_resource_recommendations,  # right-sizing analysis
     # Write operations
     scale_deployment,
     restart_deployment,
@@ -3107,6 +3702,8 @@ ALL_TOOLS = [
     drain_node,
     apply_yaml,
     create_network_policy,
+    exec_command,  # run commands in pods
+    test_connectivity,  # network connectivity tests
     # Audit
     record_audit_entry,
 ]

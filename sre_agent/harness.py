@@ -45,13 +45,12 @@ TOOL_CATEGORIES = {
             "warning",
         ],
         "tools": [
+            "list_resources",
             "list_pods",
             "describe_pod",
             "get_pod_logs",
-            "list_nodes",
             "describe_node",
             "get_events",
-            "list_deployments",
             "describe_deployment",
             "get_cluster_operators",
             "get_cluster_version",
@@ -79,18 +78,14 @@ TOOL_CATEGORIES = {
             "workload",
         ],
         "tools": [
+            "list_resources",
             "list_pods",
             "describe_pod",
             "get_pod_logs",
-            "list_deployments",
             "describe_deployment",
-            "list_statefulsets",
-            "list_daemonsets",
             "list_jobs",
             "list_cronjobs",
-            "list_replicasets",
             "list_hpas",
-            "get_pod_disruption_budgets",
             "scale_deployment",
             "restart_deployment",
             "rollback_deployment",
@@ -111,7 +106,7 @@ TOOL_CATEGORIES = {
             "traffic",
         ],
         "tools": [
-            "get_services",
+            "list_resources",
             "describe_service",
             "get_endpoint_slices",
             "list_ingresses",
@@ -149,9 +144,7 @@ TOOL_CATEGORIES = {
     "storage": {
         "keywords": ["pvc", "storage", "volume", "persistent", "disk", "capacity"],
         "tools": [
-            "get_persistent_volume_claims",
-            "get_resource_quotas",
-            "list_limit_ranges",
+            "list_resources",
         ],
     },
     "monitoring": {
@@ -219,7 +212,7 @@ TOOL_CATEGORIES = {
 # broadly useful. Better to include a few extra tools than to miss one the
 # user needs.
 ALWAYS_INCLUDE = {
-    "list_namespaces",
+    "list_resources",
     "get_cluster_version",
     "record_audit_entry",
     "suggest_remediation",
@@ -227,9 +220,7 @@ ALWAYS_INCLUDE = {
     "list_saved_views",
     "namespace_summary",
     "list_pods",
-    "list_nodes",
     "get_events",
-    "list_deployments",
     "get_firing_alerts",
 }
 
@@ -414,6 +405,13 @@ def get_cluster_context(max_age: float = 60) -> str:
 # ---------------------------------------------------------------------------
 
 COMPONENT_HINT = """
+## Resource Listing Guidance
+
+Use list_resources for any resource type including nodes, deployments, statefulsets, \
+daemonsets, services, PVCs, limitranges, replicasets, PDBs. Use specialized tools only \
+for: pods (logs link), jobs (show_completed filter), cronjobs, ingresses, routes, HPAs, \
+operator subscriptions.
+
 ## UI Component Rendering
 
 When your tool results include structured data (tables, lists, status checks),

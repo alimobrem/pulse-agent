@@ -254,6 +254,8 @@ class TestWriteToolSet:
             "propose_git_change",
             "install_gitops_operator",
             "create_argo_application",
+            "exec_command",
+            "test_connectivity",
         }
         assert expected == WRITE_TOOLS
 

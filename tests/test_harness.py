@@ -31,7 +31,7 @@ class TestToolCategories:
             assert len(config["tools"]) > 0
 
     def test_always_include_set(self):
-        assert "list_namespaces" in ALWAYS_INCLUDE
+        assert "list_resources" in ALWAYS_INCLUDE
         assert "get_cluster_version" in ALWAYS_INCLUDE
 
 
@@ -75,7 +75,7 @@ class TestSelectTools:
         all_tools, tool_map = self._all_tools()
         _defs, selected = select_tools("what's wrong with my cluster health", all_tools, tool_map)
         # diagnostics should pull in workloads
-        assert "scale_deployment" in selected or "list_deployments" in selected
+        assert "scale_deployment" in selected or "list_resources" in selected
 
     def test_fleet_query(self):
         all_tools, tool_map = self._all_tools()
@@ -85,7 +85,7 @@ class TestSelectTools:
     def test_storage_query(self):
         all_tools, tool_map = self._all_tools()
         _defs, selected = select_tools("check pvc storage volumes", all_tools, tool_map)
-        assert "get_persistent_volume_claims" in selected
+        assert "list_resources" in selected
 
     def test_empty_tool_list(self):
         defs, selected = select_tools("anything", [], {})

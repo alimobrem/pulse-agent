@@ -60,7 +60,13 @@ ALL_TOOLS = (
 )
 
 # Add tools that require confirmation
-WRITE_TOOLS = WRITE_TOOLS | {"propose_git_change", "install_gitops_operator", "create_argo_application"}
+WRITE_TOOLS = WRITE_TOOLS | {
+    "propose_git_change",
+    "install_gitops_operator",
+    "create_argo_application",
+    "exec_command",
+    "test_connectivity",
+}
 
 logger = logging.getLogger("pulse_agent")
 
