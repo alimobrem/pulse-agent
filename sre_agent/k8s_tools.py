@@ -1800,6 +1800,36 @@ def get_prometheus_query(query: str, time_range: str = "1h") -> str:
             return "Linear projection based on recent trends — shows estimated future values"
         return f"{'Time series' if tr else 'Snapshot'} with {count} {'series' if tr else 'results'}"
 
+    def _pick_chart_type(q: str, chart_series: list, raw_results: list) -> str:
+        """Pick the best chart type based on query pattern and data shape."""
+        q_lower = q.lower()
+        num_series = len(chart_series)
+
+        # Stacked area: "sum by" queries showing namespace/pod breakdown
+        if "sum by" in q_lower and num_series >= 3:
+            if "cpu" in q_lower or "memory" in q_lower or "network" in q_lower:
+                return "stacked_area"
+
+        # Bar chart: topk queries, comparison across items
+        if "topk" in q_lower or num_series >= 5:
+            # Check if values are relatively flat (comparison, not trend)
+            if chart_series:
+                data = chart_series[0].get("data", [])
+                if len(data) <= 5:
+                    return "bar"
+
+        # Area chart: single series utilization/percentage metrics
+        if num_series == 1:
+            if any(w in q_lower for w in ("percent", "ratio", "utilization", "usage", "100 -")):
+                return "area"
+
+        # Stacked bar: count/sum by category (e.g., pod status, alert severity)
+        if "count" in q_lower and "by" in q_lower and num_series <= 5:
+            return "stacked_bar"
+
+        # Default: line chart for time-series trends
+        return "line"
+
     lines = []
     if result_type == "matrix":
         # Range query → build a ChartSpec
@@ -1820,9 +1850,13 @@ def get_prometheus_query(query: str, time_range: str = "1h") -> str:
             lines.append(f"... and {len(results) - 10} more series (truncated to top 10 for chart)")
 
         text = "\n".join(lines)
+
+        # Pick chart type based on data shape and query pattern
+        chart_type = _pick_chart_type(query, series, results)
+
         component = {
             "kind": "chart",
-            "chartType": "line",
+            "chartType": chart_type,
             "title": _title_from_query(query),
             "description": _desc_from_query(query, time_range, len(series)),
             "series": series,
