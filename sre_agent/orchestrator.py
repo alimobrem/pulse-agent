@@ -5,7 +5,7 @@ from typing import Literal
 
 logger = logging.getLogger("pulse_agent.orchestrator")
 
-AgentMode = Literal["sre", "security", "both"]
+AgentMode = Literal["sre", "security", "both", "view_designer"]
 
 SRE_KEYWORDS = [
     "crash",
@@ -83,6 +83,22 @@ BOTH_KEYWORDS = [
     "cluster audit",
 ]
 
+VIEW_DESIGNER_KEYWORDS = [
+    "dashboard",
+    "create a view",
+    "build a view",
+    "build me a view",
+    "design a view",
+    "build me a dashboard",
+    "create a dashboard",
+    "customize the view",
+    "add widget",
+    "show me a dashboard",
+    "make a view",
+    "make me a view",
+    "new view",
+]
+
 
 def _keyword_score(query_lower: str, keywords: list[str]) -> float:
     """Score query against keywords, weighting longer (more specific) keywords higher."""
@@ -96,6 +112,10 @@ def classify_intent(query: str) -> AgentMode:
     # Check "both" first (explicit full-audit requests)
     if any(kw in q for kw in BOTH_KEYWORDS):
         return "both"
+
+    # Check view designer (dashboard/view creation requests)
+    if any(kw in q for kw in VIEW_DESIGNER_KEYWORDS):
+        return "view_designer"
 
     sre_score = _keyword_score(q, SRE_KEYWORDS)
     sec_score = _keyword_score(q, SECURITY_KEYWORDS)
@@ -135,7 +155,24 @@ def build_orchestrated_config(mode: AgentMode) -> dict:
         TOOL_MAP as SEC_TOOL_MAP,
     )
 
-    if mode == "security":
+    if mode == "view_designer":
+        from .view_designer import (
+            TOOL_DEFS as VD_TOOL_DEFS,
+        )
+        from .view_designer import (
+            TOOL_MAP as VD_TOOL_MAP,
+        )
+        from .view_designer import (
+            VIEW_DESIGNER_SYSTEM_PROMPT,
+        )
+
+        return {
+            "system_prompt": VIEW_DESIGNER_SYSTEM_PROMPT,
+            "tool_defs": VD_TOOL_DEFS,
+            "tool_map": VD_TOOL_MAP,
+            "write_tools": set(),  # View designer never modifies cluster state
+        }
+    elif mode == "security":
         return {
             "system_prompt": SECURITY_SYSTEM_PROMPT,
             "tool_defs": SEC_TOOL_DEFS,

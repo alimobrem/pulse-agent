@@ -656,10 +656,8 @@ async def websocket_agent(websocket: WebSocket, mode: str):
         # Redirect to the auto-routing agent handler
         await websocket_auto_agent(websocket)
         return
-    if mode not in ("sre", "security"):
-        await websocket.close(
-            code=4000, reason="Invalid mode. Use 'sre', 'security', or 'agent'. For monitoring, use /ws/monitor."
-        )
+    if mode not in ("sre", "security", "view_designer"):
+        await websocket.close(code=4000, reason="Invalid mode. Use 'sre', 'security', 'view_designer', or 'agent'.")
         return
 
     # Token authentication — mandatory unless explicitly disabled
