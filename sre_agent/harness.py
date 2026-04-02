@@ -234,18 +234,44 @@ ALWAYS_INCLUDE = {
 }
 
 
-def select_tools(query: str, all_tools: list, all_tool_map: dict) -> tuple[list, dict]:
-    """Return all tools — no filtering.
+# Map orchestrator modes to relevant tool categories
+MODE_CATEGORIES: dict[str, list[str] | None] = {
+    "sre": ["diagnostics", "workloads", "networking", "storage", "monitoring", "operations", "gitops"],
+    "security": ["security", "networking"],
+    "view_designer": ["diagnostics", "monitoring"],
+    "both": None,  # all categories
+}
 
-    Category-based filtering was too fragile and caused tools to be missing
-    for natural-language queries. With prompt caching, including all tools
-    has negligible token cost (~90% cache hit rate on the system prompt).
 
-    The TOOL_CATEGORIES dict above is retained for reference and for the
-    cluster context injection hints, but is no longer used for filtering.
+def select_tools(query: str, all_tools: list, all_tool_map: dict, mode: str = "sre") -> tuple[list, dict]:
+    """Select tools based on agent mode.
+
+    Mode-aware: each orchestrator mode maps to a set of tool categories.
+    Tools in ALWAYS_INCLUDE are always returned regardless of mode.
+    If mode is 'both' or unknown, all tools are returned.
     """
-    logger.info("Tool selection: returning all %d tools for query=%r", len(all_tools), query[:50])
-    return [t.to_dict() for t in all_tools], {t.name: t for t in all_tools}
+    categories = MODE_CATEGORIES.get(mode)
+
+    # Fallback: return all tools for 'both' or unknown modes
+    if categories is None:
+        logger.info("Tool selection: returning all %d tools for mode=%s", len(all_tools), mode)
+        return [t.to_dict() for t in all_tools], {t.name: t for t in all_tools}
+
+    # Collect tool names from the mode's categories
+    mode_tool_names = set(ALWAYS_INCLUDE)
+    for cat_name in categories:
+        cat = TOOL_CATEGORIES.get(cat_name, {})
+        mode_tool_names.update(cat.get("tools", []))
+
+    filtered = [t for t in all_tools if t.name in mode_tool_names]
+
+    # Safety: if filtering removed too many, return all
+    if len(filtered) < 5:
+        logger.warning("Tool selection: mode=%s matched only %d tools, returning all", mode, len(filtered))
+        return [t.to_dict() for t in all_tools], {t.name: t for t in all_tools}
+
+    logger.info("Tool selection: %d/%d tools for mode=%s", len(filtered), len(all_tools), mode)
+    return [t.to_dict() for t in filtered], {t.name: t for t in filtered}
 
 
 # ---------------------------------------------------------------------------
@@ -291,8 +317,8 @@ def build_cached_system_prompt(
 # ---------------------------------------------------------------------------
 
 
-def gather_cluster_context() -> str:
-    """Pre-fetch key cluster state concurrently."""
+def gather_cluster_context(mode: str = "sre") -> str:
+    """Pre-fetch key cluster state concurrently, scoped by agent mode."""
     import concurrent.futures
 
     from .errors import ToolError
@@ -362,14 +388,31 @@ def gather_cluster_context() -> str:
         except Exception:
             return None
 
+    def _fetch_view_count():
+        try:
+            from . import db
+
+            database = db.get_database()
+            row = database.fetchone("SELECT COUNT(*) as cnt FROM views")
+            return f"Saved views: {row['cnt']}" if row else None
+        except Exception:
+            return None
+
     results = {}
+    # All modes get basic cluster info
     fetchers = {
         "nodes": _fetch_nodes,
         "namespaces": _fetch_namespaces,
         "version": _fetch_version,
-        "pods": _fetch_failing_pods,
-        "alerts": _fetch_alerts,
     }
+    # SRE/both modes get operational context
+    if mode in ("sre", "both"):
+        fetchers["pods"] = _fetch_failing_pods
+        fetchers["alerts"] = _fetch_alerts
+    # View designer gets view inventory
+    if mode == "view_designer":
+        fetchers["views"] = _fetch_view_count
+    # Security mode: just nodes + namespaces + version (lightweight)
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=5) as pool:
         futures = {pool.submit(fn): key for key, fn in fetchers.items()}
@@ -397,15 +440,15 @@ _cluster_context_cache: str = ""
 _cluster_context_ts: float = 0
 
 
-def get_cluster_context(max_age: float = 60) -> str:
-    """Get cached cluster context, refreshing if stale."""
+def get_cluster_context(max_age: float = 60, mode: str = "sre") -> str:
+    """Get cached cluster context, refreshing if stale. Mode-aware."""
     import time
 
     global _cluster_context_cache, _cluster_context_ts
     now = time.time()
     if now - _cluster_context_ts > max_age:
         try:
-            _cluster_context_cache = gather_cluster_context()
+            _cluster_context_cache = gather_cluster_context(mode=mode)
             _cluster_context_ts = now
         except Exception as e:
             staleness = int(now - _cluster_context_ts) if _cluster_context_ts else 0
@@ -416,6 +459,21 @@ def get_cluster_context(max_age: float = 60) -> str:
 # ---------------------------------------------------------------------------
 # 4. Structured Output Hints — guide component rendering
 # ---------------------------------------------------------------------------
+
+
+def get_component_hint(mode: str = "sre") -> str:
+    """Return the appropriate component hint for the agent mode.
+
+    - view_designer: returns empty (has its own comprehensive guide in system prompt)
+    - security: returns empty (no component rendering needed)
+    - sre/both: returns full COMPONENT_HINT
+    """
+    if mode == "view_designer":
+        return ""  # View designer system prompt already has a complete component guide
+    if mode == "security":
+        return ""  # Security agent doesn't create views
+    return COMPONENT_HINT
+
 
 COMPONENT_HINT = """
 ## Resource Listing Guidance

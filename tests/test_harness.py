@@ -48,20 +48,19 @@ class TestSelectTools:
 
     def test_diagnostics_query(self):
         all_tools, tool_map = self._all_tools()
-        defs, selected = select_tools("check cluster health", all_tools, tool_map)
+        _defs, selected = select_tools("check cluster health", all_tools, tool_map, mode="sre")
         assert "list_pods" in selected
         assert "get_events" in selected
-        assert len(defs) == len(all_tools)  # All tools always returned
 
     def test_security_query(self):
         all_tools, tool_map = self._all_tools()
-        _defs, selected = select_tools("run a security audit of rbac", all_tools, tool_map)
+        _defs, selected = select_tools("run a security audit of rbac", all_tools, tool_map, mode="security")
         assert "scan_rbac_risks" in selected
         assert "scan_pod_security" in selected
 
     def test_generic_query_returns_all(self):
         all_tools, tool_map = self._all_tools()
-        _defs, selected = select_tools("hello world", all_tools, tool_map)
+        _defs, selected = select_tools("hello world", all_tools, tool_map, mode="both")
         assert len(selected) == len(all_tools)
 
     def test_always_include_present(self):
@@ -80,7 +79,7 @@ class TestSelectTools:
 
     def test_fleet_query(self):
         all_tools, tool_map = self._all_tools()
-        _defs, selected = select_tools("compare across all clusters fleet", all_tools, tool_map)
+        _defs, selected = select_tools("compare across all clusters fleet", all_tools, tool_map, mode="both")
         assert "fleet_list_clusters" in selected
 
     def test_storage_query(self):

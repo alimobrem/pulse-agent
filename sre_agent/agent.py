@@ -18,9 +18,9 @@ from .git_tools import GIT_TOOLS
 from .gitops_tools import GITOPS_TOOLS
 from .handoff_tools import request_security_scan
 from .harness import (
-    COMPONENT_HINT,
     build_cached_system_prompt,
     get_cluster_context,
+    get_component_hint,
     select_tools,
 )
 from .k8s_tools import ALL_TOOLS as _K8S_TOOLS
@@ -354,6 +354,7 @@ def run_agent_streaming(
     on_tool_use=None,
     on_confirm=None,
     on_component=None,
+    mode: str = "sre",
 ) -> str:
     """Run an agent turn with streaming, handling the tool loop manually.
 
@@ -397,16 +398,17 @@ def run_agent_streaming(
     if use_harness and messages:
         last_user = next((m["content"] for m in reversed(messages) if m["role"] == "user"), "")
         if isinstance(last_user, str) and last_user:
-            filtered_defs, filtered_map = select_tools(last_user, list(tool_map.values()), tool_map)
+            filtered_defs, filtered_map = select_tools(last_user, list(tool_map.values()), tool_map, mode=mode)
             if len(filtered_defs) < len(tool_defs):
                 tool_defs = filtered_defs
                 tool_map = {**filtered_map}  # Don't mutate the original
 
     # --- Harness: Cached system prompt with cluster context ---
     if use_harness:
-        cluster_ctx = get_cluster_context()
+        cluster_ctx = get_cluster_context(mode=mode)
+        hint = get_component_hint(mode)
         effective_system = build_cached_system_prompt(
-            system_prompt + COMPONENT_HINT,
+            system_prompt + hint,
             cluster_ctx,
         )
     else:

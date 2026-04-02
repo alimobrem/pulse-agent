@@ -266,6 +266,7 @@ async def _run_agent_ws(
     write_tools: set[str],
     session_id: str,
     current_user: str = "anonymous",
+    mode: str = "sre",
 ):
     """Run an agent turn and stream results over WebSocket."""
     from .view_tools import set_current_user
@@ -370,6 +371,7 @@ async def _run_agent_ws(
         on_tool_use=on_tool_use,
         on_confirm=on_confirm,
         on_component=on_component,
+        mode=mode,
     )
 
     # Process structured signals from tool results — no regex scanning needed.
@@ -764,6 +766,7 @@ async def websocket_agent(websocket: WebSocket, mode: str):
                     write_tools,
                     session_id,
                     current_user=ws_user,
+                    mode=mode,
                 )
                 messages.append({"role": "assistant", "content": full_response})
 
@@ -949,6 +952,7 @@ async def websocket_auto_agent(websocket: WebSocket):
                     write_tools,
                     session_id,
                     current_user=ws_user,
+                    mode=intent,
                 )
                 messages.append({"role": "assistant", "content": full_response})
 
