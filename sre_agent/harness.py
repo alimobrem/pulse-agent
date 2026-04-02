@@ -49,9 +49,10 @@ TOOL_CATEGORIES = {
             "list_pods",
             "describe_pod",
             "get_pod_logs",
-            "describe_node",
+            "list_nodes",
             "get_events",
             "describe_deployment",
+            "list_deployments",
             "get_cluster_operators",
             "get_cluster_version",
             "top_pods_by_restarts",
@@ -62,6 +63,8 @@ TOOL_CATEGORIES = {
             "correlate_incident",
             "namespace_summary",
             "cluster_metrics",
+            "describe_resource",
+            "search_logs",
         ],
     },
     "workloads": {
@@ -84,6 +87,7 @@ TOOL_CATEGORIES = {
             "describe_pod",
             "get_pod_logs",
             "describe_deployment",
+            "list_deployments",
             "list_jobs",
             "list_cronjobs",
             "list_hpas",
@@ -114,6 +118,7 @@ TOOL_CATEGORIES = {
             "list_routes",
             "create_network_policy",
             "scan_network_policies",
+            "test_connectivity",
         ],
     },
     "security": {
@@ -167,6 +172,7 @@ TOOL_CATEGORIES = {
             "get_node_metrics",
             "get_pod_metrics",
             "forecast_quota_exhaustion",
+            "get_resource_recommendations",
         ],
     },
     "operations": {
@@ -178,6 +184,7 @@ TOOL_CATEGORIES = {
             "apply_yaml",
             "get_configmap",
             "list_operator_subscriptions",
+            "exec_command",
         ],
     },
     "gitops": {
@@ -372,14 +379,17 @@ def gather_cluster_context() -> str:
                 result = future.result(timeout=5)
                 if result:
                     results[key] = result
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning("Cluster context fetch '%s' failed: %s", key, e)
 
     if not results:
         return ""
 
+    import time as _time
+
     parts = [results[k] for k in ("nodes", "namespaces", "version", "pods", "alerts") if k in results]
-    return "\n## Live Cluster State (auto-gathered)\n" + "\n".join(f"- {p}" for p in parts)
+    ts = _time.strftime("%H:%M:%S")
+    return f"\n## Live Cluster State (gathered at {ts})\n" + "\n".join(f"- {p}" for p in parts)
 
 
 # Cached cluster context — refreshed every 60 seconds
@@ -397,8 +407,9 @@ def get_cluster_context(max_age: float = 60) -> str:
         try:
             _cluster_context_cache = gather_cluster_context()
             _cluster_context_ts = now
-        except Exception:
-            pass  # Use stale cache on error
+        except Exception as e:
+            staleness = int(now - _cluster_context_ts) if _cluster_context_ts else 0
+            logger.warning("Cluster context refresh failed (serving %ds-old cache): %s", staleness, e)
     return _cluster_context_cache
 
 

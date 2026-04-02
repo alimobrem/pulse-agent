@@ -514,3 +514,39 @@ def restore_view_version(view_id: str, owner: str, version: int) -> bool:
     )
     db.commit()
     return True
+
+
+@_db_safe
+def migrate_view_ownership(new_owner: str) -> int:
+    """Migrate views from hash-based owners (user-*) to a real username.
+
+    Called once when a real username is first resolved via X-Forwarded-User.
+    Only migrates if there are hash-based views and no views for the real owner yet.
+    Returns the number of migrated views.
+    """
+    db = get_database()
+
+    # Don't migrate if the new owner already has views
+    existing = db.fetchone("SELECT COUNT(*) as cnt FROM views WHERE owner = ?", (new_owner,))
+    if existing and existing["cnt"] > 0:
+        return 0
+
+    # Find hash-based owners (user-<hex>)
+    hash_owners = db.fetchall(
+        "SELECT DISTINCT owner FROM views WHERE owner LIKE 'user-%' AND LENGTH(owner) = 21",
+    )
+    if not hash_owners:
+        return 0
+
+    # Migrate all hash-based views to the real owner
+    total = 0
+    for row in hash_owners:
+        old_owner = row["owner"]
+        db.execute("UPDATE views SET owner = ? WHERE owner = ?", (new_owner, old_owner))
+        count = db.fetchone("SELECT changes() as n")
+        total += count["n"] if count else 0
+
+    if total > 0:
+        db.commit()
+
+    return total

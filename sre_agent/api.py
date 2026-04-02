@@ -1560,7 +1560,19 @@ def _get_current_user(
 
     # Best source: OAuth proxy sets X-Forwarded-User directly
     if x_forwarded_user and isinstance(x_forwarded_user, str) and x_forwarded_user.strip():
-        return x_forwarded_user.strip()
+        username = x_forwarded_user.strip()
+        # One-time migration: move hash-based views to real username
+        if not _user_cache.get(f"_migrated_{username}"):
+            try:
+                from . import db
+
+                migrated = db.migrate_view_ownership(username)
+                if migrated:
+                    logger.info("Migrated %d views to user '%s'", migrated, username)
+            except Exception:
+                pass
+            _user_cache[f"_migrated_{username}"] = (username, time.time())
+        return username
 
     token = x_forwarded_access_token or ""
 
@@ -1597,24 +1609,8 @@ def _get_current_user(
     except Exception:
         logger.warning("TokenReview API unavailable, falling back to token-derived identity")
 
-    # Fallback: try to extract username from JWT claims (OpenShift OAuth tokens
-    # are often JWTs with sub/preferred_username/name claims)
-    try:
-        import base64
-
-        parts = token.split(".")
-        if len(parts) >= 2:
-            # Decode JWT payload (add padding)
-            payload = parts[1] + "=" * (4 - len(parts[1]) % 4)
-            claims = json.loads(base64.urlsafe_b64decode(payload))
-            jwt_user = claims.get("sub") or claims.get("preferred_username") or claims.get("name")
-            if jwt_user and isinstance(jwt_user, str):
-                _cache_user(token_hash, jwt_user)
-                return jwt_user
-    except Exception:
-        pass
-
     # Final fallback: stable identity derived from token hash.
+    # OpenShift tokens are sha256~ format (not JWTs), so we can't decode them.
     fallback_user = f"user-{token_hash[:16]}"
     _cache_user(token_hash, fallback_user)
     return fallback_user
