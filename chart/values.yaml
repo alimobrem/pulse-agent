@@ -1,5 +1,6 @@
-# Default 1 replica — memory PVC uses ReadWriteOnce (gp3-csi).
-# Set to 2+ only with ReadWriteMany storage or no PVC.
+# Default 1 replica. Uses RollingUpdate (maxSurge: 1), so two pods
+# briefly coexist during upgrades. The memory PVC (ReadWriteOnce) is
+# only mounted if memory.persistence.enabled=true.
 replicaCount: 1
 
 image:
