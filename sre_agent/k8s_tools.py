@@ -342,7 +342,42 @@ def get_pod_logs(
     result = safe(lambda: get_core_client().read_namespaced_pod_log(**kwargs))
     if isinstance(result, ToolError):
         return str(result)
-    return result or "(empty logs)"
+    log_text = result or ""
+    if not log_text:
+        return "(empty logs)"
+
+    # Parse log lines into structured log_viewer component
+    lines = []
+    for raw_line in log_text.strip().split("\n"):
+        if not raw_line:
+            continue
+        entry: dict = {"message": raw_line}
+        # Try to extract timestamp (common K8s log format: 2026-01-01T00:00:00.000Z ...)
+        if len(raw_line) > 24 and raw_line[4] == "-" and "T" in raw_line[:20]:
+            ts_end = raw_line.find(" ", 20)
+            if ts_end > 0:
+                entry["timestamp"] = raw_line[:ts_end]
+                entry["message"] = raw_line[ts_end + 1 :]
+        # Detect log level
+        msg_lower = entry["message"].lower()
+        if any(w in msg_lower for w in ("error", "fatal", "panic", "exception")):
+            entry["level"] = "error"
+        elif any(w in msg_lower for w in ("warn", "warning")):
+            entry["level"] = "warn"
+        elif any(w in msg_lower for w in ("debug", "trace")):
+            entry["level"] = "debug"
+        else:
+            entry["level"] = "info"
+        lines.append(entry)
+
+    source = f"{pod_name}/{container}" if container else pod_name
+    component = {
+        "kind": "log_viewer",
+        "title": f"Logs: {source}",
+        "source": source,
+        "lines": lines[-500:],  # Cap at 500 lines
+    }
+    return (log_text[:2000] if len(log_text) > 2000 else log_text, component)
 
 
 @beta_tool
@@ -939,7 +974,22 @@ def get_configmap(namespace: str, name: str) -> str:
         return str(result)
     data = result.data or {}
     info = {"name": result.metadata.name, "namespace": result.metadata.namespace, "data": data}
-    return json.dumps(info, indent=2, default=str)
+    text = json.dumps(info, indent=2, default=str)
+
+    # Render each data key as a yaml_viewer component
+    if len(data) == 1:
+        key, val = next(iter(data.items()))
+        lang = "json" if val.strip().startswith("{") or val.strip().startswith("[") else "yaml"
+        component = {"kind": "yaml_viewer", "title": f"ConfigMap: {name}/{key}", "content": val, "language": lang}
+        return (text, component)
+
+    # Multiple keys → key_value summary
+    component = {
+        "kind": "key_value",
+        "title": f"ConfigMap: {name}",
+        "pairs": [{"key": k, "value": v[:100] + ("..." if len(v) > 100 else "")} for k, v in data.items()],
+    }
+    return (text, component)
 
 
 # ---------------------------------------------------------------------------
@@ -3429,8 +3479,34 @@ def search_logs(namespace: str, label_selector: str, pattern: str, tail_lines: i
     if not matches:
         return f"No matches for '{pattern}' in logs of {pods_searched} pods matching '{label_selector}'."
 
-    header = f"Found {len(matches)} matching lines across {pods_with_matches}/{pods_searched} pods:\n\n"
-    return header + "\n".join(matches[:200])  # Overall cap
+    header = f"Found {len(matches)} matching lines across {pods_with_matches}/{pods_searched} pods:"
+    text = header + "\n\n" + "\n".join(matches[:200])
+
+    # Build log_viewer component
+    log_lines = []
+    for line in matches[:200]:
+        source = ""
+        msg = line
+        if line.startswith("[") and "] " in line:
+            bracket_end = line.index("] ")
+            source = line[1:bracket_end]
+            msg = line[bracket_end + 2 :]
+        level = (
+            "error"
+            if any(w in msg.lower() for w in ("error", "fatal", "panic"))
+            else "warn"
+            if any(w in msg.lower() for w in ("warn", "warning"))
+            else "info"
+        )
+        log_lines.append({"message": msg, "source": source, "level": level})
+
+    component = {
+        "kind": "log_viewer",
+        "title": f"Log Search: '{pattern}' ({len(matches)} matches)",
+        "source": label_selector,
+        "lines": log_lines,
+    }
+    return (text, component)
 
 
 # ---------------------------------------------------------------------------

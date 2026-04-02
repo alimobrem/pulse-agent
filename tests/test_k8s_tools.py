@@ -153,7 +153,9 @@ class TestGetPodLogs:
     def test_returns_logs(self, mock_k8s):
         mock_k8s["core"].read_namespaced_pod_log.return_value = "line1\nline2\nline3"
         result = get_pod_logs.call({"namespace": "default", "pod_name": "my-pod"})
-        assert "line1" in result
+        # Returns (text, log_viewer_component) tuple
+        text = result[0] if isinstance(result, tuple) else result
+        assert "line1" in text
 
     def test_clamps_tail_lines(self, mock_k8s):
         mock_k8s["core"].read_namespaced_pod_log.return_value = "logs"
@@ -364,7 +366,8 @@ class TestGetConfigmap:
         )
         mock_k8s["core"].read_namespaced_config_map.return_value = cm
         result = get_configmap.call({"namespace": "default", "name": "app-config"})
-        data = json.loads(result)
+        text = result[0] if isinstance(result, tuple) else result
+        data = json.loads(text)
         assert data["name"] == "app-config"
         assert data["data"]["key1"] == "value1"
 
@@ -703,11 +706,12 @@ class TestSearchLogs:
                 "pattern": "ERROR",
             }
         )
-        assert "web-1" in result
-        assert "web-2" in result
-        assert "connection refused" in result
-        assert "timeout" in result
-        assert "2/2 pods" in result
+        text = result[0] if isinstance(result, tuple) else result
+        assert "web-1" in text
+        assert "web-2" in text
+        assert "connection refused" in text
+        assert "timeout" in text
+        assert "2/2 pods" in text
 
     def test_no_matches(self, mock_k8s):
         mock_k8s["core"].list_namespaced_pod.return_value = _list_result(
@@ -750,7 +754,8 @@ class TestSearchLogs:
                 "pattern": "ERROR",
             }
         )
-        assert "something failed" in result
+        text = result[0] if isinstance(result, tuple) else result
+        assert "something failed" in text
 
     def test_missing_selector(self, mock_k8s):
         result = search_logs.call(
