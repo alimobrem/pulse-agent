@@ -1770,7 +1770,7 @@ async def rest_share_view(
 
     secret = os.environ.get("PULSE_AGENT_WS_TOKEN", "")
     if not secret:
-        return JSONResponse(status_code=503, detail="Server not configured for sharing")
+        return JSONResponse(status_code=503, content={"error": "Server not configured for sharing"})
     expires = int(time.time()) + 86400  # 24 hours
     payload = f"{view_id}:{expires}"
     signature = hmac.new(secret.encode(), payload.encode(), hashlib.sha256).hexdigest()

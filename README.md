@@ -2,7 +2,7 @@
 
 <p>
   <a href="https://github.com/alimobrem/pulse-agent/releases/tag/v1.13.1"><img src="https://img.shields.io/badge/release-v1.13.1-2563eb?style=for-the-badge" alt="Version"></a>
-  <img src="https://img.shields.io/badge/tools-103-10b981?style=for-the-badge" alt="Tools">
+  <img src="https://img.shields.io/badge/tools-72-10b981?style=for-the-badge" alt="Tools">
   <img src="https://img.shields.io/badge/scanners-11-10b981?style=for-the-badge" alt="Scanners">
   <img src="https://img.shields.io/badge/tests-753-10b981?style=for-the-badge" alt="Tests">
   <img src="https://img.shields.io/badge/license-MIT-6366f1?style=for-the-badge" alt="License">
@@ -255,17 +255,18 @@ The trust level is persisted in the UI's `localStorage` (via `trustStore`) and d
 
 ## Tools
 
-### SRE Tools (35)
+### SRE Tools (59)
 
 | Category | Tools |
 |----------|-------|
-| **Core diagnostics** | `list_namespaces`, `list_pods`, `describe_pod`, `get_pod_logs`, `list_nodes`, `describe_node`, `get_events` |
-| **Workloads** | `list_deployments`, `describe_deployment`, `list_statefulsets`, `list_daemonsets`, `list_jobs`, `list_cronjobs` |
-| **Networking** | `get_services`, `list_ingresses`, `list_routes` |
-| **Storage & resources** | `get_persistent_volume_claims`, `get_resource_quotas`, `get_configmap` |
-| **Metrics** | `get_node_metrics`, `get_pod_metrics`, `list_hpas`, `get_prometheus_query` |
-| **Cluster info** | `get_cluster_version`, `get_cluster_operators`, `list_operator_subscriptions`, `get_firing_alerts` |
-| **Write operations** | `scale_deployment`, `restart_deployment`, `cordon_node`, `uncordon_node`, `delete_pod`, `apply_yaml`, `create_network_policy` |
+| **Core diagnostics** | `list_namespaces`, `list_pods`, `describe_pod`, `get_pod_logs`, `list_nodes`, `describe_node`, `get_events`, `list_resources`, `describe_resource`, `search_logs` |
+| **Workloads** | `list_deployments`, `describe_deployment`, `list_statefulsets`, `list_daemonsets`, `list_jobs`, `list_cronjobs`, `list_replicasets`, `get_recent_changes`, `get_resource_relationships`, `top_pods_by_restarts` |
+| **Networking** | `get_services`, `describe_service`, `list_ingresses`, `list_routes`, `get_endpoint_slices`, `test_connectivity` |
+| **Storage & resources** | `get_persistent_volume_claims`, `get_resource_quotas`, `get_configmap`, `list_limit_ranges`, `get_pod_disruption_budgets` |
+| **Metrics** | `get_node_metrics`, `get_pod_metrics`, `list_hpas`, `get_prometheus_query`, `get_resource_recommendations` |
+| **Cluster info** | `get_cluster_version`, `get_cluster_operators`, `list_operator_subscriptions`, `get_firing_alerts`, `get_tls_certificates` |
+| **Write operations** | `scale_deployment`, `restart_deployment`, `rollback_deployment`, `cordon_node`, `uncordon_node`, `drain_node`, `delete_pod`, `apply_yaml`, `create_network_policy`, `exec_command` |
+| **GitOps** | `get_argo_applications`, `get_argo_app_detail`, `get_argo_sync_diff`, `create_argo_application`, `detect_gitops_drift`, `install_gitops_operator` |
 | **Audit** | `record_audit_entry` |
 
 ### Security Tools (9)
@@ -321,7 +322,7 @@ Built-in optimizations for getting the most out of Claude (`PULSE_AGENT_HARNESS=
 
 | Feature | What It Does | Impact |
 |---------|-------------|--------|
-| **Dynamic Tool Selection** | Categorizes 103 tools into 8 groups, loads only relevant ones per query | 103->15-25 tools, faster + cheaper |
+| **Dynamic Tool Selection** | Categorizes 72 tools into 8 groups, loads only relevant ones per query | 72->15-25 tools, faster + cheaper |
 | **Prompt Caching** | Marks system prompt + runbooks with `cache_control: ephemeral` | ~90% cost reduction on context |
 | **Cluster Context Injection** | Pre-fetches node count, namespaces, OCP version, failing pods, firing alerts | Saves 2-3 tool calls per query |
 | **Component Rendering Hints** | Guides Claude to focus on analysis, not data formatting | Cleaner responses |
@@ -408,7 +409,7 @@ Tools can return structured UI specs alongside text. The [Pulse UI](https://gith
 return (text, {"kind": "data_table", "title": "Pods", "columns": [...], "rows": [...]})
 ```
 
-Supported: `data_table`, `info_card_grid`, `badge_list`, `status_list`, `key_value`, `chart`, `metric_card`, `log_viewer`, `yaml_viewer`, `markdown`.
+Supported: `data_table`, `info_card_grid`, `badge_list`, `status_list`, `key_value`, `chart`, `relationship_tree`, `tabs`, `grid`, `section`.
 
 **Views auto-save:** `create_dashboard` saves views directly to PostgreSQL — no frontend click needed. View deserialization sanitizes NaN/Infinity values. Prometheus chart data filters NaN before rendering.
 
@@ -456,8 +457,8 @@ Builds both images locally with Podman, pushes to Quay.io, deploys via Helm. Age
 ### Build Image
 
 ```bash
-podman build --platform linux/amd64 -t quay.io/amobrem/pulse-agent:v1.12.0 -f Dockerfile.full .
-podman push quay.io/amobrem/pulse-agent:v1.12.0
+podman build --platform linux/amd64 -t quay.io/amobrem/pulse-agent:v1.13.1 -f Dockerfile.full .
+podman push quay.io/amobrem/pulse-agent:v1.13.1
 ```
 
 ### Helm Install
@@ -672,7 +673,7 @@ Suites:
 ---
 
 <p align="center">
-  <strong>103 tools</strong> &bull; <strong>16 scanners</strong> &bull; <strong>10 runbooks</strong> &bull; <strong>8 tool categories</strong> &bull; <strong>753 tests</strong> &bull; <strong>Protocol v2</strong>
+  <strong>72 tools</strong> &bull; <strong>16 scanners</strong> &bull; <strong>10 runbooks</strong> &bull; <strong>8 tool categories</strong> &bull; <strong>753 tests</strong> &bull; <strong>Protocol v2</strong>
 </p>
 
 <p align="center">
