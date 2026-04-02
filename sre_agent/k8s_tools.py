@@ -1750,7 +1750,25 @@ def get_prometheus_query(query: str, time_range: str = "1h") -> str:
             return "Node CPU Utilization"
         if "node_memory" in q:
             return "Node Memory Pressure"
-        # Fallback: use the metric name
+        if "network_receive" in q:
+            group = _re.search(r"by\s*\(([^)]+)\)", q)
+            by = group.group(1) if group else ""
+            return "Network Receive" + (f" by {by}" if by else "")
+        if "network_transmit" in q:
+            group = _re.search(r"by\s*\(([^)]+)\)", q)
+            by = group.group(1) if group else ""
+            return "Network Transmit" + (f" by {by}" if by else "")
+        if "restart" in q.lower():
+            return "Pod Restarts"
+        if "ALERTS" in q:
+            return "Firing Alerts"
+        if "kube_event" in q:
+            return "Warning Events"
+        if "filesystem" in q or "volume_stats" in q:
+            return "Disk Usage"
+        if "predict_linear" in q:
+            return "Capacity Projection"
+        # Fallback: use the metric name, cleaned up
         metric = _re.search(r"([a-z_]+)\{", q) or _re.search(r"([a-z_]+)\(", q) or _re.search(r"^([a-z_]+)", q)
         return metric.group(1).replace("_", " ").title() if metric else q[:60]
 
@@ -1768,6 +1786,18 @@ def get_prometheus_query(query: str, time_range: str = "1h") -> str:
             return "Monitors available memory per node — low availability risks OOM kills and pod evictions"
         if "up" in q and "up{" not in q:
             return "Service availability — 1 means up, 0 means the target is down or unreachable"
+        if "network_receive" in q:
+            return "Inbound network traffic — spikes may indicate unexpected load or DDoS"
+        if "network_transmit" in q:
+            return "Outbound network traffic — useful for identifying high-bandwidth workloads"
+        if "restart" in q.lower():
+            return "Container restarts over time — sustained restarts indicate crashlooping or resource issues"
+        if "ALERTS" in q:
+            return "Firing alert count over time — rising trend indicates degrading cluster health"
+        if "filesystem" in q or "volume_stats" in q:
+            return "Storage utilization — watch for volumes approaching capacity"
+        if "predict_linear" in q:
+            return "Linear projection based on recent trends — shows estimated future values"
         return f"{'Time series' if tr else 'Snapshot'} with {count} {'series' if tr else 'results'}"
 
     lines = []

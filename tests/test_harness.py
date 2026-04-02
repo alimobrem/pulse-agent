@@ -125,12 +125,11 @@ class TestGetClusterContext:
     def test_caches_result(self):
         import sre_agent.harness as h
 
-        h._cluster_context_cache = ""
-        h._cluster_context_ts = 0
+        h._cluster_context_cache.clear()
 
         with patch("sre_agent.harness.gather_cluster_context", return_value="cached data") as mock_gather:
-            result1 = get_cluster_context(max_age=60)
-            result2 = get_cluster_context(max_age=60)
+            result1 = get_cluster_context(max_age=60, mode="sre")
+            result2 = get_cluster_context(max_age=60, mode="sre")
         assert result1 == "cached data"
         assert result2 == "cached data"
         assert mock_gather.call_count == 1
@@ -138,21 +137,19 @@ class TestGetClusterContext:
     def test_refreshes_when_stale(self):
         import sre_agent.harness as h
 
-        h._cluster_context_cache = "old"
-        h._cluster_context_ts = 0  # ancient timestamp
+        h._cluster_context_cache["sre"] = ("old", 0)  # ancient timestamp
 
         with patch("sre_agent.harness.gather_cluster_context", return_value="new data"):
-            result = get_cluster_context(max_age=60)
+            result = get_cluster_context(max_age=60, mode="sre")
         assert result == "new data"
 
     def test_keeps_stale_on_error(self):
         import sre_agent.harness as h
 
-        h._cluster_context_cache = "stale"
-        h._cluster_context_ts = 0
+        h._cluster_context_cache["sre"] = ("stale", 0)
 
         with patch("sre_agent.harness.gather_cluster_context", side_effect=RuntimeError("k8s down")):
-            result = get_cluster_context(max_age=60)
+            result = get_cluster_context(max_age=60, mode="sre")
         assert result == "stale"
 
 

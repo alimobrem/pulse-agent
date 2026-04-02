@@ -436,24 +436,26 @@ def gather_cluster_context(mode: str = "sre") -> str:
 
 
 # Cached cluster context — refreshed every 60 seconds
-_cluster_context_cache: str = ""
-_cluster_context_ts: float = 0
+_cluster_context_cache: dict[str, tuple[str, float]] = {}
 
 
 def get_cluster_context(max_age: float = 60, mode: str = "sre") -> str:
-    """Get cached cluster context, refreshing if stale. Mode-aware."""
+    """Get cached cluster context, refreshing if stale. Mode-aware (keyed by mode)."""
     import time
 
-    global _cluster_context_cache, _cluster_context_ts
     now = time.time()
-    if now - _cluster_context_ts > max_age:
-        try:
-            _cluster_context_cache = gather_cluster_context(mode=mode)
-            _cluster_context_ts = now
-        except Exception as e:
-            staleness = int(now - _cluster_context_ts) if _cluster_context_ts else 0
-            logger.warning("Cluster context refresh failed (serving %ds-old cache): %s", staleness, e)
-    return _cluster_context_cache
+    cached = _cluster_context_cache.get(mode)
+    if cached and (now - cached[1]) <= max_age:
+        return cached[0]
+
+    try:
+        ctx = gather_cluster_context(mode=mode)
+        _cluster_context_cache[mode] = (ctx, now)
+        return ctx
+    except Exception as e:
+        staleness = int(now - cached[1]) if cached else 0
+        logger.warning("Cluster context refresh failed (serving %ds-old cache): %s", staleness, e)
+        return cached[0] if cached else ""
 
 
 # ---------------------------------------------------------------------------

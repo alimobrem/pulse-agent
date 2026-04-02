@@ -113,6 +113,9 @@ VIEW_DESIGNER_KEYWORDS = [
 ]
 
 
+_VIEW_TRIGGER_WORDS = {"widget", "sparkline", "metric card"}
+
+
 def _keyword_score(query_lower: str, keywords: list[str]) -> float:
     """Score query against keywords, weighting longer (more specific) keywords higher."""
     return sum(len(kw) for kw in keywords if kw in query_lower)
@@ -127,9 +130,7 @@ def classify_intent(query: str) -> AgentMode:
         return "both"
 
     # Check view designer (dashboard/view creation requests)
-    # Match exact phrases OR single trigger words
-    VIEW_TRIGGER_WORDS = {"dashboard", "widget", "sparkline", "metric card", "layout"}
-    if any(kw in q for kw in VIEW_DESIGNER_KEYWORDS) or any(w in q for w in VIEW_TRIGGER_WORDS):
+    if any(kw in q for kw in VIEW_DESIGNER_KEYWORDS) or any(w in q for w in _VIEW_TRIGGER_WORDS):
         return "view_designer"
 
     sre_score = _keyword_score(q, SRE_KEYWORDS)
