@@ -417,11 +417,21 @@ async def _run_agent_ws(
             view_desc = sig.get("description", "")
             view_template = sig.get("template", "")
 
+            # Compute positions from template if specified
+            positions = None
+            if view_template:
+                from .layout_templates import apply_template as _apply_tpl
+
+                positions = _apply_tpl(view_template, session_components)
+
             existing = _db.get_view_by_title(current_user, view_title)
             if existing:
                 old_layout = existing.get("layout", [])
                 merged_layout = old_layout + session_components
-                _db.update_view(existing["id"], current_user, layout=merged_layout, description=view_desc)
+                update_kwargs: dict = {"layout": merged_layout, "description": view_desc}
+                if positions:
+                    update_kwargs["positions"] = positions
+                _db.update_view(existing["id"], current_user, **update_kwargs)
                 _view_updated_ids.add(existing["id"])
                 logger.info(
                     "Updated existing view: id=%s title=%s (+%d components)",
@@ -430,17 +440,21 @@ async def _run_agent_ws(
                     len(session_components),
                 )
             else:
-                # Auto-save new views to DB so they persist without user action
-                _db.save_view(current_user, view_id, view_title, view_desc, session_components)
+                _db.save_view(current_user, view_id, view_title, view_desc, session_components, positions=positions)
                 _view_updated_ids.add(view_id)
                 logger.info(
-                    "Saved new view: id=%s title=%s components=%d", view_id, view_title, len(session_components)
+                    "Saved new view: id=%s title=%s components=%d template=%s",
+                    view_id,
+                    view_title,
+                    len(session_components),
+                    view_template or "none",
                 )
                 spec = {
                     "id": view_id,
                     "title": view_title,
                     "description": view_desc,
                     "layout": session_components,
+                    "positions": positions or {},
                     "generatedAt": int(_time.time() * 1000),
                 }
                 if view_template:
@@ -1581,8 +1595,24 @@ def _get_current_user(
     except Exception:
         logger.warning("TokenReview API unavailable, falling back to token-derived identity")
 
-    # Fallback: stable identity derived from token hash.
-    # Safe because request already passed Bearer auth via _verify_rest_token.
+    # Fallback: try to extract username from JWT claims (OpenShift OAuth tokens
+    # are often JWTs with sub/preferred_username/name claims)
+    try:
+        import base64
+
+        parts = token.split(".")
+        if len(parts) >= 2:
+            # Decode JWT payload (add padding)
+            payload = parts[1] + "=" * (4 - len(parts[1]) % 4)
+            claims = json.loads(base64.urlsafe_b64decode(payload))
+            jwt_user = claims.get("sub") or claims.get("preferred_username") or claims.get("name")
+            if jwt_user and isinstance(jwt_user, str):
+                _cache_user(token_hash, jwt_user)
+                return jwt_user
+    except Exception:
+        pass
+
+    # Final fallback: stable identity derived from token hash.
     fallback_user = f"user-{token_hash[:16]}"
     _cache_user(token_hash, fallback_user)
     return fallback_user
