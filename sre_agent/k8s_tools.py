@@ -2955,6 +2955,12 @@ def list_resources(
         col_defs.append({"id": col_id, "header": col["name"], "type": col_type})
         col_indices.append(i)
 
+    # Detect if resource is cluster-scoped (no namespace on any row)
+    is_cluster_scoped = all(
+        not (tr.get("object", {}).get("metadata", {}) if isinstance(tr.get("object"), dict) else {}).get("namespace")
+        for tr in table_rows[:5]
+    )
+
     # Build rows from Table cells
     rows = []
     for tr in table_rows:
@@ -2962,7 +2968,7 @@ def list_resources(
         meta = tr.get("object", {}).get("metadata", {}) if isinstance(tr.get("object"), dict) else {}
         ns = meta.get("namespace", "")
         row: dict = {"_gvr": gvr}
-        if ns:
+        if ns and not is_cluster_scoped:
             row["namespace"] = ns
 
         for j, idx in enumerate(col_indices):
@@ -2972,9 +2978,17 @@ def list_resources(
 
         rows.append(row)
 
-    # Add namespace column if cross-namespace listing
-    if (not namespace or namespace.upper() == "ALL") and not any(c["id"] == "namespace" for c in col_defs):
+    # Add namespace column only for namespaced resources listed across namespaces
+    if (
+        not is_cluster_scoped
+        and (not namespace or namespace.upper() == "ALL")
+        and not any(c["id"] == "namespace" for c in col_defs)
+    ):
         col_defs.insert(0, {"id": "namespace", "header": "Namespace", "type": "namespace"})
+
+    # Remove namespace column from cluster-scoped resources
+    if is_cluster_scoped:
+        col_defs = [c for c in col_defs if c["id"] != "namespace"]
 
     # Sort if requested
     if sort_by:
