@@ -443,6 +443,123 @@ def list_nodes() -> str:
 
 
 @beta_tool
+def visualize_nodes(label_selector: str = "", show_pods: bool = True) -> str:
+    """Visualize cluster nodes as an interactive hex map showing health status,
+    CPU/memory usage, and pod distribution. Each node renders as a clickable
+    hexagon with status coloring and resource gauges. Use this for cluster
+    overviews and node health dashboards.
+
+    Args:
+        label_selector: Filter nodes by labels (e.g., 'node-role.kubernetes.io/worker=').
+        show_pods: Include per-node pod details for clickable pod dots (default: true).
+    """
+    kwargs = {}
+    if label_selector:
+        kwargs["label_selector"] = label_selector
+
+    result = safe(lambda: get_core_client().list_node(**kwargs))
+    if isinstance(result, ToolError):
+        return str(result)
+
+    node_specs = []
+    for node in result.items:
+        conditions = {c.type: c.status for c in node.status.conditions or []}
+        ready = conditions.get("Ready", "Unknown") == "True"
+        labels = node.metadata.labels or {}
+        roles = [label.split("/")[-1] for label in labels if label.startswith("node-role.kubernetes.io/")] or ["worker"]
+
+        alloc = node.status.allocatable or {}
+        cap = node.status.capacity or {}
+
+        pressure_conditions = [
+            c.type for c in (node.status.conditions or []) if c.type.endswith("Pressure") and c.status == "True"
+        ]
+
+        status = "not-ready"
+        if ready and not node.spec.unschedulable:
+            status = "pressure" if pressure_conditions else "ready"
+        elif node.spec.unschedulable:
+            status = "cordoned"
+
+        node_specs.append(
+            {
+                "name": node.metadata.name,
+                "status": status,
+                "roles": roles,
+                "podCount": 0,
+                "podCap": int(alloc.get("pods", cap.get("pods", "110"))),
+                "age": age(node.metadata.creation_timestamp),
+                "instanceType": labels.get("node.kubernetes.io/instance-type", ""),
+                "conditions": pressure_conditions,
+            }
+        )
+
+    # Get pod counts per node
+    pods_by_node: dict[str, list[dict]] = {}
+    if show_pods:
+        pods_result = safe(lambda: get_core_client().list_pod_for_all_namespaces(limit=1000))
+        if not isinstance(pods_result, ToolError):
+            for pod in pods_result.items:
+                node_name = pod.spec.node_name
+                if not node_name:
+                    continue
+                if node_name not in pods_by_node:
+                    pods_by_node[node_name] = []
+                cs = (pod.status.container_statuses or [None])[0]
+                wait_reason = cs.state.waiting.reason if cs and cs.state and cs.state.waiting else None
+                pods_by_node[node_name].append(
+                    {
+                        "name": pod.metadata.name,
+                        "namespace": pod.metadata.namespace or "",
+                        "status": wait_reason or pod.status.phase or "Unknown",
+                        "restarts": cs.restart_count if cs else 0,
+                    }
+                )
+
+    for ns in node_specs:
+        ns["podCount"] = len(pods_by_node.get(ns["name"], []))
+
+    # Get CPU/memory metrics
+    try:
+        from kubernetes import client as k8s_client
+
+        from .units import parse_cpu_millicores, parse_memory_bytes
+
+        custom = k8s_client.CustomObjectsApi()
+        metrics = custom.list_cluster_custom_object("metrics.k8s.io", "v1beta1", "nodes")
+        for m in metrics.get("items", []):
+            name = m["metadata"]["name"]
+            ns_spec = next((n for n in node_specs if n["name"] == name), None)
+            if ns_spec:
+                cpu_usage = parse_cpu_millicores(m["usage"]["cpu"])
+                mem_usage = parse_memory_bytes(m["usage"]["memory"])
+                alloc_node = next((n for n in result.items if n.metadata.name == name), None)
+                if alloc_node:
+                    node_alloc = alloc_node.status.allocatable or {}
+                    cpu_alloc = parse_cpu_millicores(node_alloc.get("cpu", "1"))
+                    mem_alloc = parse_memory_bytes(node_alloc.get("memory", "1Gi"))
+                    ns_spec["cpuPct"] = round(cpu_usage / cpu_alloc * 100, 1) if cpu_alloc else None
+                    ns_spec["memPct"] = round(mem_usage / mem_alloc * 100, 1) if mem_alloc else None
+    except Exception:
+        pass
+
+    ready_count = sum(1 for n in node_specs if n["status"] == "ready")
+    total_pods = sum(n["podCount"] for n in node_specs)
+    text = f"Cluster: {ready_count}/{len(node_specs)} nodes ready, {total_pods} pods running"
+
+    component = {
+        "kind": "node_map",
+        "title": "Cluster Nodes",
+        "description": text,
+        "nodes": node_specs,
+    }
+    if show_pods:
+        component["pods"] = pods_by_node
+
+    return (text, component)
+
+
+@beta_tool
 def describe_node(node_name: str) -> str:
     """Get detailed information about a node including conditions, taints, and resource usage.
 

@@ -26,6 +26,7 @@ _DATA_TOOL_NAMES = {
     "list_resources",
     "describe_resource",
     # Diagnostics
+    "visualize_nodes",
     "describe_pod",
     "describe_deployment",
     "get_pod_logs",
@@ -157,6 +158,7 @@ Best for: debugging a specific resource
 
 | Need | Component | When to Use |
 |------|-----------|-------------|
+| Cluster node health | `node_map` | Use `visualize_nodes()` — hex grid with CPU/mem/pods per node |
 | Single KPI number | `metric_card` | Top row summary. Include `query` for live sparkline |
 | Summary cards (3-6) | `info_card_grid` | Namespace overview, cluster health snapshot |
 | Time-series trend | `chart` (line/area) | CPU, memory, request rates over time |
