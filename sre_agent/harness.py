@@ -171,7 +171,6 @@ TOOL_CATEGORIES = {
         ],
         "tools": [
             "discover_metrics",
-            "verify_query",
             "get_prometheus_query",
             "get_firing_alerts",
             "get_node_metrics",

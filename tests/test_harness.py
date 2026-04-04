@@ -265,6 +265,7 @@ class TestCategoryCoverage:
             "add_widget_to_view",
             "undo_view_change",
             "get_view_versions",
+            "verify_query",
         }
 
         missing = set()
