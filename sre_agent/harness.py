@@ -261,7 +261,7 @@ def get_tool_category(tool_name: str) -> str | None:
 MODE_CATEGORIES: dict[str, list[str] | None] = {
     "sre": ["diagnostics", "workloads", "networking", "storage", "monitoring", "operations", "gitops"],
     "security": ["security", "networking"],
-    "view_designer": ["diagnostics", "monitoring"],
+    "view_designer": None,  # all tools — view_designer has its own curated list
     "both": None,  # all categories
 }
 
