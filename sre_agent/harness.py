@@ -494,6 +494,14 @@ def get_cluster_context(max_age: float = 60, mode: str = "sre") -> str:
                 ctx += hints
         except Exception:
             pass
+        try:
+            from .intelligence import get_intelligence_context
+
+            intel = get_intelligence_context(mode=mode)
+            if intel:
+                ctx += "\n\n" + intel
+        except Exception:
+            pass
         _cluster_context_cache[mode] = (ctx, now)
         return ctx
     except Exception as e:
