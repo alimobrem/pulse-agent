@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-Pulse Agent — AI-powered OpenShift/Kubernetes SRE and Security agent built on Claude. Connects to live clusters via the K8s API and uses Claude Opus for diagnostics, incident triage, and automated remediation. v1.11.0, Protocol v2, ~70 tools (refactored), 16 scanners, 627 tests. Aladdin MVP foundation: chart-first canvas view builder, generic list_resources with K8s Table API, 14 smart column renderers, resource relationship tracer. Auto-routing orchestrator classifies queries and routes to SRE or Security agent. Generative views: tools return component specs for rich UI rendering, user-scoped custom dashboards with share/clone.
+Pulse Agent — AI-powered OpenShift/Kubernetes SRE and Security agent built on Claude. Connects to live clusters via the K8s API and uses Claude Opus for diagnostics, incident triage, and automated remediation. v1.13.0, Protocol v2, ~103 tools, 16 scanners, 846 tests. Aladdin MVP foundation: chart-first canvas view builder, generic list_resources with K8s Table API, 14 smart column renderers, resource relationship tracer. Auto-routing orchestrator classifies queries and routes to SRE or Security agent. Generative views: tools return component specs for rich UI rendering, user-scoped custom dashboards with share/clone. Tool usage tracking: full audit log with chain intelligence (bigram discovery, next-tool hints injected into system prompt).
 
 **UI Repository:** `/Users/amobrem/ali/OpenshiftPulse` — React/TypeScript frontend (Zustand stores, incident views, admin dashboard).
 
@@ -38,7 +38,7 @@ python -m sre_agent.main security     # Security scanner
 pulse-agent-api                       # FastAPI on port 8080
 
 # Tests
-python3 -m pytest tests/ -v           # all tests (~450 tests)
+python3 -m pytest tests/ -v           # all tests (~846 tests)
 python3 -m pytest tests/test_k8s_tools.py -v  # single file
 make verify                                    # lint + type-check + test
 
@@ -139,7 +139,7 @@ Rules: validate inputs with `_validate_k8s_name()`/`_validate_k8s_namespace()`, 
 ### Helm Chart (`chart/`)
 - `values.yaml` — requires `vertexAI.projectId` or `anthropicApiKey.existingSecret`
 - WS token and PG password auto-generated with `lookup()` to preserve existing values on upgrade
-- Recreate strategy, replicaCount=1 (RWO PVC requires single replica)
+- RollingUpdate strategy with maxUnavailable=1/maxSurge=0 (old pod dies first to free RWO PVC)
 - `chart/templates/deployment.yaml` — validates credentials at install time via `_helpers.tpl`
 - `chart/templates/postgresql.yaml` — PostgreSQL **StatefulSet** (RHEL 9, runAsNonRoot, NetworkPolicy, headless Service)
 
