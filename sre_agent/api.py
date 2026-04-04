@@ -709,6 +709,15 @@ def _make_receive_loop(
                     except Exception as e:
                         logger.debug("Feedback recording failed: %s", e)
                         await websocket.send_json({"type": "feedback_ack", "resolved": resolved, "score": 0})
+
+                    # Link feedback to tool tracking
+                    try:
+                        from .tool_usage import update_turn_feedback
+
+                        update_turn_feedback(session_id=session_id, feedback="positive" if resolved else "negative")
+                    except Exception:
+                        pass
+
                     continue
 
                 await incoming.put(data)
