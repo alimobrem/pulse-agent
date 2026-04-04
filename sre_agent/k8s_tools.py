@@ -1860,6 +1860,90 @@ def discover_metrics(category: str = "all") -> str:
 
 
 @beta_tool
+def verify_query(query: str) -> str:
+    """Test a PromQL query against Prometheus to verify it returns data.
+    Call this BEFORE using a query in a dashboard to ensure it works.
+
+    Args:
+        query: PromQL query to test.
+    """
+    import os
+    import ssl
+    import urllib.parse
+    import urllib.request
+
+    if not query or not query.strip():
+        return "Error: query is empty."
+
+    if any(c in query for c in [";", "\\", "\n", "\r"]):
+        return "Error: Invalid characters in query."
+
+    base_url = os.environ.get(
+        "THANOS_URL",
+        "https://thanos-querier.openshift-monitoring.svc:9091",
+    )
+    params = urllib.parse.urlencode({"query": query})
+    url = f"{base_url}/api/v1/query?{params}"
+
+    try:
+        token = ""
+        try:
+            with open("/var/run/secrets/kubernetes.io/serviceaccount/token") as f:
+                token = f.read().strip()
+        except FileNotFoundError:
+            pass
+
+        ctx = ssl.create_default_context()
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+
+        headers = {}
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
+
+        req = urllib.request.Request(url, headers=headers)
+        resp = urllib.request.urlopen(req, context=ctx, timeout=15)
+        data = json.loads(resp.read())
+    except Exception as e:
+        return f"FAIL_UNREACHABLE: Cannot reach Prometheus at {base_url}: {e}"
+
+    if data.get("status") != "success":
+        error_msg = data.get("error", "unknown error")
+        try:
+            from .promql_recipes import record_query_result
+
+            record_query_result(query, success=False, series_count=0)
+        except Exception:
+            pass
+        return f"FAIL_SYNTAX: {error_msg}"
+
+    results = data.get("data", {}).get("result", [])
+
+    if not results:
+        try:
+            from .promql_recipes import record_query_result
+
+            record_query_result(query, success=False, series_count=0)
+        except Exception:
+            pass
+        return "FAIL_NO_DATA: Query returned 0 results. Metric may not exist or labels may be wrong."
+
+    sample = results[0]
+    metric_name = sample.get("metric", {}).get("__name__", "")
+    value = sample.get("value", [None, ""])[1] if sample.get("value") else ""
+    sample_info = f"{metric_name}={value}" if metric_name else f"value={value}"
+
+    try:
+        from .promql_recipes import record_query_result
+
+        record_query_result(query, success=True, series_count=len(results))
+    except Exception:
+        pass
+
+    return f"PASS: Query returns data ({len(results)} series, sample: {sample_info})"
+
+
+@beta_tool
 def get_prometheus_query(query: str, time_range: str = "1h") -> str:
     """Execute a PromQL query against Prometheus/Thanos and return the results as an interactive chart.
 
@@ -4132,6 +4216,7 @@ ALL_TOOLS = [
     list_operator_subscriptions,  # OLM CSV/channel/health
     get_firing_alerts,  # Alertmanager proxy
     discover_metrics,  # Prometheus metric discovery
+    verify_query,  # PromQL query validation
     get_prometheus_query,  # PromQL chart generation
     # Diagnostics
     describe_service,
