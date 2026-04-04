@@ -168,3 +168,30 @@ class TestToolsUsageStatsEndpoint:
         resp = client.get("/tools/usage/stats", headers={"Authorization": "Bearer test-token-123"})
         assert resp.status_code == 200
         assert resp.json()["total_calls"] == 100
+
+
+class TestToolsUsageChainsEndpoint:
+    @patch("sre_agent.tool_chains.discover_chains")
+    def test_returns_chains(self, mock_discover):
+        mock_discover.return_value = {
+            "bigrams": [
+                {"from_tool": "list_resources", "to_tool": "get_pod_logs", "frequency": 42, "probability": 0.78},
+            ],
+            "total_sessions_analyzed": 120,
+        }
+        from sre_agent.api import app
+
+        client = TestClient(app)
+        resp = client.get("/tools/usage/chains", headers={"Authorization": "Bearer test-token-123"})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert len(data["bigrams"]) == 1
+        assert data["bigrams"][0]["from_tool"] == "list_resources"
+        assert data["total_sessions_analyzed"] == 120
+
+    def test_unauthorized(self):
+        from sre_agent.api import app
+
+        client = TestClient(app)
+        resp = client.get("/tools/usage/chains")
+        assert resp.status_code == 401

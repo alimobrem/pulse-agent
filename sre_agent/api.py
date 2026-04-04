@@ -287,6 +287,18 @@ async def get_tools_usage_stats(
     return get_usage_stats(time_from=time_from, time_to=time_to)
 
 
+@app.get("/tools/usage/chains")
+async def get_tools_usage_chains(
+    authorization: str | None = Header(None),
+    token: str | None = Query(None),
+):
+    """Discovered tool call chains (common sequences)."""
+    _verify_rest_token(authorization, token)
+    from .tool_chains import discover_chains
+
+    return discover_chains()
+
+
 @app.get("/tools/usage")
 async def get_tools_usage(
     tool_name: str | None = Query(None),
