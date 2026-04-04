@@ -170,6 +170,7 @@ TOOL_CATEGORIES = {
             "grafana",
         ],
         "tools": [
+            "discover_metrics",
             "get_prometheus_query",
             "get_firing_alerts",
             "get_node_metrics",

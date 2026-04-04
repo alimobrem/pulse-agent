@@ -1754,6 +1754,111 @@ def get_firing_alerts() -> str:
     return (text, component)
 
 
+# In-memory cache for metric names (TTL 5 minutes)
+_metric_names_cache: dict = {"data": None, "ts": 0}
+
+_CATEGORY_PREFIXES: dict[str, list[str]] = {
+    "cpu": ["container_cpu_", "node_cpu_", "process_cpu_", "pod:container_cpu_"],
+    "memory": ["container_memory_", "node_memory_", "machine_memory_"],
+    "network": ["container_network_", "node_network_"],
+    "storage": ["node_filesystem_", "kubelet_volume_", "container_fs_"],
+    "pods": ["kube_pod_", "kube_running_pod_", "kubelet_running_"],
+    "nodes": ["kube_node_", "machine_", "node_"],
+    "api_server": ["apiserver_"],
+    "etcd": ["etcd_"],
+    "alerts": ["ALERTS"],
+}
+
+
+@beta_tool
+def discover_metrics(category: str = "all") -> str:
+    """Discover available Prometheus metrics on this cluster. Call this BEFORE
+    writing PromQL queries to know which metrics actually exist.
+
+    Args:
+        category: One of: 'cpu', 'memory', 'network', 'storage', 'pods',
+                  'nodes', 'api_server', 'etcd', 'alerts', 'all'.
+    """
+    import os
+    import ssl
+    import time as _time
+    import urllib.request
+
+    from .promql_recipes import RECIPES, get_recipe
+
+    valid_cats = set(_CATEGORY_PREFIXES.keys()) | {"all"}
+    if category not in valid_cats:
+        return f"Invalid category '{category}'. Available categories: {', '.join(sorted(valid_cats))}"
+
+    now = _time.time()
+    if _metric_names_cache["data"] is not None and now - _metric_names_cache["ts"] < 300:
+        all_metrics = _metric_names_cache["data"]
+    else:
+        base_url = os.environ.get(
+            "THANOS_URL",
+            "https://thanos-querier.openshift-monitoring.svc:9091",
+        )
+        url = f"{base_url}/api/v1/label/__name__/values"
+
+        try:
+            token = ""
+            try:
+                with open("/var/run/secrets/kubernetes.io/serviceaccount/token") as f:
+                    token = f.read().strip()
+            except FileNotFoundError:
+                pass
+
+            ctx = ssl.create_default_context()
+            ctx.check_hostname = False
+            ctx.verify_mode = ssl.CERT_NONE
+
+            headers = {}
+            if token:
+                headers["Authorization"] = f"Bearer {token}"
+
+            req = urllib.request.Request(url, headers=headers)
+            resp = urllib.request.urlopen(req, context=ctx, timeout=15)
+            data = json.loads(resp.read())
+
+            if data.get("status") != "success":
+                return f"Prometheus error: {data.get('error', 'unknown')}"
+
+            all_metrics = sorted(data.get("data", []))
+            _metric_names_cache["data"] = all_metrics
+            _metric_names_cache["ts"] = now
+
+        except Exception as e:
+            lines = [f"Cannot reach Prometheus ({e}). Using hardcoded recipes:"]
+            cat_recipes = RECIPES.get(category, []) if category != "all" else [r for rs in RECIPES.values() for r in rs]
+            for r in cat_recipes[:15]:
+                lines.append(f"  {r.metric}")
+                lines.append(f"    Recipe: {r.query}")
+                lines.append(f'    Chart: {r.chart_type} | Title: "{r.name}"')
+            return "\n".join(lines)
+
+    if category == "all":
+        filtered = all_metrics
+    else:
+        prefixes = _CATEGORY_PREFIXES[category]
+        filtered = [m for m in all_metrics if any(m.startswith(p) or m.startswith(p.rstrip("_")) for p in prefixes)]
+
+    if not filtered:
+        return f"No metrics found for category '{category}' (0 of {len(all_metrics)} total metrics matched)."
+
+    lines = [f"Available {category} metrics ({len(filtered)} found):"]
+    for metric_name in filtered[:30]:
+        recipe = get_recipe(metric_name)
+        lines.append(f"  {metric_name}")
+        if recipe:
+            lines.append(f"    Recipe: {recipe.query}")
+            lines.append(f'    Chart: {recipe.chart_type} | Title: "{recipe.name}"')
+
+    if len(filtered) > 30:
+        lines.append(f"  ... and {len(filtered) - 30} more")
+
+    return "\n".join(lines)
+
+
 @beta_tool
 def get_prometheus_query(query: str, time_range: str = "1h") -> str:
     """Execute a PromQL query against Prometheus/Thanos and return the results as an interactive chart.
@@ -4026,6 +4131,7 @@ ALL_TOOLS = [
     list_hpas,  # current metrics extraction
     list_operator_subscriptions,  # OLM CSV/channel/health
     get_firing_alerts,  # Alertmanager proxy
+    discover_metrics,  # Prometheus metric discovery
     get_prometheus_query,  # PromQL chart generation
     # Diagnostics
     describe_service,
