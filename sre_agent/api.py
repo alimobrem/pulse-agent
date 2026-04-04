@@ -547,12 +547,10 @@ async def _run_agent_ws(
             view_desc = sig.get("description", "")
             view_template = sig.get("template", "")
 
-            # Compute positions from template if specified
-            positions = None
-            if view_template:
-                from .layout_templates import apply_template as _apply_tpl
+            # Compute positions using semantic layout engine
+            from .layout_engine import compute_layout
 
-                positions = _apply_tpl(view_template, session_components)
+            positions = compute_layout(session_components)
 
             existing = _db.get_view_by_title(current_user, view_title)
             if existing:
@@ -572,6 +570,7 @@ async def _run_agent_ws(
                     )
                     continue
                 merged_layout = _vr_merged.components
+                positions = compute_layout(merged_layout)
                 update_kwargs: dict = {"layout": merged_layout, "description": view_desc}
                 if positions:
                     update_kwargs["positions"] = positions
