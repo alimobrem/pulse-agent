@@ -38,7 +38,7 @@ python -m sre_agent.main security     # Security scanner
 pulse-agent-api                       # FastAPI on port 8080
 
 # Tests
-python3 -m pytest tests/ -v           # all tests (~1026 tests)
+python3 -m pytest tests/ -v           # all tests (~1049 tests)
 python3 -m pytest tests/test_k8s_tools.py -v  # single file
 make verify                                    # lint + type-check + test
 
@@ -159,6 +159,7 @@ Rules: validate inputs with `_validate_k8s_name()`/`_validate_k8s_namespace()`, 
 - `tool_usage.py` — tool invocation audit log (PostgreSQL, fire-and-forget recording, query/stats)
 - `tool_chains.py` — tool chain discovery and next-tool hints (bigram analysis, system prompt injection)
 - `promql_recipes.py` — 73 production-tested PromQL recipes + learned queries DB (sources: OpenShift console, cluster-monitoring-operator, kube-state-metrics, node_exporter, ACM)
+- `layout_engine.py` — semantic auto-layout engine (role-based row packing, replaces fixed templates)
 
 ### Claude Code Agents (`.claude/agents/`)
 8 specialized agents with hooks in `.claude/settings.json`:
