@@ -317,19 +317,24 @@ from sre_agent.orchestrator import build_orchestrated_config, classify_intent
 
 class TestViewDesignerRouting:
     def test_dashboard_keyword_routes_to_view_designer(self):
-        assert classify_intent("create a dashboard for my cluster") == "view_designer"
+        mode, _ = classify_intent("create a dashboard for my cluster")
+        assert mode == "view_designer"
 
     def test_widget_keyword_routes_to_view_designer(self):
-        assert classify_intent("add a widget to my view") == "view_designer"
+        mode, _ = classify_intent("add a widget to my view")
+        assert mode == "view_designer"
 
     def test_metric_card_routes_to_view_designer(self):
-        assert classify_intent("add metric cards with sparklines") == "view_designer"
+        mode, _ = classify_intent("add metric cards with sparklines")
+        assert mode == "view_designer"
 
     def test_sre_query_does_not_route_to_view_designer(self):
-        assert classify_intent("what pods are crashing") == "sre"
+        mode, _ = classify_intent("what pods are crashing")
+        assert mode == "sre"
 
     def test_security_query_does_not_route_to_view_designer(self):
-        assert classify_intent("scan rbac permissions") == "security"
+        mode, _ = classify_intent("scan rbac permissions")
+        assert mode == "security"
 
     def test_build_config_returns_no_write_tools(self):
         config = build_orchestrated_config("view_designer")

@@ -121,17 +121,23 @@ def _keyword_score(query_lower: str, keywords: list[str]) -> float:
     return sum(len(kw) for kw in keywords if kw in query_lower)
 
 
-def classify_intent(query: str) -> AgentMode:
-    """Classify a user query as sre, security, or both."""
+def classify_intent(query: str) -> tuple[AgentMode, bool]:
+    """Classify a user query as sre, security, both, or view_designer.
+
+    Returns:
+        (mode, is_strong) — is_strong is True when the classification is based
+        on explicit keyword matches, False when it's the default sre fallback.
+        Callers should only switch session mode on strong signals.
+    """
     q = query.lower()
 
     # Check "both" first (explicit full-audit requests)
     if any(kw in q for kw in BOTH_KEYWORDS):
-        return "both"
+        return "both", True
 
     # Check view designer (dashboard/view creation requests)
     if any(kw in q for kw in VIEW_DESIGNER_KEYWORDS) or any(w in q for w in _VIEW_TRIGGER_WORDS):
-        return "view_designer"
+        return "view_designer", True
 
     sre_score = _keyword_score(q, SRE_KEYWORDS)
     sec_score = _keyword_score(q, SECURITY_KEYWORDS)
@@ -140,11 +146,13 @@ def classify_intent(query: str) -> AgentMode:
     if sre_score > 0 and sec_score > 0:
         ratio = min(sre_score, sec_score) / max(sre_score, sec_score)
         if ratio >= 0.7:
-            return "both"
+            return "both", True
 
     if sec_score > sre_score and sec_score > 0:
-        return "security"
-    return "sre"  # default
+        return "security", True
+
+    # SRE is the default — only strong if there were actual keyword matches
+    return "sre", sre_score > 0
 
 
 def build_orchestrated_config(mode: AgentMode) -> dict:

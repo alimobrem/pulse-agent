@@ -7,34 +7,60 @@ from sre_agent.orchestrator import build_orchestrated_config, classify_intent
 
 class TestClassifyIntent:
     def test_sre_crashlooping(self):
-        assert classify_intent("why are pods crashlooping") == "sre"
+        mode, is_strong = classify_intent("why are pods crashlooping")
+        assert mode == "sre"
+        assert is_strong is True
 
     def test_security_rbac(self):
-        assert classify_intent("check RBAC permissions") == "security"
+        mode, is_strong = classify_intent("check RBAC permissions")
+        assert mode == "security"
+        assert is_strong is True
 
     def test_both_full_audit(self):
-        assert classify_intent("full cluster audit") == "both"
+        mode, is_strong = classify_intent("full cluster audit")
+        assert mode == "both"
+        assert is_strong is True
 
     def test_default_sre(self):
-        assert classify_intent("hello") == "sre"
+        mode, is_strong = classify_intent("hello")
+        assert mode == "sre"
+        assert is_strong is False  # no keyword matches = weak/default
 
     def test_mixed_keywords_more_security(self):
-        assert classify_intent("check network policy and service account permissions") == "security"
+        mode, _ = classify_intent("check network policy and service account permissions")
+        assert mode == "security"
 
     def test_mixed_keywords_more_sre(self):
-        assert classify_intent("pod restart and node drain and check logs") == "sre"
+        mode, _ = classify_intent("pod restart and node drain and check logs")
+        assert mode == "sre"
 
     def test_both_scan_cluster(self):
-        assert classify_intent("scan the cluster for issues") == "both"
+        mode, _ = classify_intent("scan the cluster for issues")
+        assert mode == "both"
 
     def test_both_production_readiness(self):
-        assert classify_intent("production readiness review") == "both"
+        mode, _ = classify_intent("production readiness review")
+        assert mode == "both"
 
     def test_case_insensitive(self):
-        assert classify_intent("CHECK RBAC PERMISSIONS") == "security"
+        mode, _ = classify_intent("CHECK RBAC PERMISSIONS")
+        assert mode == "security"
 
     def test_empty_string(self):
-        assert classify_intent("") == "sre"
+        mode, is_strong = classify_intent("")
+        assert mode == "sre"
+        assert is_strong is False
+
+    def test_view_designer_strong(self):
+        mode, is_strong = classify_intent("create a dashboard for my cluster")
+        assert mode == "view_designer"
+        assert is_strong is True
+
+    def test_followup_weak(self):
+        """A follow-up like 'yes build it' should be weak (no keywords)."""
+        mode, is_strong = classify_intent("yes, build it")
+        assert mode == "sre"  # default fallback
+        assert is_strong is False  # caller should keep previous mode
 
 
 class TestBuildOrchestratedConfig:

@@ -1024,16 +1024,16 @@ async def websocket_auto_agent(websocket: WebSocket):
                     + content
                 )
 
-            # --- Auto-classify intent ---
-            intent = classify_intent(content)
-            # Sticky mode: if previous turn was view_designer and new intent
-            # defaults to sre (no strong signal), keep view_designer — the user
-            # is likely continuing the dashboard conversation (e.g. "yes, build it")
-            if last_mode == "view_designer" and intent == "sre":
-                intent = "view_designer"
+            # --- Auto-classify intent with session locking ---
+            intent, is_strong = classify_intent(content)
+            # Session locking: keep the current mode unless there's a strong
+            # signal to switch. Weak/default classifications (e.g. "yes build it"
+            # returning sre with no keyword matches) don't break the session flow.
+            if last_mode != "sre" and not is_strong:
+                intent = last_mode
             config = build_orchestrated_config(intent)
             last_mode = intent
-            logger.info("Auto-agent classified intent=%s for session=%s", intent, session_id)
+            logger.info("Auto-agent classified intent=%s strong=%s for session=%s", intent, is_strong, session_id)
 
             system_prompt = config["system_prompt"]
             tool_defs = config["tool_defs"]
