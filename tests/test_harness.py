@@ -49,24 +49,24 @@ class TestSelectTools:
 
     def test_diagnostics_query(self):
         all_tools, tool_map = self._all_tools()
-        _defs, selected = select_tools("check cluster health", all_tools, tool_map, mode="sre")
+        _defs, selected, _offered = select_tools("check cluster health", all_tools, tool_map, mode="sre")
         assert "list_pods" in selected
         assert "get_events" in selected
 
     def test_security_query(self):
         all_tools, tool_map = self._all_tools()
-        _defs, selected = select_tools("run a security audit of rbac", all_tools, tool_map, mode="security")
+        _defs, selected, _offered = select_tools("run a security audit of rbac", all_tools, tool_map, mode="security")
         assert "scan_rbac_risks" in selected
         assert "scan_pod_security" in selected
 
     def test_generic_query_returns_all(self):
         all_tools, tool_map = self._all_tools()
-        _defs, selected = select_tools("hello world", all_tools, tool_map, mode="both")
+        _defs, selected, _offered = select_tools("hello world", all_tools, tool_map, mode="both")
         assert len(selected) == len(all_tools)
 
     def test_always_include_present(self):
         all_tools, tool_map = self._all_tools()
-        _defs, selected = select_tools("check pod status", all_tools, tool_map)
+        _defs, selected, _offered = select_tools("check pod status", all_tools, tool_map)
         for name in ALWAYS_INCLUDE:
             if name in tool_map:
                 assert name in selected
@@ -74,22 +74,22 @@ class TestSelectTools:
     def test_diagnostics_includes_workloads(self):
         """When diagnostics is a top category, workload tools should be included."""
         all_tools, tool_map = self._all_tools()
-        _defs, selected = select_tools("what's wrong with my cluster health", all_tools, tool_map)
+        _defs, selected, _offered = select_tools("what's wrong with my cluster health", all_tools, tool_map)
         # diagnostics should pull in workloads
         assert "scale_deployment" in selected or "list_resources" in selected
 
     def test_fleet_query(self):
         all_tools, tool_map = self._all_tools()
-        _defs, selected = select_tools("compare across all clusters fleet", all_tools, tool_map, mode="both")
+        _defs, selected, _offered = select_tools("compare across all clusters fleet", all_tools, tool_map, mode="both")
         assert "fleet_list_clusters" in selected
 
     def test_storage_query(self):
         all_tools, tool_map = self._all_tools()
-        _defs, selected = select_tools("check pvc storage volumes", all_tools, tool_map)
+        _defs, selected, _offered = select_tools("check pvc storage volumes", all_tools, tool_map)
         assert "list_resources" in selected
 
     def test_empty_tool_list(self):
-        defs, selected = select_tools("anything", [], {})
+        defs, selected, _offered = select_tools("anything", [], {})
         assert defs == []
         assert selected == {}
 
@@ -97,7 +97,7 @@ class TestSelectTools:
         """Tools named in categories but not in all_tools should be excluded."""
         tools = [_make_tool("list_namespaces")]
         tool_map = {"list_namespaces": tools[0]}
-        _defs, selected = select_tools("check health status", tools, tool_map)
+        _defs, selected, _offered = select_tools("check health status", tools, tool_map)
         # Only the available tool should be in selected
         assert len(selected) <= 1
 
@@ -176,6 +176,37 @@ class TestGetToolCategory:
             for tool_name in config["tools"]:
                 result = get_tool_category(tool_name)
                 assert result is not None, f"{tool_name} returned None but is in {cat_name}"
+
+
+class TestSelectToolsOffered:
+    def _all_tools(self):
+        names = set(ALWAYS_INCLUDE)
+        for config in TOOL_CATEGORIES.values():
+            names.update(config["tools"])
+        tools = [_make_tool(n) for n in sorted(names)]
+        tool_map = {t.name: t for t in tools}
+        return tools, tool_map
+
+    def test_returns_three_tuple(self):
+        all_tools, tool_map = self._all_tools()
+        result = select_tools("check health", all_tools, tool_map, mode="sre")
+        assert len(result) == 3, "select_tools should return (defs, map, offered_names)"
+
+    def test_offered_names_is_list(self):
+        all_tools, tool_map = self._all_tools()
+        _defs, _map, offered = select_tools("check health", all_tools, tool_map, mode="sre")
+        assert isinstance(offered, list)
+        assert all(isinstance(n, str) for n in offered)
+
+    def test_offered_matches_filtered(self):
+        all_tools, tool_map = self._all_tools()
+        _defs, selected, offered = select_tools("check health", all_tools, tool_map, mode="sre")
+        assert set(offered) == set(selected.keys())
+
+    def test_both_mode_returns_all_names(self):
+        all_tools, tool_map = self._all_tools()
+        _defs, _map, offered = select_tools("hello", all_tools, tool_map, mode="both")
+        assert len(offered) == len(all_tools)
 
 
 class TestCategoryCoverage:

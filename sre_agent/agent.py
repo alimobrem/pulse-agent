@@ -398,7 +398,9 @@ def run_agent_streaming(
     if use_harness and messages:
         last_user = next((m["content"] for m in reversed(messages) if m["role"] == "user"), "")
         if isinstance(last_user, str) and last_user:
-            filtered_defs, filtered_map = select_tools(last_user, list(tool_map.values()), tool_map, mode=mode)
+            filtered_defs, filtered_map, _offered = select_tools(
+                last_user, list(tool_map.values()), tool_map, mode=mode
+            )
             if len(filtered_defs) < len(tool_defs):
                 tool_defs = filtered_defs
                 tool_map = {**filtered_map}  # Don't mutate the original

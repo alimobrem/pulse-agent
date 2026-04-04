@@ -275,19 +275,26 @@ MODE_CATEGORIES: dict[str, list[str] | None] = {
 }
 
 
-def select_tools(query: str, all_tools: list, all_tool_map: dict, mode: str = "sre") -> tuple[list, dict]:
+def select_tools(query: str, all_tools: list, all_tool_map: dict, mode: str = "sre") -> tuple[list, dict, list[str]]:
     """Select tools based on agent mode.
 
     Mode-aware: each orchestrator mode maps to a set of tool categories.
     Tools in ALWAYS_INCLUDE are always returned regardless of mode.
     If mode is 'both' or unknown, all tools are returned.
+
+    Returns:
+        tuple[list, dict, list[str]]: (tool_defs, tool_map, offered_names)
+            - tool_defs: list of tool definition dicts
+            - tool_map: dict mapping tool names to tool objects
+            - offered_names: list of tool names that were offered
     """
     categories = MODE_CATEGORIES.get(mode)
 
     # Fallback: return all tools for 'both' or unknown modes
     if categories is None:
         logger.info("Tool selection: returning all %d tools for mode=%s", len(all_tools), mode)
-        return [t.to_dict() for t in all_tools], {t.name: t for t in all_tools}
+        tool_map = {t.name: t for t in all_tools}
+        return [t.to_dict() for t in all_tools], tool_map, list(tool_map.keys())
 
     # Collect tool names from the mode's categories
     mode_tool_names = set(ALWAYS_INCLUDE)
@@ -300,10 +307,12 @@ def select_tools(query: str, all_tools: list, all_tool_map: dict, mode: str = "s
     # Safety: if filtering removed too many, return all
     if len(filtered) < 5:
         logger.warning("Tool selection: mode=%s matched only %d tools, returning all", mode, len(filtered))
-        return [t.to_dict() for t in all_tools], {t.name: t for t in all_tools}
+        tool_map = {t.name: t for t in all_tools}
+        return [t.to_dict() for t in all_tools], tool_map, list(tool_map.keys())
 
     logger.info("Tool selection: %d/%d tools for mode=%s", len(filtered), len(all_tools), mode)
-    return [t.to_dict() for t in filtered], {t.name: t for t in filtered}
+    tool_map = {t.name: t for t in filtered}
+    return [t.to_dict() for t in filtered], tool_map, list(tool_map.keys())
 
 
 # ---------------------------------------------------------------------------

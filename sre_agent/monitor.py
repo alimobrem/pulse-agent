@@ -1330,7 +1330,7 @@ def _run_proactive_investigation_sync(finding: dict) -> dict[str, Any]:
 
     # Harness: dynamic tool selection based on investigation prompt
     prompt = _build_investigation_prompt(finding)
-    filtered_defs, filtered_map = select_tools(prompt, list(readonly_map.values()), readonly_map)
+    filtered_defs, filtered_map, _offered = select_tools(prompt, list(readonly_map.values()), readonly_map)
     if len(filtered_defs) < len(readonly_defs):
         readonly_defs = filtered_defs
         readonly_map = {**filtered_map}
@@ -1422,7 +1422,7 @@ def _run_security_followup_sync(finding: dict) -> dict:
     # Harness: dynamic tool selection based on security prompt
     sec_tool_defs = list(SEC_TOOL_DEFS)
     sec_tool_map = dict(SEC_TOOL_MAP)
-    filtered_defs, filtered_map = select_tools(prompt, list(sec_tool_map.values()), sec_tool_map)
+    filtered_defs, filtered_map, _offered = select_tools(prompt, list(sec_tool_map.values()), sec_tool_map)
     if len(filtered_defs) < len(sec_tool_defs):
         sec_tool_defs = filtered_defs
         sec_tool_map = {**filtered_map}
