@@ -238,6 +238,19 @@ ALWAYS_INCLUDE = {
 }
 
 
+# Reverse lookup: tool_name -> first matching category
+_TOOL_CATEGORY_MAP: dict[str, str] = {}
+for _cat_name, _cat_config in TOOL_CATEGORIES.items():
+    for _tool_name in _cat_config["tools"]:
+        if _tool_name not in _TOOL_CATEGORY_MAP:
+            _TOOL_CATEGORY_MAP[_tool_name] = _cat_name
+
+
+def get_tool_category(tool_name: str) -> str | None:
+    """Return the primary category for a tool, or None if uncategorized."""
+    return _TOOL_CATEGORY_MAP.get(tool_name)
+
+
 # Map orchestrator modes to relevant tool categories
 MODE_CATEGORIES: dict[str, list[str] | None] = {
     "sre": ["diagnostics", "workloads", "networking", "storage", "monitoring", "operations", "gitops"],

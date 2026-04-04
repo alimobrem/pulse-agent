@@ -12,6 +12,7 @@ from sre_agent.harness import (
     TOOL_CATEGORIES,
     build_cached_system_prompt,
     get_cluster_context,
+    get_tool_category,
     select_tools,
 )
 
@@ -151,6 +152,30 @@ class TestGetClusterContext:
         with patch("sre_agent.harness.gather_cluster_context", side_effect=RuntimeError("k8s down")):
             result = get_cluster_context(max_age=60, mode="sre")
         assert result == "stale"
+
+
+class TestGetToolCategory:
+    def test_tool_in_single_category(self):
+        assert get_tool_category("scale_deployment") == "workloads"
+
+    def test_tool_in_multiple_categories_returns_first(self):
+        # list_resources is in diagnostics, workloads, networking, storage
+        result = get_tool_category("list_resources")
+        assert result in ("diagnostics", "workloads", "networking", "storage")
+
+    def test_tool_not_in_any_category(self):
+        assert get_tool_category("nonexistent_tool_xyz") is None
+
+    def test_always_include_tool_without_category(self):
+        # record_audit_entry is in ALWAYS_INCLUDE but no category
+        assert get_tool_category("record_audit_entry") is None
+
+    def test_all_categorized_tools_return_category(self):
+        """Every tool in TOOL_CATEGORIES should return a non-None category."""
+        for cat_name, config in TOOL_CATEGORIES.items():
+            for tool_name in config["tools"]:
+                result = get_tool_category(tool_name)
+                assert result is not None, f"{tool_name} returned None but is in {cat_name}"
 
 
 class TestComponentHint:
