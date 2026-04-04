@@ -52,6 +52,14 @@ def _migrate_001_baseline(db: Database) -> None:
     db.executescript(ALL_SCHEMAS)
 
 
+def _migrate_002_tool_usage(db: Database) -> None:
+    """Add tool_usage and tool_turns tables for tool call tracking."""
+    from .db_schema import TOOL_TURNS_SCHEMA, TOOL_USAGE_INDEX_SCHEMA, TOOL_USAGE_SCHEMA
+
+    db.executescript(TOOL_USAGE_SCHEMA + TOOL_TURNS_SCHEMA + TOOL_USAGE_INDEX_SCHEMA)
+
+
 MIGRATIONS = [
     (1, "baseline", _migrate_001_baseline),
+    (2, "tool_usage", _migrate_002_tool_usage),
 ]

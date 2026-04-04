@@ -157,6 +157,51 @@ CREATE TABLE IF NOT EXISTS view_versions (
 );
 """
 
+TOOL_USAGE_SCHEMA = """
+CREATE TABLE IF NOT EXISTS tool_usage (
+    id              SERIAL PRIMARY KEY,
+    timestamp       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    session_id      TEXT NOT NULL,
+    turn_number     INTEGER NOT NULL,
+    agent_mode      TEXT NOT NULL,
+    tool_name       TEXT NOT NULL,
+    tool_category   TEXT,
+    input_summary   JSONB,
+    status          TEXT NOT NULL,
+    error_message   TEXT,
+    error_category  TEXT,
+    duration_ms     INTEGER,
+    result_bytes    INTEGER,
+    requires_confirmation BOOLEAN DEFAULT FALSE,
+    was_confirmed   BOOLEAN
+);
+"""
+
+TOOL_TURNS_SCHEMA = """
+CREATE TABLE IF NOT EXISTS tool_turns (
+    id              SERIAL PRIMARY KEY,
+    timestamp       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    session_id      TEXT NOT NULL,
+    turn_number     INTEGER NOT NULL,
+    agent_mode      TEXT NOT NULL,
+    query_summary   TEXT,
+    tools_offered   TEXT[],
+    tools_called    TEXT[],
+    feedback        TEXT,
+    UNIQUE(session_id, turn_number)
+);
+"""
+
+TOOL_USAGE_INDEX_SCHEMA = """
+CREATE INDEX IF NOT EXISTS idx_tool_usage_timestamp ON tool_usage(timestamp DESC);
+CREATE INDEX IF NOT EXISTS idx_tool_usage_tool_name ON tool_usage(tool_name);
+CREATE INDEX IF NOT EXISTS idx_tool_usage_session ON tool_usage(session_id);
+CREATE INDEX IF NOT EXISTS idx_tool_usage_mode ON tool_usage(agent_mode);
+CREATE INDEX IF NOT EXISTS idx_tool_usage_status ON tool_usage(status);
+CREATE INDEX IF NOT EXISTS idx_tool_turns_session ON tool_turns(session_id);
+CREATE INDEX IF NOT EXISTS idx_tool_turns_feedback ON tool_turns(feedback) WHERE feedback IS NOT NULL;
+"""
+
 INDEX_SCHEMA = """
 CREATE INDEX IF NOT EXISTS idx_incidents_keywords ON incidents(query_keywords);
 CREATE INDEX IF NOT EXISTS idx_incidents_error_type ON incidents(error_type);
@@ -186,5 +231,8 @@ ALL_SCHEMAS = (
     + FINDINGS_SCHEMA
     + VIEWS_SCHEMA
     + VIEW_VERSIONS_SCHEMA
+    + TOOL_USAGE_SCHEMA
+    + TOOL_TURNS_SCHEMA
     + INDEX_SCHEMA
+    + TOOL_USAGE_INDEX_SCHEMA
 )
