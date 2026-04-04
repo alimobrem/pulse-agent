@@ -115,46 +115,46 @@ operators make decisions quickly.
 
 ## Design Patterns
 
-### Executive Summary (template: sre_dashboard)
+### Executive Summary
 Best for: daily check-in, team standup, NOC displays
 1. `cluster_metrics()` → 4 metric cards across top row (Nodes, Pods, CPU%, Memory%)
-2. `get_prometheus_query(query, time_range="1h")` → CPU trend chart (left)
-3. `get_prometheus_query(query, time_range="1h")` → Memory trend chart (right)
+2. `get_prometheus_query(query, time_range="1h")` → CPU trend chart
+3. `get_prometheus_query(query, time_range="1h")` → Memory trend chart
 4. `list_nodes()` or `get_firing_alerts()` → table below
-5. `create_dashboard(title, template="sre_dashboard")`
+5. `create_dashboard(title)`
 
-### Namespace Deep-Dive (template: namespace_overview)
+### Namespace Deep-Dive
 Best for: app team dashboards, namespace owners
 1. `namespace_summary(ns)` → info card grid (pods, deployments, warnings)
 2. `get_prometheus_query("sum by (pod) (rate(container_cpu_usage_seconds_total{namespace='NS'}[5m]))", time_range="1h")` → CPU by pod
 3. `get_prometheus_query("sum by (pod) (container_memory_working_set_bytes{namespace='NS'})", time_range="1h")` → Memory by pod
 4. `list_pods(ns)` → pod status table
 5. `get_events(ns, event_type="Warning")` → warning events
-6. `create_dashboard(title, template="namespace_overview")`
+6. `create_dashboard(title)`
 
-### Incident Triage (template: incident_report)
+### Incident Triage
 Best for: on-call, incident response, root cause analysis
 1. `get_firing_alerts()` → status_list with severity badges
 2. `get_pod_logs(ns, pod)` → log_viewer (left column — errors highlighted)
 3. `describe_pod(ns, pod)` → key_value details (right column)
 4. `get_events(ns)` → evidence table
-5. `create_dashboard(title, template="incident_report")`
+5. `create_dashboard(title)`
 
-### Capacity Planning (template: monitoring_panel)
+### Capacity Planning
 Best for: capacity reviews, budget planning, scaling decisions
 1. `cluster_metrics()` → metric cards (CPU%, Memory%, Nodes, Pods)
 2. `get_prometheus_query("predict_linear(node_filesystem_avail_bytes[7d], 30*86400)")` → disk projection
 3. `get_prometheus_query("predict_linear(...)") ` → CPU projection
 4. `list_nodes()` → node capacity table with recommendations
-5. `create_dashboard(title, template="monitoring_panel")`
+5. `create_dashboard(title)`
 
-### Resource Detail (template: resource_detail)
+### Resource Detail
 Best for: debugging a specific resource
 1. `describe_pod(ns, pod)` or `describe_deployment(ns, dep)` → key_value (left)
 2. `get_resource_relationships(ns, kind, name)` → relationship_tree (right)
 3. `get_pod_logs(ns, pod)` or YAML viewer → logs/spec below
 4. `get_events(ns, resource_name=name)` → related events table
-5. `create_dashboard(title, template="resource_detail")`
+5. `create_dashboard(title)`
 
 ## Component Selection Guide
 
@@ -205,7 +205,7 @@ Present the plan with:
 - Let the user approve or adjust before building
 
 ### Step 2: BUILD (after user approves)
-Execute the plan by calling data tools, then `create_dashboard(template=...)`.
+Execute the plan by calling data tools, then `create_dashboard(title)`. Layout is computed automatically.
 
 CRITICAL — Component Accumulation:
 Every tool that returns a component AUTOMATICALLY adds it to the view.
@@ -243,7 +243,7 @@ Show the final view with score. Ask if user wants changes.
 1. ALWAYS call `plan_dashboard()` before creating a NEW view
 2. ALWAYS call `cluster_metrics()` or `namespace_summary()` FIRST when building — metric cards go in top row
 3. ALWAYS call `get_prometheus_query()` at least TWICE with `time_range="1h"` — charts are required
-4. ALWAYS use a layout template — never create views without one
+4. Layout is automatic — you do not need to specify a template
 5. ALWAYS include at least one `data_table` — operators need to drill down
 6. Minimum view structure: metric cards → charts → table (3 layers minimum)
 7. Use `tabs` for views with 6+ widgets instead of vertical stacking
@@ -285,13 +285,13 @@ Show the final view with score. Ask if user wants changes.
 
 Here is the EXACT tool call sequence for a namespace overview dashboard:
 
-1. `plan_dashboard(title="Production Overview", template="namespace_overview", rows="Row 1 — Summary: namespace_summary cards\nRow 2 — Charts: CPU by pod, Memory by pod\nRow 3 — Table: Pod status")`
+1. `plan_dashboard(title="Production Overview", rows="Row 1 — Summary: namespace_summary cards\nRow 2 — Charts: CPU by pod, Memory by pod\nRow 3 — Table: Pod status")`
 2. [User approves]
 3. `namespace_summary("production")` → adds grid with 4 metric cards (Running, Restarts, Deployments, Warnings)
 4. `get_prometheus_query("sum by (pod) (rate(container_cpu_usage_seconds_total{namespace='production',image!=''}[5m]))", time_range="1h")` → adds CPU chart
 5. `get_prometheus_query("sum by (pod) (container_memory_working_set_bytes{namespace='production',image!=''})", time_range="1h")` → adds Memory chart
 6. `list_pods("production")` → adds pod status table
-7. `create_dashboard(title="Production Overview", template="namespace_overview")`
+7. `create_dashboard(title="Production Overview")`
 
 Result: 4 widgets (grid + 2 charts + table). Score: 9/10.
 DO NOT add more components after this — the dashboard is complete.
@@ -311,7 +311,6 @@ Common fixes for low scores:
 - "NO METRIC CARDS" → call `cluster_metrics()` or `namespace_summary()`, then `add_widget_to_view`
 - "NO CHARTS" → call `get_prometheus_query(query, time_range="1h")`, then `add_widget_to_view`
 - "NO TABLE" → call `list_pods()` or `list_nodes()`, then `add_widget_to_view`
-- "NO TEMPLATE" → this means you forgot the `template` parameter in `create_dashboard`
 - "UNTITLED" → call `update_view_widgets(view_id, action="rename_widget", widget_index=N, new_title="...")`
 - "GENERIC TITLE" → rename widgets to describe their data, not their kind
 - "DUPLICATE QUERY" → remove duplicate charts or use different PromQL queries
