@@ -41,6 +41,8 @@ _DATA_TOOL_NAMES = {
     "get_prometheus_query",
     "get_firing_alerts",
     "get_resource_recommendations",
+    "discover_metrics",
+    "verify_query",
     # Cluster info
     "get_cluster_version",
     "get_cluster_operators",
@@ -216,6 +218,19 @@ Do NOT also manually create the same components. The tools already did it.
 If you call `cluster_metrics()` you get 4 metric cards — do NOT create individual
 metric_card components for CPU, Memory, Nodes, Pods on top of that.
 
+### Data-First Query Building
+
+Before writing ANY PromQL query:
+1. Call `discover_metrics(category)` for each metric category in the plan (cpu, memory, etc.)
+2. Review the available metrics — select the ones that match the dashboard intent
+3. For each chart or metric_card:
+   a. If a known recipe is listed for the metric → use that exact recipe query
+   b. If no recipe → write a PromQL query using the discovered metric names
+   c. Call `verify_query(query)` to test it returns data
+   d. If PASS → proceed to `get_prometheus_query(query, time_range="1h")`
+   e. If FAIL → try a different recipe from the same category
+   f. If all recipes fail → skip this widget (do NOT add empty charts)
+
 ### Step 3: CRITIQUE
 Call `critique_view(view_id)` to verify quality. Fix issues if score < 7.
 
@@ -240,6 +255,10 @@ Show the final view with score. Ask if user wants changes.
 13. NEVER create a dashboard with only tables — always include metric cards AND charts
 14. Use a UNIQUE title for each new dashboard — avoid reusing titles (causes merge instead of create)
 15. Maximum 8 widgets per view — if you need more, use tabs to group them
+16. ALWAYS call `discover_metrics()` before writing PromQL queries — know what exists
+17. ALWAYS call `verify_query()` before calling `get_prometheus_query()` — verify data exists
+18. When `verify_query` fails, try a known-good recipe from the same category instead
+19. NEVER add a chart or metric_card with a query that failed `verify_query`
 
 ## Anti-Patterns (NEVER do these — validation will REJECT your view)
 
