@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from sre_agent.db import Database, reset_database, set_database
 from sre_agent.db_migrations import run_migrations
+from sre_agent.tool_usage import record_tool_call, record_turn, sanitize_input, update_turn_feedback
 
 from .conftest import _TEST_DB_URL
 
@@ -115,3 +116,222 @@ class TestToolUsageTables:
         row = db.fetchone("SELECT * FROM tool_turns WHERE session_id = %s", ("sess-1",))
         assert row["tools_called"] == ["list_pods"]
         reset_database()
+
+
+class TestSanitizeInput:
+    def test_strips_secret_fields(self):
+        result = sanitize_input({"namespace": "prod", "token": "abc123", "password": "hunter2"})
+        assert result["namespace"] == "prod"
+        assert "abc123" not in str(result)
+        assert "hunter2" not in str(result)
+
+    def test_truncates_long_values(self):
+        result = sanitize_input({"data": "x" * 500})
+        assert len(result["data"]) <= 260
+
+    def test_caps_total_size(self):
+        big = {f"key_{i}": "v" * 200 for i in range(20)}
+        result = sanitize_input(big)
+        import json
+
+        assert len(json.dumps(result)) <= 1100
+
+    def test_empty_input(self):
+        assert sanitize_input({}) == {}
+
+    def test_none_input(self):
+        assert sanitize_input(None) is None
+
+
+class TestRecordToolCall:
+    def setup_method(self):
+        self.db = _make_test_db()
+        db2 = Database(_TEST_DB_URL)
+        db2.execute("DELETE FROM schema_migrations WHERE version >= 2")
+        db2.commit()
+        db2.close()
+        set_database(self.db)
+        run_migrations(self.db)
+
+    def teardown_method(self):
+        reset_database()
+
+    def test_records_successful_call(self):
+        record_tool_call(
+            session_id="s1",
+            turn_number=1,
+            agent_mode="sre",
+            tool_name="list_pods",
+            tool_category="diagnostics",
+            input_data={"namespace": "default"},
+            status="success",
+            error_message=None,
+            error_category=None,
+            duration_ms=100,
+            result_bytes=500,
+            requires_confirmation=False,
+            was_confirmed=None,
+        )
+        rows = self.db.fetchall("SELECT * FROM tool_usage WHERE session_id = %s", ("s1",))
+        assert len(rows) == 1
+        assert rows[0]["tool_name"] == "list_pods"
+        assert rows[0]["status"] == "success"
+        assert rows[0]["duration_ms"] == 100
+
+    def test_records_error_call(self):
+        record_tool_call(
+            session_id="s2",
+            turn_number=1,
+            agent_mode="sre",
+            tool_name="bad_tool",
+            tool_category=None,
+            input_data={},
+            status="error",
+            error_message="RuntimeError: failed",
+            error_category="server",
+            duration_ms=50,
+            result_bytes=0,
+            requires_confirmation=False,
+            was_confirmed=None,
+        )
+        row = self.db.fetchone("SELECT * FROM tool_usage WHERE session_id = %s", ("s2",))
+        assert row["status"] == "error"
+        assert row["error_message"] == "RuntimeError: failed"
+
+    def test_sanitizes_input(self):
+        record_tool_call(
+            session_id="s3",
+            turn_number=1,
+            agent_mode="sre",
+            tool_name="apply_yaml",
+            tool_category="operations",
+            input_data={"yaml_content": "secret: hunter2\n" * 100, "namespace": "prod"},
+            status="success",
+            error_message=None,
+            error_category=None,
+            duration_ms=200,
+            result_bytes=100,
+            requires_confirmation=True,
+            was_confirmed=True,
+        )
+        row = self.db.fetchone("SELECT * FROM tool_usage WHERE session_id = %s", ("s3",))
+        assert "hunter2" not in str(row["input_summary"])
+
+    def test_recording_failure_does_not_raise(self):
+        reset_database()
+        record_tool_call(
+            session_id="s4",
+            turn_number=1,
+            agent_mode="sre",
+            tool_name="t",
+            tool_category=None,
+            input_data={},
+            status="success",
+            error_message=None,
+            error_category=None,
+            duration_ms=0,
+            result_bytes=0,
+            requires_confirmation=False,
+            was_confirmed=None,
+        )
+
+
+class TestRecordTurn:
+    def setup_method(self):
+        self.db = _make_test_db()
+        db2 = Database(_TEST_DB_URL)
+        db2.execute("DELETE FROM schema_migrations WHERE version >= 2")
+        db2.commit()
+        db2.close()
+        set_database(self.db)
+        run_migrations(self.db)
+
+    def teardown_method(self):
+        reset_database()
+
+    def test_records_turn(self):
+        record_turn(
+            session_id="s1",
+            turn_number=1,
+            agent_mode="sre",
+            query_summary="what pods are crashing",
+            tools_offered=["list_pods", "get_events", "describe_pod"],
+            tools_called=["list_pods", "get_events"],
+        )
+        row = self.db.fetchone("SELECT * FROM tool_turns WHERE session_id = %s", ("s1",))
+        assert row is not None
+        assert row["query_summary"] == "what pods are crashing"
+        assert row["tools_offered"] == ["list_pods", "get_events", "describe_pod"]
+        assert row["tools_called"] == ["list_pods", "get_events"]
+
+    def test_truncates_query_summary(self):
+        record_turn(
+            session_id="s2",
+            turn_number=1,
+            agent_mode="sre",
+            query_summary="x" * 500,
+            tools_offered=[],
+            tools_called=[],
+        )
+        row = self.db.fetchone("SELECT * FROM tool_turns WHERE session_id = %s", ("s2",))
+        assert len(row["query_summary"]) <= 200
+
+    def test_upsert_on_duplicate(self):
+        record_turn(
+            session_id="s3",
+            turn_number=1,
+            agent_mode="sre",
+            query_summary="first",
+            tools_offered=[],
+            tools_called=[],
+        )
+        record_turn(
+            session_id="s3",
+            turn_number=1,
+            agent_mode="sre",
+            query_summary="first",
+            tools_offered=[],
+            tools_called=["list_pods"],
+        )
+        row = self.db.fetchone("SELECT * FROM tool_turns WHERE session_id = %s", ("s3",))
+        assert row["tools_called"] == ["list_pods"]
+
+
+class TestUpdateTurnFeedback:
+    def setup_method(self):
+        self.db = _make_test_db()
+        db2 = Database(_TEST_DB_URL)
+        db2.execute("DELETE FROM schema_migrations WHERE version >= 2")
+        db2.commit()
+        db2.close()
+        set_database(self.db)
+        run_migrations(self.db)
+
+    def teardown_method(self):
+        reset_database()
+
+    def test_links_feedback_to_latest_turn(self):
+        record_turn(
+            session_id="fb-s1",
+            turn_number=1,
+            agent_mode="sre",
+            query_summary="q1",
+            tools_offered=[],
+            tools_called=[],
+        )
+        record_turn(
+            session_id="fb-s1",
+            turn_number=2,
+            agent_mode="sre",
+            query_summary="q2",
+            tools_offered=[],
+            tools_called=[],
+        )
+        update_turn_feedback(session_id="fb-s1", feedback="positive")
+        row = self.db.fetchone("SELECT feedback FROM tool_turns WHERE session_id = %s AND turn_number = 2", ("fb-s1",))
+        assert row["feedback"] == "positive"
+        row1 = self.db.fetchone("SELECT feedback FROM tool_turns WHERE session_id = %s AND turn_number = 1", ("fb-s1",))
+        assert row1["feedback"] is None
+
+    def test_no_turns_does_not_raise(self):
+        update_turn_feedback(session_id="nonexistent", feedback="negative")
