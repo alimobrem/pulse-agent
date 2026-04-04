@@ -782,6 +782,11 @@ These render as single KPI numbers with trend indicators — ideal for the top r
 
 ## Charts via PromQL
 
+**CRITICAL PromQL syntax rule:** All label matchers MUST go in a SINGLE `{}` block.
+CORRECT: `kube_pod_status_phase{namespace="prod",phase="Running"}`
+WRONG:   `kube_pod_status_phase{namespace="prod"}{phase="Running"}` (double braces = parse error)
+Use double quotes for label values, not single quotes.
+
 When the user asks for a chart, time series, or graph, use get_prometheus_query with
 a time_range parameter (e.g. "1h", "6h", "24h") to get range data that renders as
 an interactive chart. Common PromQL patterns:

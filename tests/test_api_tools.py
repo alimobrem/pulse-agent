@@ -195,3 +195,51 @@ class TestToolsUsageChainsEndpoint:
         client = TestClient(app)
         resp = client.get("/tools/usage/chains")
         assert resp.status_code == 401
+
+
+class TestPromQLSanitization:
+    def test_fix_double_braces(self):
+        from sre_agent.api import _fix_promql
+
+        assert _fix_promql('metric{a="1"}{b="2"}') == 'metric{a="1",b="2"}'
+
+    def test_fix_double_braces_with_space(self):
+        from sre_agent.api import _fix_promql
+
+        assert _fix_promql('metric{a="1"} {b="2"}') == 'metric{a="1",b="2"}'
+
+    def test_valid_query_unchanged(self):
+        from sre_agent.api import _fix_promql
+
+        q = 'count(kube_pod_status_phase{namespace="prod",phase="Running"})'
+        assert _fix_promql(q) == q
+
+    def test_empty_query(self):
+        from sre_agent.api import _fix_promql
+
+        assert _fix_promql("") == ""
+
+    def test_sanitize_components_fixes_metric_card(self):
+        from sre_agent.api import _sanitize_components
+
+        comps = [
+            {"kind": "metric_card", "title": "Pods", "query": 'count(kube_pod{ns="x"}{phase="Running"})'},
+            {"kind": "data_table", "title": "Table"},
+        ]
+        _sanitize_components(comps)
+        assert comps[0]["query"] == 'count(kube_pod{ns="x",phase="Running"})'
+        assert comps[1].get("query") is None  # untouched
+
+    def test_sanitize_nested_in_grid(self):
+        from sre_agent.api import _sanitize_components
+
+        comps = [
+            {
+                "kind": "grid",
+                "items": [
+                    {"kind": "metric_card", "query": 'a{x="1"}{y="2"}'},
+                ],
+            }
+        ]
+        _sanitize_components(comps)
+        assert comps[0]["items"][0]["query"] == 'a{x="1",y="2"}'
