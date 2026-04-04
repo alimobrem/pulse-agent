@@ -13,8 +13,8 @@ from anthropic import beta_tool
 @beta_tool
 def plan_dashboard(
     title: str,
-    template: str,
     rows: str,
+    template: str = "",
 ) -> str:
     """Present a dashboard plan to the user for approval BEFORE building it.
     Call this INSTEAD of create_dashboard. After user approves, then call the
@@ -22,7 +22,6 @@ def plan_dashboard(
 
     Args:
         title: Proposed dashboard title.
-        template: Layout template ID (sre_dashboard, namespace_overview, incident_report, monitoring_panel, resource_detail).
         rows: A structured description of each row, formatted as:
               "Row 1 — Metric Cards: CPU Usage (sparkline), Memory Usage (sparkline), Nodes Ready, Pods Running
                Row 2 — Charts: CPU by Namespace (stacked_area, 1h), Memory by Namespace (stacked_area, 1h)
@@ -31,7 +30,7 @@ def plan_dashboard(
     plan_lines = [
         f"## Dashboard Plan: {title}",
         "",
-        f"**Template:** `{template}`",
+        "**Layout:** automatic (computed from component types)",
         "",
     ]
 

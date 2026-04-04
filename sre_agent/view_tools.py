@@ -44,18 +44,12 @@ def get_current_user() -> str:
 def create_dashboard(title: str, description: str = "", template: str = "") -> str:
     """Create a custom dashboard view. IMPORTANT: Call plan_dashboard() FIRST to show the user a plan before building. Only call create_dashboard after the user approves the plan.
 
-    If a layout template is specified, widgets are automatically arranged in a
-    professional grid layout instead of stacking vertically.
+    Layout is computed automatically based on component types — no template needed.
 
     Args:
         title: Name for the dashboard (e.g. "SRE Overview", "Node Health").
         description: Brief description of what the dashboard shows.
-        template: Optional layout template ID. Available templates:
-                  'sre_dashboard' — 4 metric cards + 2 charts side-by-side + table
-                  'namespace_overview' — summary cards + 2 charts + table + events
-                  'incident_report' — status timeline + logs/details side-by-side + table
-                  'monitoring_panel' — 4 metric cards + 2x2 chart grid + alerts
-                  'resource_detail' — key-value + resource tree + yaml + table
+        template: Deprecated — layout is now automatic. Ignored if provided.
     """
     view_id = f"cv-{uuid.uuid4().hex[:12]}"
     kwargs = {"view_id": view_id, "title": title, "description": description}
