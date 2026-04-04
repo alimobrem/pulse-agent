@@ -178,6 +178,39 @@ class TestGetToolCategory:
                 assert result is not None, f"{tool_name} returned None but is in {cat_name}"
 
 
+class TestCategoryCoverage:
+    def test_all_registered_tools_have_category(self):
+        """Every tool in the registry should be in at least one category or ALWAYS_INCLUDE."""
+        # Import all tool modules to populate the registry (side-effect imports)
+        from sre_agent import (
+            fleet_tools,  # noqa: F401
+            git_tools,  # noqa: F401
+            gitops_tools,  # noqa: F401
+            handoff_tools,  # noqa: F401
+            k8s_tools,  # noqa: F401
+            predict_tools,  # noqa: F401
+            security_tools,  # noqa: F401
+            timeline_tools,  # noqa: F401
+            view_tools,  # noqa: F401
+        )
+        from sre_agent.harness import ALWAYS_INCLUDE, TOOL_CATEGORIES
+        from sre_agent.tool_registry import TOOL_REGISTRY
+
+        all_categorized = set(ALWAYS_INCLUDE)
+        for config in TOOL_CATEGORIES.values():
+            all_categorized.update(config["tools"])
+
+        # These tools are internal/meta and intentionally uncategorized
+        EXCLUDED = {"set_store", "set_current_user", "get_current_user", "get_cluster_patterns"}
+
+        missing = set()
+        for tool_name in TOOL_REGISTRY:
+            if tool_name not in all_categorized and tool_name not in EXCLUDED:
+                missing.add(tool_name)
+
+        assert missing == set(), f"Tools missing from categories: {sorted(missing)}"
+
+
 class TestComponentHint:
     REQUIRED_COMPONENT_KINDS: ClassVar[list[str]] = [
         "data_table",

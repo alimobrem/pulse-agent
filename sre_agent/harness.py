@@ -66,6 +66,7 @@ TOOL_CATEGORIES = {
             "visualize_nodes",
             "describe_resource",
             "search_logs",
+            "get_resource_relationships",
         ],
     },
     "workloads": {
@@ -146,6 +147,7 @@ TOOL_CATEGORIES = {
             "scan_secrets",
             "get_security_summary",
             "get_tls_certificates",
+            "request_security_scan",
         ],
     },
     "storage": {
@@ -174,6 +176,7 @@ TOOL_CATEGORIES = {
             "get_pod_metrics",
             "forecast_quota_exhaustion",
             "get_resource_recommendations",
+            "analyze_hpa_thrashing",
         ],
     },
     "operations": {
@@ -193,6 +196,12 @@ TOOL_CATEGORIES = {
         "tools": [
             "detect_gitops_drift",
             "propose_git_change",
+            "get_argo_applications",
+            "get_argo_app_detail",
+            "get_argo_app_source",
+            "get_argo_sync_diff",
+            "install_gitops_operator",
+            "create_argo_application",
         ],
     },
     "fleet": {
@@ -235,6 +244,12 @@ ALWAYS_INCLUDE = {
     "list_pods",
     "get_events",
     "get_firing_alerts",
+    "request_sre_investigation",
+    "get_view_details",
+    "update_view_widgets",
+    "add_widget_to_view",
+    "undo_view_change",
+    "get_view_versions",
 }
 
 
