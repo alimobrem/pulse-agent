@@ -63,32 +63,42 @@ class TestExecuteTool:
         tool = MagicMock()
         tool.call.return_value = "result data"
         tool_map = {"my_tool": tool}
-        text, component = _execute_tool("my_tool", {"arg": "val"}, tool_map)
+        text, component, meta = _execute_tool("my_tool", {"arg": "val"}, tool_map)
         assert text == "result data"
         assert component is None
+        assert meta["status"] == "success"
+        assert meta["result_bytes"] == len("result data")
         tool.call.assert_called_once_with({"arg": "val"})
 
     def test_success_with_component(self):
         tool = MagicMock()
         tool.call.return_value = ("result data", {"kind": "data_table"})
         tool_map = {"my_tool": tool}
-        text, component = _execute_tool("my_tool", {}, tool_map)
+        text, component, meta = _execute_tool("my_tool", {}, tool_map)
         assert text == "result data"
         assert component == {"kind": "data_table"}
+        assert meta["status"] == "success"
+        assert meta["result_bytes"] == len("result data")
 
     def test_unknown_tool(self):
-        text, component = _execute_tool("nonexistent", {}, {})
+        text, component, meta = _execute_tool("nonexistent", {}, {})
         assert "unknown tool" in text
         assert component is None
+        assert meta["status"] == "error"
+        assert meta["error_category"] == "not_found"
+        assert meta["result_bytes"] == 0
 
     def test_exception_returns_type_only(self):
         tool = MagicMock()
         tool.call.side_effect = ValueError("secret details here")
         tool_map = {"bad_tool": tool}
-        text, component = _execute_tool("bad_tool", {}, tool_map)
+        text, component, meta = _execute_tool("bad_tool", {}, tool_map)
         assert "ValueError" in text
         assert "secret details" not in text
         assert component is None
+        assert meta["status"] == "error"
+        assert "ValueError" in meta["error_message"]
+        assert meta["result_bytes"] == 0
 
 
 class TestConfirmationGate:
@@ -262,3 +272,137 @@ class TestWriteToolSet:
     def test_read_tools_not_in_write_set(self):
         read_tools = {"list_pods", "list_nodes", "get_events", "describe_pod", "list_namespaces"}
         assert WRITE_TOOLS & read_tools == set()
+
+
+class TestOnToolResult:
+    def _make_stream_context(self, responses):
+        client = MagicMock()
+        streams = []
+        for resp in responses:
+            stream = MagicMock()
+            stream.__enter__ = MagicMock(return_value=stream)
+            stream.__exit__ = MagicMock(return_value=False)
+            stream.__iter__ = MagicMock(return_value=iter([]))
+            stream.get_final_message.return_value = resp
+            streams.append(stream)
+        client.messages.stream = MagicMock(side_effect=streams)
+        return client
+
+    def test_on_tool_result_called_for_read_tool(self):
+        tool_use_response = SimpleNamespace(
+            stop_reason="tool_use",
+            content=[SimpleNamespace(type="tool_use", id="t1", name="list_pods", input={"namespace": "default"})],
+        )
+        final_response = SimpleNamespace(stop_reason="end_turn", content=[SimpleNamespace(type="text", text="Done.")])
+        client = self._make_stream_context([tool_use_response, final_response])
+        mock_tool = MagicMock()
+        mock_tool.call.return_value = "pod-1 Running"
+        results = []
+        run_agent_streaming(
+            client=client,
+            messages=[{"role": "user", "content": "list pods"}],
+            system_prompt="test",
+            tool_defs=[],
+            tool_map={"list_pods": mock_tool},
+            on_tool_result=lambda info: results.append(info),
+        )
+        assert len(results) == 1
+        r = results[0]
+        assert r["tool_name"] == "list_pods"
+        assert r["input"] == {"namespace": "default"}
+        assert r["status"] == "success"
+        assert r["error_message"] is None
+        assert r["duration_ms"] >= 0
+        assert r["result_bytes"] > 0
+        assert r["was_confirmed"] is None
+
+    def test_on_tool_result_called_for_write_tool_confirmed(self):
+        tool_use_response = SimpleNamespace(
+            stop_reason="tool_use",
+            content=[SimpleNamespace(type="tool_use", id="t1", name="delete_pod", input={"pod_name": "x"})],
+        )
+        final_response = SimpleNamespace(stop_reason="end_turn", content=[SimpleNamespace(type="text", text="Done.")])
+        client = self._make_stream_context([tool_use_response, final_response])
+        mock_tool = MagicMock()
+        mock_tool.call.return_value = "deleted"
+        results = []
+        run_agent_streaming(
+            client=client,
+            messages=[{"role": "user", "content": "delete pod"}],
+            system_prompt="test",
+            tool_defs=[],
+            tool_map={"delete_pod": mock_tool},
+            write_tools={"delete_pod"},
+            on_confirm=lambda name, inp: True,
+            on_tool_result=lambda info: results.append(info),
+        )
+        assert len(results) == 1
+        assert results[0]["was_confirmed"] is True
+        assert results[0]["status"] == "success"
+
+    def test_on_tool_result_called_for_write_tool_denied(self):
+        tool_use_response = SimpleNamespace(
+            stop_reason="tool_use",
+            content=[SimpleNamespace(type="tool_use", id="t1", name="delete_pod", input={"pod_name": "x"})],
+        )
+        final_response = SimpleNamespace(
+            stop_reason="end_turn", content=[SimpleNamespace(type="text", text="Cancelled.")]
+        )
+        client = self._make_stream_context([tool_use_response, final_response])
+        mock_tool = MagicMock()
+        results = []
+        run_agent_streaming(
+            client=client,
+            messages=[{"role": "user", "content": "delete pod"}],
+            system_prompt="test",
+            tool_defs=[],
+            tool_map={"delete_pod": mock_tool},
+            write_tools={"delete_pod"},
+            on_confirm=lambda name, inp: False,
+            on_tool_result=lambda info: results.append(info),
+        )
+        assert len(results) == 1
+        assert results[0]["was_confirmed"] is False
+        assert results[0]["status"] == "denied"
+
+    def test_on_tool_result_captures_error(self):
+        tool_use_response = SimpleNamespace(
+            stop_reason="tool_use",
+            content=[SimpleNamespace(type="tool_use", id="t1", name="bad_tool", input={})],
+        )
+        final_response = SimpleNamespace(stop_reason="end_turn", content=[SimpleNamespace(type="text", text="Error.")])
+        client = self._make_stream_context([tool_use_response, final_response])
+        mock_tool = MagicMock()
+        mock_tool.call.side_effect = RuntimeError("k8s unreachable")
+        results = []
+        run_agent_streaming(
+            client=client,
+            messages=[{"role": "user", "content": "do thing"}],
+            system_prompt="test",
+            tool_defs=[],
+            tool_map={"bad_tool": mock_tool},
+            on_tool_result=lambda info: results.append(info),
+        )
+        assert len(results) == 1
+        assert results[0]["status"] == "error"
+        assert "RuntimeError" in results[0]["error_message"]
+
+    def test_on_tool_result_includes_iteration(self):
+        tool_use_response = SimpleNamespace(
+            stop_reason="tool_use",
+            content=[SimpleNamespace(type="tool_use", id="t1", name="list_pods", input={})],
+        )
+        final_response = SimpleNamespace(stop_reason="end_turn", content=[SimpleNamespace(type="text", text="Done.")])
+        client = self._make_stream_context([tool_use_response, final_response])
+        mock_tool = MagicMock()
+        mock_tool.call.return_value = "pods"
+        results = []
+        run_agent_streaming(
+            client=client,
+            messages=[{"role": "user", "content": "list"}],
+            system_prompt="test",
+            tool_defs=[],
+            tool_map={"list_pods": mock_tool},
+            on_tool_result=lambda info: results.append(info),
+        )
+        assert results[0]["turn_number"] == 1

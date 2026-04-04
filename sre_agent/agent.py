@@ -259,11 +259,17 @@ def _redact_input(name: str, input_data: dict) -> dict:
 MAX_TOOL_RESULT_LENGTH = 50_000  # ~50KB cap to prevent WebSocket overflow
 
 
-def _execute_tool(name: str, input_data: dict, tool_map: dict) -> tuple[str, dict | None]:
-    """Execute a tool by name. Returns (text_result, component_spec_or_None)."""
+def _execute_tool(name: str, input_data: dict, tool_map: dict) -> tuple[str, dict | None, dict]:
+    """Execute a tool by name. Returns (text_result, component_spec_or_None, exec_meta)."""
     tool = tool_map.get(name)
     if not tool:
-        return f"Error: unknown tool '{name}'", None
+        meta = {
+            "status": "error",
+            "error_message": f"unknown tool '{name}'",
+            "error_category": "not_found",
+            "result_bytes": 0,
+        }
+        return f"Error: unknown tool '{name}'", None, meta
     try:
         result = tool.call(input_data)
         # Tools can return a tuple (text, component_spec) for rich UI rendering
@@ -271,6 +277,8 @@ def _execute_tool(name: str, input_data: dict, tool_map: dict) -> tuple[str, dic
             text, component = result
         else:
             text, component = result, None
+        # Capture size BEFORE truncation
+        result_bytes = len(text)
         # Cap result size to prevent WebSocket overflow
         if len(text) > MAX_TOOL_RESULT_LENGTH:
             original_len = len(text)
@@ -287,7 +295,8 @@ def _execute_tool(name: str, input_data: dict, tool_map: dict) -> tuple[str, dic
                 }
             )
         )
-        return text, component
+        meta = {"status": "success", "error_message": None, "error_category": None, "result_bytes": result_bytes}
+        return text, component, meta
     except Exception as e:
         from .error_tracker import get_tracker
         from .errors import classify_exception
@@ -307,8 +316,10 @@ def _execute_tool(name: str, input_data: dict, tool_map: dict) -> tuple[str, dic
                 }
             )
         )
+        error_message = f"{type(e).__name__}: {str(e)[:200]}"
+        meta = {"status": "error", "error_message": error_message, "error_category": err.category, "result_bytes": 0}
         # Only return type name to LLM — don't leak internal details
-        return f"Error executing {name}: {type(e).__name__}", None
+        return f"Error executing {name}: {type(e).__name__}", None, meta
 
 
 TOOL_TIMEOUT = get_settings().tool_timeout
@@ -316,7 +327,7 @@ TOOL_TIMEOUT = get_settings().tool_timeout
 
 def _execute_tool_with_timeout(
     name: str, input_data: dict, tool_map: dict, timeout: int | None = None
-) -> tuple[str, dict | None]:
+) -> tuple[str, dict | None, dict]:
     """Execute a tool with a timeout guard."""
     timeout = timeout or TOOL_TIMEOUT
     with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
@@ -339,7 +350,13 @@ def _execute_tool_with_timeout(
 
             err = ToolError(message=f"{name} timed out after {timeout}s", category="server", operation=name)
             get_tracker().record(err)
-            return f"Error: {name} timed out after {timeout}s", None
+            meta = {
+                "status": "error",
+                "error_message": f"{name} timed out after {timeout}s",
+                "error_category": "server",
+                "result_bytes": 0,
+            }
+            return f"Error: {name} timed out after {timeout}s", None, meta
 
 
 def run_agent_streaming(
@@ -354,6 +371,7 @@ def run_agent_streaming(
     on_tool_use=None,
     on_confirm=None,
     on_component=None,
+    on_tool_result=None,
     mode: str = "sre",
 ) -> str:
     """Run an agent turn with streaming, handling the tool loop manually.
@@ -372,6 +390,7 @@ def run_agent_streaming(
         on_tool_use: Callback when a tool is invoked (name, input).
         on_confirm: Callback to confirm write operations. Returns True to proceed.
         on_component: Callback when a tool returns a UI component spec (name, spec).
+        on_tool_result: Callback fired after each tool execution with full metadata dict.
 
     Returns the full final text response.
     """
@@ -502,24 +521,86 @@ def run_agent_streaming(
 
             # Execute read tools in parallel
             if read_blocks:
+                start_time = time.time()
                 with concurrent.futures.ThreadPoolExecutor(max_workers=min(len(read_blocks), 5)) as pool:
                     futures = {
                         pool.submit(_execute_tool_with_timeout, b.name, b.input, tool_map): b for b in read_blocks
                     }
                     for future in concurrent.futures.as_completed(futures):
                         block = futures[future]
+                        elapsed_ms = int((time.time() - start_time) * 1000)
                         try:
-                            results_map[block.id] = future.result()
+                            text, component, exec_meta = future.result()
+                            results_map[block.id] = (text, component)
+                            if on_tool_result:
+                                on_tool_result(
+                                    {
+                                        "tool_name": block.name,
+                                        "input": block.input,
+                                        "status": exec_meta["status"],
+                                        "error_message": exec_meta["error_message"],
+                                        "error_category": exec_meta["error_category"],
+                                        "duration_ms": elapsed_ms,
+                                        "result_bytes": exec_meta["result_bytes"],
+                                        "was_confirmed": None,
+                                        "turn_number": iterations,
+                                    }
+                                )
                         except Exception:
                             results_map[block.id] = (f"Error executing {block.name}", None)
+                            if on_tool_result:
+                                on_tool_result(
+                                    {
+                                        "tool_name": block.name,
+                                        "input": block.input,
+                                        "status": "error",
+                                        "error_message": f"Error executing {block.name}",
+                                        "error_category": "server",
+                                        "duration_ms": elapsed_ms,
+                                        "result_bytes": 0,
+                                        "was_confirmed": None,
+                                        "turn_number": iterations,
+                                    }
+                                )
 
             # Execute write tools sequentially (need confirmation gate)
             for block in write_blocks:
                 confirmed = on_confirm(block.name, block.input) if on_confirm else False
                 if not confirmed:
                     results_map[block.id] = ("Operation denied. No confirmation callback or user rejected.", None)
+                    if on_tool_result:
+                        on_tool_result(
+                            {
+                                "tool_name": block.name,
+                                "input": block.input,
+                                "status": "denied",
+                                "error_message": None,
+                                "error_category": None,
+                                "duration_ms": 0,
+                                "result_bytes": 0,
+                                "was_confirmed": False,
+                                "turn_number": iterations,
+                            }
+                        )
                     continue
-                results_map[block.id] = _execute_tool_with_timeout(block.name, block.input, tool_map)
+                write_start = time.time()
+                text, component, exec_meta = _execute_tool_with_timeout(block.name, block.input, tool_map)
+                write_elapsed_ms = int((time.time() - write_start) * 1000)
+                results_map[block.id] = (text, component)
+                if on_tool_result:
+                    on_tool_result(
+                        {
+                            "tool_name": block.name,
+                            "input": block.input,
+                            "status": exec_meta["status"],
+                            "error_message": exec_meta["error_message"],
+                            "error_category": exec_meta["error_category"],
+                            "duration_ms": write_elapsed_ms,
+                            "result_bytes": exec_meta["result_bytes"],
+                            "was_confirmed": True,
+                            "turn_number": iterations,
+                        }
+                    )
 
             # Assemble results in original order
             for block in tool_blocks:
@@ -557,6 +638,7 @@ def run_agent_turn_streaming(
     on_tool_use=None,
     on_confirm=None,
     on_component=None,
+    on_tool_result=None,
 ) -> str:
     """Run the SRE agent. Delegates to the shared agent loop."""
     effective_defs = TOOL_DEFS + (extra_tool_defs or [])
@@ -574,4 +656,5 @@ def run_agent_turn_streaming(
         on_tool_use=on_tool_use,
         on_confirm=on_confirm,
         on_component=on_component,
+        on_tool_result=on_tool_result,
     )
