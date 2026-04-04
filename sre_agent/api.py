@@ -316,6 +316,35 @@ async def get_tools_usage(
     )
 
 
+def _build_tool_result_handler(session_id: str, agent_mode: str, write_tools: set[str]):
+    """Build an on_tool_result callback that records to tool_usage table."""
+
+    def on_tool_result(info: dict):
+        try:
+            from .harness import get_tool_category
+            from .tool_usage import record_tool_call
+
+            record_tool_call(
+                session_id=session_id,
+                turn_number=info["turn_number"],
+                agent_mode=agent_mode,
+                tool_name=info["tool_name"],
+                tool_category=get_tool_category(info["tool_name"]),
+                input_data=info.get("input"),
+                status=info["status"],
+                error_message=info.get("error_message"),
+                error_category=info.get("error_category"),
+                duration_ms=info.get("duration_ms", 0),
+                result_bytes=info.get("result_bytes", 0),
+                requires_confirmation=info["tool_name"] in write_tools,
+                was_confirmed=info.get("was_confirmed"),
+            )
+        except Exception:
+            logger.debug("Tool result recording failed", exc_info=True)
+
+    return on_tool_result
+
+
 async def _run_agent_ws(
     websocket: WebSocket,
     messages: list[dict],
@@ -416,6 +445,9 @@ async def _run_agent_ws(
         except Exception as e:
             logger.debug("Memory retrieval failed: %s", e)
 
+    # Build tool result recording handler
+    tool_result_handler = _build_tool_result_handler(ws_id, mode, write_tools)
+
     # Run the blocking agent in a thread
     full_response = await asyncio.to_thread(
         run_agent_streaming,
@@ -430,6 +462,7 @@ async def _run_agent_ws(
         on_tool_use=on_tool_use,
         on_confirm=on_confirm,
         on_component=on_component,
+        on_tool_result=tool_result_handler,
         mode=mode,
     )
 

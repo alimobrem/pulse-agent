@@ -80,6 +80,74 @@ class TestToolsUsageEndpoint:
         )
 
 
+class TestToolResultRecording:
+    @patch("sre_agent.tool_usage.record_tool_call")
+    def test_on_tool_result_records(self, mock_call):
+        from sre_agent.api import _build_tool_result_handler
+
+        handler = _build_tool_result_handler(session_id="test-sess", agent_mode="sre", write_tools={"delete_pod"})
+        handler(
+            {
+                "tool_name": "list_pods",
+                "input": {"namespace": "default"},
+                "status": "success",
+                "error_message": None,
+                "error_category": None,
+                "duration_ms": 100,
+                "result_bytes": 500,
+                "was_confirmed": None,
+                "turn_number": 1,
+            }
+        )
+        mock_call.assert_called_once()
+        call_kwargs = mock_call.call_args[1]
+        assert call_kwargs["session_id"] == "test-sess"
+        assert call_kwargs["tool_name"] == "list_pods"
+        assert call_kwargs["requires_confirmation"] is False
+
+    @patch("sre_agent.tool_usage.record_tool_call")
+    def test_write_tool_flagged(self, mock_call):
+        from sre_agent.api import _build_tool_result_handler
+
+        handler = _build_tool_result_handler(session_id="test-sess", agent_mode="sre", write_tools={"delete_pod"})
+        handler(
+            {
+                "tool_name": "delete_pod",
+                "input": {"pod_name": "x"},
+                "status": "success",
+                "error_message": None,
+                "error_category": None,
+                "duration_ms": 50,
+                "result_bytes": 10,
+                "was_confirmed": True,
+                "turn_number": 1,
+            }
+        )
+        call_kwargs = mock_call.call_args[1]
+        assert call_kwargs["requires_confirmation"] is True
+
+    @patch("sre_agent.tool_usage.record_tool_call")
+    def test_handler_swallows_errors(self, mock_call):
+        mock_call.side_effect = RuntimeError("DB down")
+        from sre_agent.api import _build_tool_result_handler
+
+        handler = _build_tool_result_handler(session_id="test-sess", agent_mode="sre", write_tools=set())
+        # Should not raise
+        handler(
+            {
+                "tool_name": "list_pods",
+                "input": {},
+                "status": "success",
+                "error_message": None,
+                "error_category": None,
+                "duration_ms": 0,
+                "result_bytes": 0,
+                "was_confirmed": None,
+                "turn_number": 1,
+            }
+        )
+
+
 class TestToolsUsageStatsEndpoint:
     @patch("sre_agent.tool_usage.get_usage_stats")
     def test_basic_stats(self, mock_stats):
