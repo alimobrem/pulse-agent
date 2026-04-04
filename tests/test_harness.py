@@ -398,3 +398,40 @@ class TestPickChartType:
         assert result is not None
         # Both should be appended at bottom since they don't match sre_dashboard slots
         assert len(result) == 2
+
+
+class TestLayoutEngine:
+    def test_compute_layout_sre_dashboard(self):
+        from sre_agent.layout_engine import compute_layout
+
+        components = [
+            {"kind": "grid", "title": "KPIs", "items": [{"kind": "metric_card", "title": "CPU"}]},
+            {"kind": "chart", "title": "CPU Trend"},
+            {"kind": "chart", "title": "Memory Trend"},
+            {"kind": "data_table", "title": "Pods"},
+        ]
+        pos = compute_layout(components)
+        assert len(pos) == 4
+        assert pos[0]["y"] == 0
+        assert pos[0]["w"] == 4
+        assert pos[1]["w"] == 2
+        assert pos[2]["w"] == 2
+        assert pos[1]["y"] == pos[2]["y"]
+        assert pos[3]["y"] > pos[1]["y"]
+
+    def test_compute_layout_empty(self):
+        from sre_agent.layout_engine import compute_layout
+
+        assert compute_layout([]) == {}
+
+    def test_old_templates_still_work(self):
+        """Verify backward compatibility — old apply_template still functions."""
+        from sre_agent.layout_templates import apply_template
+
+        components = [
+            {"kind": "metric_card", "title": "CPU"},
+            {"kind": "chart", "title": "CPU Trend"},
+            {"kind": "data_table", "title": "Pods"},
+        ]
+        result = apply_template("sre_dashboard", components)
+        assert result is not None

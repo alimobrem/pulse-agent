@@ -1,4 +1,9 @@
-"""Layout template registry — mirrors frontend layoutTemplates.ts."""
+"""Layout template registry — mirrors frontend layoutTemplates.ts.
+
+DEPRECATED: This module is superseded by layout_engine.py.
+Kept for backward compatibility with existing saved views.
+New views use compute_layout() from layout_engine.py.
+"""
 
 TEMPLATES: dict[str, list[dict]] = {
     "sre_dashboard": [
