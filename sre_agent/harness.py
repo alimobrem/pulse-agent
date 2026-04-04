@@ -491,6 +491,16 @@ def get_cluster_context(max_age: float = 60, mode: str = "sre") -> str:
 
     try:
         ctx = gather_cluster_context(mode=mode)
+        # Append chain hints if available
+        try:
+            from .tool_chains import ensure_hints_fresh, get_chain_hints_text
+
+            ensure_hints_fresh()
+            hints = get_chain_hints_text()
+            if hints:
+                ctx += hints
+        except Exception:
+            pass
         _cluster_context_cache[mode] = (ctx, now)
         return ctx
     except Exception as e:

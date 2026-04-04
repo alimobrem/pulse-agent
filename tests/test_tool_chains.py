@@ -199,3 +199,36 @@ class TestChainHints:
         for hints in _chain_hints_cache.values():
             for _, prob in hints:
                 assert prob >= 0.99
+
+
+class TestHarnessIntegration:
+    def setup_method(self):
+        self.db = _make_test_db()
+        db2 = Database(_TEST_DB_URL)
+        db2.execute("DELETE FROM schema_migrations WHERE version >= 2")
+        db2.commit()
+        db2.close()
+        set_database(self.db)
+        run_migrations(self.db)
+        _seed_chains(self.db)
+
+    def teardown_method(self):
+        from sre_agent.tool_chains import _chain_hints_cache
+
+        _chain_hints_cache.clear()
+        reset_database()
+
+    def test_cluster_context_includes_hints(self):
+        from unittest.mock import patch
+
+        from sre_agent.tool_chains import refresh_chain_hints
+
+        refresh_chain_hints()
+
+        with patch("sre_agent.harness.gather_cluster_context", return_value="Nodes: 3/3 Ready"):
+            import sre_agent.harness as h
+
+            h._cluster_context_cache.clear()
+            ctx = h.get_cluster_context(max_age=0, mode="sre")
+            assert "Tool Usage Patterns" in ctx
+            assert "list_resources" in ctx
