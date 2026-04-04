@@ -7,8 +7,11 @@ design issues and score quality before showing to the user.
 from __future__ import annotations
 
 import logging
+from collections import Counter
 
 from anthropic import beta_tool
+
+from .view_validator import is_generic_title
 
 logger = logging.getLogger("pulse_agent.view_critic")
 
@@ -106,27 +109,69 @@ def critique_view(view_id: str) -> str:
     elif len(layout) >= 6:
         suggestions.append("Consider using tabs to organize 6+ widgets into logical groups")
 
-    # 8. Duplicate widget detection
+    # 8. Duplicate widget detection (Check A: find ALL duplicates, deduct per extra)
     queries = [w.get("query", "") for w in layout if w.get("query")]
     # Also check inside grids
     for w in layout:
         if w.get("kind") == "grid":
             queries.extend(item.get("query", "") for item in w.get("items", []) if item.get("query"))
-    seen_queries: set[str] = set()
-    for q in queries:
-        if q and q in seen_queries:
-            issues.append(f"DUPLICATE QUERY: '{q[:60]}' appears multiple times — use different metrics")
-            break
-        if q:
-            seen_queries.add(q)
+    query_counts: Counter[str] = Counter(q for q in queries if q)
+    for q, count in query_counts.items():
+        if count > 1:
+            extras = count - 1
+            score -= extras
+            issues.append(f"DUPLICATE QUERY: '{q[:60]}' appears {count} times — use different metrics (-{extras} pts)")
 
-    # 9. Data quality — charts with no data
+    # 9. Data quality — charts with no data (Check C: issue, not suggestion; deduct per empty)
     for w in layout:
         if w.get("kind") == "chart":
             series = w.get("series", [])
             total_points = sum(len(s.get("data", [])) for s in series)
-            if total_points == 0 and w.get("title"):
-                suggestions.append(f"Chart '{w['title']}' has no data — verify Prometheus connectivity")
+            has_query = bool(w.get("query"))
+            if total_points == 0 and not has_query:
+                chart_title = w.get("title", "untitled")
+                issues.append(f"EMPTY CHART: '{chart_title}' has no data and no query — remove or add data")
+                score -= 1
+
+    # --- Check B: Generic title detection ---
+    for w in layout:
+        w_title = w.get("title", "")
+        w_kind = w.get("kind", "")
+        if w_title and w_kind and is_generic_title(w_title, w_kind):
+            issues.append(f"GENERIC TITLE: '{w_title}' — provide a descriptive, specific title")
+            score -= 1
+        # Also check nested grid items
+        if w_kind == "grid":
+            for item in w.get("items", []):
+                it = item.get("title", "")
+                ik = item.get("kind", "")
+                if it and ik and is_generic_title(it, ik):
+                    issues.append(f"GENERIC TITLE: '{it}' — provide a descriptive, specific title")
+                    score -= 1
+
+    # --- Check D: Component balance ---
+    if len(layout) >= 3:
+        kind_counts = Counter(w.get("kind", "") for w in layout)
+        most_common_kind, most_common_count = kind_counts.most_common(1)[0]
+        if most_common_count / len(layout) > 0.8:
+            issues.append(
+                f"IMBALANCED: {most_common_count}/{len(layout)} widgets are '{most_common_kind}'"
+                " — mix metric cards, charts, and tables"
+            )
+            score -= 1
+
+    # --- Check E: Duplicate titles (case-insensitive) ---
+    all_titles = [w.get("title", "").lower() for w in layout if w.get("title")]
+    title_counts = Counter(all_titles)
+    dup_titles = [t for t, c in title_counts.items() if c > 1]
+    if dup_titles:
+        issues.append(
+            f"DUPLICATE TITLES: {', '.join(repr(t) for t in dup_titles)} — each widget must have a unique title"
+        )
+        score -= 1
+
+    # --- Score clamping ---
+    score = max(0, min(max_score, score))
 
     # --- Build result ---
     result_lines = [
@@ -139,20 +184,20 @@ def critique_view(view_id: str) -> str:
     if issues:
         result_lines.append(f"\n### Issues ({len(issues)}):")
         for issue in issues:
-            result_lines.append(f"- ❌ {issue}")
+            result_lines.append(f"- \u274c {issue}")
 
     if suggestions:
         result_lines.append(f"\n### Suggestions ({len(suggestions)}):")
         for s in suggestions:
-            result_lines.append(f"- 💡 {s}")
+            result_lines.append(f"- \U0001f4a1 {s}")
 
     if score >= 7:
-        result_lines.append("\n✅ View passes quality check. Ready to show to user.")
+        result_lines.append("\n\u2705 View passes quality check. Ready to show to user.")
     elif score >= 5:
-        result_lines.append("\n⚠️ View needs improvements. Fix the issues above, then critique again.")
+        result_lines.append("\n\u26a0\ufe0f View needs improvements. Fix the issues above, then critique again.")
     else:
         result_lines.append(
-            "\n❌ View quality is low. Add missing components (metrics, charts, table) and re-critique."
+            "\n\u274c View quality is low. Add missing components (metrics, charts, table) and re-critique."
         )
 
     return "\n".join(result_lines)

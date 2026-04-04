@@ -219,24 +219,32 @@ def _validate_component(comp: dict, result: ValidationResult) -> None:
                 _validate_component(item, result)
 
 
-def _check_generic_title(title: str, kind: str, result: ValidationResult) -> None:
-    """Reject generic or meaningless titles."""
+def is_generic_title(title: str, kind: str) -> bool:
+    """Return True if *title* is generic or meaningless for the given *kind*."""
     lower = title.strip().lower()
 
     # Exact match
     if lower in _GENERIC_TITLES:
-        result.errors.append(f"Generic title '{title}' — provide a descriptive title.")
-        return
+        return True
 
     # Numbered generic (e.g. "Chart 1", "Table 2")
     if _NUMBERED_GENERIC_RE.match(lower):
-        result.errors.append(f"Generic title '{title}' — provide a descriptive title.")
-        return
+        return True
 
     # Kind-as-title (e.g. "data table" for kind "data_table")
     kind_as_title = kind.replace("_", " ")
-    if lower == kind_as_title:
-        result.errors.append(f"Generic title '{title}' — title matches kind '{kind}', provide a descriptive title.")
+    return lower == kind_as_title
+
+
+def _check_generic_title(title: str, kind: str, result: ValidationResult) -> None:
+    """Reject generic or meaningless titles."""
+    if is_generic_title(title, kind):
+        lower = title.strip().lower()
+        kind_as_title = kind.replace("_", " ")
+        if lower == kind_as_title:
+            result.errors.append(f"Generic title '{title}' — title matches kind '{kind}', provide a descriptive title.")
+        else:
+            result.errors.append(f"Generic title '{title}' — provide a descriptive title.")
 
 
 def _check_promql_all(components: list[dict], result: ValidationResult) -> None:
