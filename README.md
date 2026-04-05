@@ -690,7 +690,7 @@ Current eval dimensions:
 
 84 real-world user prompts mapped to expected tool calls, covering all 82 registered tools. Used for evaluating agent tool selection quality and ensuring every tool is reachable.
 
-See **[docs/EVAL_PROMPTS.md](docs/EVAL_PROMPTS.md)** for the complete prompt-to-tool mapping.
+See **[EVAL_PROMPTS.md](EVAL_PROMPTS.md)** for the complete prompt-to-tool mapping.
 
 | Mode | Prompts | Example |
 |------|---------|---------|
