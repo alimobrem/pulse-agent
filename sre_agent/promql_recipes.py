@@ -22,6 +22,19 @@ class PromQLRecipe:
     scope: str  # "cluster", "namespace", "pod", "node"
     parameters: list[str] = field(default_factory=list)  # Template variables: ["namespace"]
 
+    def render(self, **params: str) -> str:
+        """Substitute parameter placeholders in the query.
+
+        Example: recipe.render(namespace="production", pod="my-pod")
+        Replaces 'NS' with namespace value, 'POD' with pod value, etc.
+        """
+        q = self.query
+        mapping = {"NS": "namespace", "POD": "pod", "NODE": "instance", "DEP": "deployment"}
+        for placeholder, param_name in mapping.items():
+            if param_name in params:
+                q = q.replace(f"'{placeholder}'", f"'{params[param_name]}'")
+        return q
+
 
 # ---------------------------------------------------------------------------
 # Recipe registry — 16 categories, 79 recipes

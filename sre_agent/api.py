@@ -575,6 +575,7 @@ async def _run_agent_ws(
                     view_title,
                     len(session_components),
                 )
+                session_components.clear()
             else:
                 _db.save_view(current_user, view_id, view_title, view_desc, session_components, positions=positions)
                 _view_updated_ids.add(view_id)
@@ -596,6 +597,7 @@ async def _run_agent_ws(
                 if view_template:
                     spec["templateId"] = view_template
                 await websocket.send_json({"type": "view_spec", "spec": spec})
+                session_components.clear()
 
         elif sig_type == "view_updated":
             _view_updated_ids.add(sig.get("view_id", ""))

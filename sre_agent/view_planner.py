@@ -26,6 +26,7 @@ def plan_dashboard(
               "Row 1 — Metric Cards: CPU Usage (sparkline), Memory Usage (sparkline), Nodes Ready, Pods Running
                Row 2 — Charts: CPU by Namespace (stacked_area, 1h), Memory by Namespace (stacked_area, 1h)
                Row 3 — Table: Pod Status (name, status, restarts, node, age)"
+        template: Deprecated — layout is now automatic. Ignored if provided.
     """
     plan_lines = [
         f"## Dashboard Plan: {title}",

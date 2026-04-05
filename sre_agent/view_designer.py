@@ -7,7 +7,6 @@ production-grade views that platform engineers use daily.
 from __future__ import annotations
 
 from .k8s_tools import ALL_TOOLS as SRE_TOOLS
-from .security_tools import ALL_SECURITY_TOOLS
 from .view_tools import VIEW_TOOLS
 
 # Data tools — read-only, used to gather information for display
@@ -60,15 +59,11 @@ _DATA_TOOL_NAMES = {
 }
 
 _DATA_TOOLS = [t for t in SRE_TOOLS if t.name in _DATA_TOOL_NAMES]
-_SEC_TOOLS = [
-    t
-    for t in ALL_SECURITY_TOOLS
-    if t.name in {"get_security_summary", "scan_pod_security", "scan_rbac_risks"}
-    and t.name not in _DATA_TOOL_NAMES  # avoid duplicates
-]
 
-# Combine data tools + security tools + view tools (no cluster write ops)
-_combined = _DATA_TOOLS + _SEC_TOOLS + VIEW_TOOLS
+# Combine data tools + view tools (no cluster write ops)
+# Security tools (get_security_summary, scan_pod_security, scan_rbac_risks)
+# are already included in _DATA_TOOL_NAMES above.
+_combined = _DATA_TOOLS + VIEW_TOOLS
 # Deduplicate by name (keep first occurrence)
 _seen: set[str] = set()
 ALL_TOOLS = []

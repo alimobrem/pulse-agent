@@ -119,7 +119,6 @@ def namespace_summary(namespace: str) -> str:
     )
 
     # Build metric cards with PromQL sparklines
-    ns_filter = f'{{namespace="{namespace}"}}'
     cards = [
         {
             "kind": "metric_card",
@@ -127,7 +126,7 @@ def namespace_summary(namespace: str) -> str:
             "value": str(running),
             "status": "healthy" if failed + crashloop == 0 else "warning",
             "description": f"of {total_pods} total",
-            "query": f"count(kube_pod_status_phase{ns_filter}{{phase='Running'}})",
+            "query": f"count(kube_pod_status_phase{{namespace=\"{namespace}\",phase='Running'}})",
             "color": "#10b981",
         },
         {
@@ -136,7 +135,7 @@ def namespace_summary(namespace: str) -> str:
             "value": str(crashloop),
             "status": "healthy" if crashloop == 0 else "error",
             "description": f"{failed} failed",
-            "query": f"sum(rate(kube_pod_container_status_restarts_total{ns_filter}[5m]))",
+            "query": f'sum(rate(kube_pod_container_status_restarts_total{{namespace="{namespace}"}}[5m]))',
             "color": "#ef4444" if crashloop > 0 else "#10b981",
         },
         {
@@ -152,7 +151,7 @@ def namespace_summary(namespace: str) -> str:
             "value": str(warning_count),
             "status": "healthy" if warning_count == 0 else "warning",
             "description": "active events",
-            "query": f"count(kube_event_count{ns_filter}{{type='Warning'}}) or vector(0)",
+            "query": f"count(kube_event_count{{namespace=\"{namespace}\",type='Warning'}}) or vector(0)",
             "color": "#f59e0b" if warning_count > 0 else "#10b981",
         },
     ]

@@ -18,8 +18,16 @@ class TestSingleComponents:
     def test_single_metric_card(self):
         components = [{"kind": "metric_card"}]
         layout = compute_layout(components)
-        assert layout[0]["w"] == 1
+        assert layout[0]["w"] == 4  # Single card fills full width
         assert layout[0]["x"] == 0
+
+    def test_two_metric_cards_half_width(self):
+        components = [{"kind": "metric_card"}, {"kind": "metric_card"}]
+        layout = compute_layout(components)
+        assert layout[0]["w"] == 2
+        assert layout[1]["w"] == 2
+        assert layout[0]["x"] == 0
+        assert layout[1]["x"] == 2
 
     def test_empty_list(self):
         assert compute_layout([]) == {}

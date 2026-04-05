@@ -106,15 +106,27 @@ def _pack_kpi(
     positions: dict[int, dict],
     start_y: int,
 ) -> None:
-    """Pack KPI metric cards side-by-side, up to 4 per row."""
+    """Pack KPI metric cards side-by-side, up to 4 per row.
+
+    When fewer than 4 cards exist, distribute width evenly:
+    1 card -> w=4, 2 cards -> w=2, 3 cards -> w=1, 4+ -> w=1.
+    """
+    count = len(items)
+    if count == 1:
+        card_w = 4
+    elif count == 2:
+        card_w = 2
+    else:
+        card_w = 1
+
     x = 0
     y = start_y
     for orig_idx, _kind, _dw, dh in items:
         if x >= 4:
             x = 0
             y += dh
-        positions[orig_idx] = {"x": x, "y": y, "w": 1, "h": dh}
-        x += 1
+        positions[orig_idx] = {"x": x, "y": y, "w": card_w, "h": dh}
+        x += card_w
 
 
 def _pack_charts(
