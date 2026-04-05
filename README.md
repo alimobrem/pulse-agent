@@ -656,6 +656,21 @@ Current eval dimensions:
 - safety/compliance
 - tool efficiency
 - operational quality
+
+### Tool Eval Prompts
+
+84 real-world user prompts mapped to expected tool calls, covering all 82 registered tools. Used for evaluating agent tool selection quality and ensuring every tool is reachable.
+
+See **[docs/EVAL_PROMPTS.md](docs/EVAL_PROMPTS.md)** for the complete prompt-to-tool mapping.
+
+| Mode | Prompts | Example |
+|------|---------|---------|
+| SRE | 64 | "why are my pods crashing" → `list_pods`, `describe_pod`, `get_pod_logs` |
+| Security | 8 | "scan RBAC for overly permissive roles" → `scan_rbac_risks` |
+| View Designer | 11 | "create a dashboard for production" → `plan_dashboard`, `create_dashboard` |
+| Cross-Agent | 1 | "hand this off to security" → `request_security_scan` |
+
+CI enforced: adding a new tool without an eval prompt fails the test suite.
 - reliability
 
 Hard blocker categories:
