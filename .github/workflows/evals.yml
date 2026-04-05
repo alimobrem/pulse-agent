@@ -68,7 +68,7 @@ jobs:
         run: |
           curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
           helm lint chart/
-          helm template test chart/ --set vertexAI.projectId=test --set vertexAI.region=us-central1
+          helm template test chart/ --set vertexAI.projectId=test --set vertexAI.region=us-central1 --set wsAuth.existingSecret=test-token
 
       - name: Verify docs consistency
         run: |
