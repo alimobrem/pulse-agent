@@ -35,7 +35,18 @@ Defines the REST and WebSocket protocol between the Pulse UI and Pulse Agent. Bo
 | `GET` | `/monitor/capabilities` | token | Max trust level and supported auto-fix categories |
 | `POST` | `/monitor/pause` | token | Emergency kill switch — pause all auto-fix actions |
 | `POST` | `/monitor/resume` | token | Resume auto-fix actions after a pause |
+| `GET` | `/tools/usage/chains` | token | Discovered tool call chains (common sequences via bigram analysis) |
 | `GET` | `/context` | token | View recent shared context bus entries across all agents |
+| `GET` | `/views` | token | List saved views for current user |
+| `GET` | `/views/:id` | token | Get a single saved view |
+| `POST` | `/views` | token | Save a new view |
+| `PUT` | `/views/:id` | token | Update view (title, layout, positions) |
+| `DELETE` | `/views/:id` | token | Delete a view |
+| `POST` | `/views/:id/clone` | token | Clone a view |
+| `POST` | `/views/:id/share` | token | Generate 24h share link |
+| `POST` | `/views/claim/:token` | token | Claim a shared view |
+| `GET` | `/views/:id/versions` | token | List version history for a view |
+| `POST` | `/views/:id/undo` | token | Undo last change to a view |
 
 **Authentication:** Token-authenticated endpoints accept `Authorization: Bearer <token>` header or `?token=<token>` query parameter. The token is `PULSE_AGENT_WS_TOKEN`. Unauthenticated requests return 401.
 
@@ -45,7 +56,7 @@ Defines the REST and WebSocket protocol between the Pulse UI and Pulse Agent. Bo
 {
   "protocol": "2",
   "agent": "1.5.0",
-  "tools": 109,
+  "tools": 82,
   "features": ["component_specs", "ws_token_auth", "rate_limiting", "monitor", "fix_history", "predictions"]
 }
 ```
@@ -693,11 +704,14 @@ The UI sends a `GET /version` request before connecting. If the agent's `protoco
 
 | UI Version | Agent Version | Protocol | Status |
 |------------|--------------|----------|--------|
-| v5.13.0 | v1.5.0 | 2 | Current |
+| v5.16.2+ | v1.13.1 | 2 | Current |
+| v5.16.2+ | v1.13.0 | 2 | Compatible |
+| v5.16.2+ | v1.12.0 | 2 | Compatible |
+| v5.14.0+ | v1.9.0 | 2 | Compatible |
+| v5.14.0+ | v1.7.0-v1.8.0 | 2 | Compatible |
+| v5.13.0+ | v1.5.3-v1.6.1 | 2 | Compatible |
 | v5.12.0 | v1.4.0 | 2 | Compatible |
-| v5.11.0 | v1.3.0 | 1 | Compatible |
-| v5.10.0 | v1.3.0 | 1 | Compatible |
-| v5.8.0 | v1.2.0 | 1 | Compatible |
-| v5.0.0-v5.7.0 | v1.0.0-v1.1.0 | 1 | Compatible |
+| v5.6.0+ | v1.1.0-v1.3.0 | 1 | Compatible |
+| v5.3.0+ | v1.0.0 | 1 | Compatible |
 
 > Both repos should tag releases together when protocol changes occur. Minor UI/Agent releases within the same protocol version are always compatible.
