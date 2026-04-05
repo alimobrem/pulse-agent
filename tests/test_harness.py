@@ -8,10 +8,11 @@ from unittest.mock import patch
 
 from sre_agent.harness import (
     ALWAYS_INCLUDE,
-    COMPONENT_HINT,
+    COMPONENT_SCHEMAS,
     TOOL_CATEGORIES,
     build_cached_system_prompt,
     get_cluster_context,
+    get_component_hint,
     get_tool_category,
     select_tools,
 )
@@ -288,25 +289,48 @@ class TestComponentHint:
         "tabs",
         "grid",
         "section",
+        "log_viewer",
+        "yaml_viewer",
+        "metric_card",
+        "node_map",
     ]
 
-    def test_hint_mentions_dashboards(self):
-        assert "dashboard" in COMPONENT_HINT.lower()
-
-    def test_hint_mentions_safety(self):
-        assert "dry_run" in COMPONENT_HINT
-
-    def test_hint_documents_all_component_kinds(self):
-        """Every component kind must be documented in the system prompt."""
+    def test_schemas_dict_has_all_component_kinds(self):
+        """Every component kind must have a schema in COMPONENT_SCHEMAS."""
         for kind in self.REQUIRED_COMPONENT_KINDS:
-            assert kind in COMPONENT_HINT, f"Component kind '{kind}' missing from COMPONENT_HINT"
+            assert kind in COMPONENT_SCHEMAS, f"Component kind '{kind}' missing from COMPONENT_SCHEMAS"
 
-    def test_hint_has_schema_for_each_kind(self):
-        """Each component kind should have a JSON schema example in the hint."""
+    def test_schemas_have_json_example(self):
+        """Each schema entry should contain a JSON kind example."""
         for kind in self.REQUIRED_COMPONENT_KINDS:
-            assert f'"kind": "{kind}"' in COMPONENT_HINT, (
-                f"Component kind '{kind}' has no schema example in COMPONENT_HINT"
+            assert f'"kind": "{kind}"' in COMPONENT_SCHEMAS[kind], (
+                f"Component kind '{kind}' has no JSON schema example in COMPONENT_SCHEMAS"
             )
+
+    def test_full_hint_mentions_dry_run(self):
+        hint = get_component_hint("sre")
+        assert "dry_run" in hint
+
+    def test_full_hint_mentions_dashboards(self):
+        hint = get_component_hint("sre")
+        assert "dashboard" in hint.lower()
+
+    def test_tool_based_selection_reduces_schemas(self):
+        """Passing a small tool list should produce fewer schemas than all."""
+        full_hint = get_component_hint("sre")
+        filtered_hint = get_component_hint("sre", tool_names=["list_pods"])
+        assert len(filtered_hint) < len(full_hint)
+
+    def test_view_designer_returns_empty(self):
+        assert get_component_hint("view_designer") == ""
+
+    def test_security_returns_empty(self):
+        assert get_component_hint("security") == ""
+
+    def test_data_table_always_included(self):
+        """data_table schema is included even for tools that don't produce it."""
+        hint = get_component_hint("sre", tool_names=["get_prometheus_query"])
+        assert "data_table" in hint
 
 
 # ---------------------------------------------------------------------------

@@ -1323,7 +1323,7 @@ def _run_proactive_investigation_sync(finding: dict) -> dict[str, Any]:
         create_client,
         run_agent_streaming,
     )
-    from .harness import COMPONENT_HINT, build_cached_system_prompt, get_cluster_context, select_tools
+    from .harness import build_cached_system_prompt, get_cluster_context, get_component_hint, select_tools
 
     readonly_defs = [tool_def for tool_def in SRE_TOOL_DEFS if tool_def.get("name") not in SRE_WRITE_TOOLS]
     readonly_map = {name: tool for name, tool in SRE_TOOL_MAP.items() if name not in SRE_WRITE_TOOLS}
@@ -1337,8 +1337,9 @@ def _run_proactive_investigation_sync(finding: dict) -> dict[str, Any]:
 
     # Harness: cached system prompt with cluster context
     cluster_ctx = get_cluster_context()
+    hint = get_component_hint("sre", tool_names=list(readonly_map.keys()))
     effective_system = build_cached_system_prompt(
-        SRE_SYSTEM_PROMPT + COMPONENT_HINT,
+        SRE_SYSTEM_PROMPT + hint,
         cluster_ctx,
     )
 
@@ -1395,7 +1396,7 @@ def _run_proactive_investigation_sync(finding: dict) -> dict[str, Any]:
 def _run_security_followup_sync(finding: dict) -> dict:
     """Run a lightweight security check on the namespace of a critical finding."""
     from .agent import create_client, run_agent_streaming
-    from .harness import COMPONENT_HINT, build_cached_system_prompt, get_cluster_context, select_tools
+    from .harness import build_cached_system_prompt, get_cluster_context, get_component_hint, select_tools
     from .security_agent import (
         SECURITY_SYSTEM_PROMPT,
     )
@@ -1429,8 +1430,9 @@ def _run_security_followup_sync(finding: dict) -> dict:
 
     # Harness: cached system prompt with cluster context
     cluster_ctx = get_cluster_context()
+    hint = get_component_hint("security", tool_names=list(sec_tool_map.keys()))
     effective_system = build_cached_system_prompt(
-        SECURITY_SYSTEM_PROMPT + COMPONENT_HINT,
+        SECURITY_SYSTEM_PROMPT + hint,
         cluster_ctx,
     )
 

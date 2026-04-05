@@ -514,21 +514,128 @@ def get_cluster_context(max_age: float = 60, mode: str = "sre") -> str:
 # ---------------------------------------------------------------------------
 
 
-def get_component_hint(mode: str = "sre") -> str:
-    """Return the appropriate component hint for the agent mode.
+COMPONENT_SCHEMAS: dict[str, str] = {
+    "data_table": """data_table -- Sortable, filterable, paginated tables
+{"kind": "data_table", "title": "Pods", "description": "Running pods in namespace",
+ "columns": [{"id": "name", "header": "Name", "type": "resource_name"},
+              {"id": "status", "header": "Status", "type": "status"},
+              {"id": "age", "header": "Age", "type": "age"}],
+ "rows": [{"name": "nginx-abc", "status": "Running", "age": "2d", "_gvr": "v1~pods", "namespace": "default"}],
+ "resourceType": "pods", "gvr": "v1~pods"}
+Column types: resource_name, namespace, node, status, age, cpu, memory, replicas, progress, sparkline, timestamp, labels, boolean, severity, link, text.""",
+    "info_card_grid": """info_card_grid -- Summary metric cards in a row
+{"kind": "info_card_grid", "title": "Cluster Health",
+ "cards": [{"label": "Nodes Ready", "value": "5/5", "sub": "all healthy"},
+           {"label": "Pods Running", "value": "142", "sub": "3 pending"}]}""",
+    "chart": """chart -- Interactive time-series (line, bar, area, stacked_area, stacked_bar, pie, donut, scatter, radar, treemap)
+{"kind": "chart", "chartType": "line", "title": "CPU Usage", "description": "Last hour",
+ "series": [{"label": "nginx", "data": [[1700000000, 0.5], [1700003600, 0.7]]}],
+ "yAxisLabel": "cores", "query": "rate(container_cpu...)", "timeRange": "1h"}""",
+    "status_list": """status_list -- Colored status indicators
+{"kind": "status_list", "title": "Node Conditions",
+ "items": [{"name": "Ready", "status": "healthy", "detail": "KubeletReady"},
+           {"name": "MemoryPressure", "status": "warning", "detail": "threshold exceeded"}]}
+Statuses: healthy, warning, error, pending, unknown.""",
+    "badge_list": """badge_list -- Colored badges/tags in a row
+{"kind": "badge_list",
+ "badges": [{"text": "production", "variant": "info"},
+            {"text": "critical", "variant": "error"},
+            {"text": "healthy", "variant": "success"}]}
+Variants: success, warning, error, info, default.""",
+    "key_value": """key_value -- Key-value pairs display
+{"kind": "key_value", "title": "Deployment Details",
+ "pairs": [{"key": "Replicas", "value": "3/3 ready"},
+           {"key": "Strategy", "value": "RollingUpdate"},
+           {"key": "Image", "value": "nginx:1.25"}]}""",
+    "relationship_tree": """relationship_tree -- Visual resource hierarchy
+{"kind": "relationship_tree", "title": "Resource Tree",
+ "rootId": "dep-1",
+ "nodes": [{"id": "dep-1", "label": "Deployment/nginx", "kind": "Deployment",
+            "name": "nginx", "status": "healthy", "children": ["rs-1"]},
+           {"id": "rs-1", "label": "ReplicaSet/nginx-abc", "kind": "ReplicaSet",
+            "name": "nginx-abc", "status": "healthy", "children": ["pod-1"]},
+           {"id": "pod-1", "label": "Pod/nginx-abc-xyz", "kind": "Pod",
+            "name": "nginx-abc-xyz", "status": "healthy"}]}""",
+    "tabs": """tabs -- Tabbed layout grouping components
+{"kind": "tabs",
+ "tabs": [{"label": "Overview", "components": [<info_card_grid>, <status_list>]},
+          {"label": "Metrics", "components": [<chart>, <chart>]},
+          {"label": "Events", "components": [<data_table>]}]}""",
+    "grid": """grid -- Side-by-side layout (2+ columns)
+{"kind": "grid", "columns": 2,
+ "items": [<chart_spec>, <chart_spec>, <status_list>, <key_value>]}""",
+    "section": """section -- Collapsible titled section
+{"kind": "section", "title": "Advanced Details", "collapsible": true,
+ "defaultOpen": false, "components": [<key_value>, <data_table>]}""",
+    "log_viewer": """log_viewer -- Searchable, filterable log output
+{"kind": "log_viewer", "title": "Pod Logs: nginx-abc",
+ "source": "nginx-abc/nginx",
+ "lines": [{"timestamp": "2026-04-02T10:00:01Z", "level": "info", "message": "Server started on :8080"},
+            {"timestamp": "2026-04-02T10:00:05Z", "level": "error", "message": "Connection refused to upstream"},
+            {"timestamp": "2026-04-02T10:00:06Z", "level": "warn", "message": "Retrying in 5s"}]}
+Levels: info, warn, error, debug. Include timestamps for sortable output.""",
+    "yaml_viewer": """yaml_viewer -- Formatted YAML/JSON with copy button
+{"kind": "yaml_viewer", "title": "Deployment Manifest", "language": "yaml",
+ "content": "apiVersion: apps/v1\\nkind: Deployment\\nmetadata:\\n  name: nginx\\nspec:\\n  replicas: 3"}""",
+    "metric_card": """metric_card -- Single metric with live sparkline chart
+{"kind": "metric_card", "title": "CPU Usage", "value": "72", "unit": "%",
+ "query": "100 - avg(rate(node_cpu_seconds_total{mode='idle'}[5m])) * 100",
+ "color": "#3b82f6", "thresholds": {"warning": 70, "critical": 90},
+ "status": "warning", "description": "Above 70% threshold"}
+Include `query` for live sparklines. Status: healthy, warning, error.""",
+    "node_map": """node_map -- Visual cluster node topology
+{"kind": "node_map", "title": "Cluster Nodes", "description": "3/3 nodes ready, 42 pods running",
+ "nodes": [{"name": "worker-1", "status": "ready", "roles": ["worker"], "podCount": 15,
+            "cpuPct": 45.2, "memPct": 62.1}]}
+Use `visualize_nodes()` for pre-built node maps.""",
+}
 
-    - view_designer: returns empty (has its own comprehensive guide in system prompt)
-    - security: returns empty (no component rendering needed)
-    - sre/both: returns full COMPONENT_HINT
-    """
-    if mode == "view_designer":
-        return ""  # View designer system prompt already has a complete component guide
-    if mode == "security":
-        return ""  # Security agent doesn't create views
-    return COMPONENT_HINT
+# Map tools to the component kinds they produce
+_TOOL_COMPONENTS: dict[str, list[str]] = {
+    "get_prometheus_query": ["chart"],
+    "list_pods": ["data_table"],
+    "list_nodes": ["data_table"],
+    "list_deployments": ["data_table"],
+    "list_resources": ["data_table"],
+    "list_statefulsets": ["data_table"],
+    "list_daemonsets": ["data_table"],
+    "list_jobs": ["data_table"],
+    "list_hpas": ["data_table"],
+    "list_ingresses": ["data_table"],
+    "list_routes": ["data_table"],
+    "cluster_metrics": ["metric_card", "grid"],
+    "namespace_summary": ["metric_card", "info_card_grid", "grid"],
+    "get_firing_alerts": ["status_list"],
+    "get_pod_logs": ["log_viewer"],
+    "search_logs": ["log_viewer"],
+    "describe_pod": ["key_value"],
+    "describe_deployment": ["key_value"],
+    "describe_resource": ["key_value"],
+    "get_resource_relationships": ["relationship_tree"],
+    "visualize_nodes": ["node_map"],
+    "get_events": ["data_table"],
+    "get_node_metrics": ["data_table"],
+    "get_pod_metrics": ["data_table"],
+    "create_dashboard": ["tabs", "grid", "section"],
+    "plan_dashboard": ["tabs", "grid", "section"],
+}
 
 
-COMPONENT_HINT = """
+def _select_relevant_schemas(tool_names: list[str]) -> list[str]:
+    """Select component schemas relevant to the selected tools."""
+    relevant: set[str] = set()
+
+    for tool in tool_names:
+        if tool in _TOOL_COMPONENTS:
+            relevant.update(_TOOL_COMPONENTS[tool])
+
+    # Always include data_table (most common)
+    relevant.add("data_table")
+
+    return [COMPONENT_SCHEMAS[k] for k in sorted(relevant) if k in COMPONENT_SCHEMAS]
+
+
+COMPONENT_HINT_CORE = """
 ## Resource Listing Guidance
 
 Use list_resources for any resource type including nodes, deployments, statefulsets, \
@@ -538,346 +645,36 @@ operator subscriptions.
 
 ## UI Component Rendering
 
-When your tool results include structured data (tables, lists, status checks),
-the system automatically renders them as interactive UI components in the chat.
-You do NOT need to format data as tables in your text — the tools handle rendering.
+Tools return structured data as interactive UI components. Focus your text on analysis, \
+root causes, and recommendations -- not raw data the tools already displayed.
+"""
 
-Focus your text response on:
-- Analysis and interpretation of the data
-- Root cause identification
-- Actionable recommendations
-- Risk assessment
+COMPONENT_HINT_OPS = """
+## Table Guidelines
 
-Do NOT repeat raw data that the tools already displayed as components.
+- Include `_gvr` field for clickable resource names (e.g. "v1~pods", "apps~v1~deployments")
+- No Namespace column for cluster-scoped resources (Nodes, PVs, ClusterRoles)
+- Table columns are dynamic -- add/remove based on user's request
+- Links: cell values starting with `/` or `http` render as clickable links
 
-## Component Catalog
+## PromQL Syntax
 
-You can return ANY of these 13 component kinds as structured JSON. The UI renders
-each one with appropriate interactive features. Choose the best kind for the data:
-
-### data_table — Sortable, filterable, paginated tables
-Best for: Resource lists, metrics tables, event logs, any tabular data.
-```json
-{"kind": "data_table", "title": "Pods", "description": "Running pods in namespace",
- "columns": [{"id": "name", "header": "Name", "type": "resource_name"},
-              {"id": "status", "header": "Status", "type": "status"},
-              {"id": "age", "header": "Age", "type": "age"}],
- "rows": [{"name": "nginx-abc", "status": "Running", "age": "2d", "_gvr": "v1~pods", "namespace": "default"}],
- "resourceType": "pods", "gvr": "v1~pods"}
-```
-Column types: resource_name, namespace, node, status, age, cpu, memory, replicas,
-progress, sparkline, timestamp, labels, boolean, severity, link, text.
-
-### info_card_grid — Summary metric cards in a row
-Best for: Namespace overviews, cluster health summaries, KPI dashboards.
-```json
-{"kind": "info_card_grid", "title": "Cluster Health",
- "cards": [{"label": "Nodes Ready", "value": "5/5", "sub": "all healthy"},
-           {"label": "Pods Running", "value": "142", "sub": "3 pending"}]}
-```
-
-### chart — Interactive time-series charts (10 types)
-Best for: PromQL metrics, trends, resource usage over time.
-Chart types: line, bar, area, pie, donut, stacked_bar, stacked_area, scatter, radar, treemap.
-```json
-{"kind": "chart", "chartType": "line", "title": "CPU Usage", "description": "Last hour",
- "series": [{"label": "nginx", "data": [[1700000000, 0.5], [1700003600, 0.7]]}],
- "yAxisLabel": "cores", "query": "rate(container_cpu...)", "timeRange": "1h"}
-```
-
-### status_list — Colored status indicators
-Best for: Health checks, readiness gates, condition lists.
-```json
-{"kind": "status_list", "title": "Node Conditions",
- "items": [{"name": "Ready", "status": "healthy", "detail": "KubeletReady"},
-           {"name": "MemoryPressure", "status": "warning", "detail": "threshold exceeded"}]}
-```
-Statuses: healthy, warning, error, pending, unknown.
-
-### badge_list — Colored badges/tags in a row
-Best for: Labels, tags, categories, severity indicators.
-```json
-{"kind": "badge_list",
- "badges": [{"text": "production", "variant": "info"},
-            {"text": "critical", "variant": "error"},
-            {"text": "healthy", "variant": "success"}]}
-```
-Variants: success, warning, error, info, default.
-
-### key_value — Key-value pairs display
-Best for: Resource details, config summaries, describe output highlights.
-```json
-{"kind": "key_value", "title": "Deployment Details",
- "pairs": [{"key": "Replicas", "value": "3/3 ready"},
-           {"key": "Strategy", "value": "RollingUpdate"},
-           {"key": "Image", "value": "nginx:1.25"}]}
-```
-
-### relationship_tree — Visual resource hierarchy
-Best for: Owner references, resource dependencies, topology.
-```json
-{"kind": "relationship_tree", "title": "Resource Tree",
- "rootId": "dep-1",
- "nodes": [{"id": "dep-1", "label": "Deployment/nginx", "kind": "Deployment",
-            "name": "nginx", "status": "healthy", "children": ["rs-1"]},
-           {"id": "rs-1", "label": "ReplicaSet/nginx-abc", "kind": "ReplicaSet",
-            "name": "nginx-abc", "status": "healthy", "children": ["pod-1"]},
-           {"id": "pod-1", "label": "Pod/nginx-abc-xyz", "kind": "Pod",
-            "name": "nginx-abc-xyz", "status": "healthy"}]}
-```
-
-### tabs — Tabbed layout grouping components
-Best for: Multi-section views, resource vs metrics separation.
-```json
-{"kind": "tabs",
- "tabs": [{"label": "Overview", "components": [<info_card_grid>, <status_list>]},
-          {"label": "Metrics", "components": [<chart>, <chart>]},
-          {"label": "Events", "components": [<data_table>]}]}
-```
-
-### grid — Side-by-side layout (2+ columns)
-Best for: Placing charts or cards next to each other.
-```json
-{"kind": "grid", "columns": 2,
- "items": [<chart_spec>, <chart_spec>, <status_list>, <key_value>]}
-```
-
-### section — Collapsible titled section
-Best for: Grouping related components under a header.
-```json
-{"kind": "section", "title": "Advanced Details", "collapsible": true,
- "defaultOpen": false, "components": [<key_value>, <data_table>]}
-```
-
-### log_viewer — Searchable, filterable log output
-Best for: Pod logs, event streams, audit trails, debugging output.
-```json
-{"kind": "log_viewer", "title": "Pod Logs: nginx-abc",
- "source": "nginx-abc/nginx",
- "lines": [{"timestamp": "2026-04-02T10:00:01Z", "level": "info", "message": "Server started on :8080"},
-            {"timestamp": "2026-04-02T10:00:05Z", "level": "error", "message": "Connection refused to upstream", "source": "nginx"},
-            {"timestamp": "2026-04-02T10:00:06Z", "level": "warn", "message": "Retrying in 5s"}]}
-```
-Levels: info, warn, error, debug. Include timestamps for sortable output.
-
-### yaml_viewer — Formatted YAML/JSON with copy button
-Best for: Resource manifests, config dumps, diff comparisons, apply previews.
-```json
-{"kind": "yaml_viewer", "title": "Deployment Manifest", "language": "yaml",
- "content": "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: nginx\nspec:\n  replicas: 3"}
-```
-
-### metric_card — Single metric with live sparkline chart
-Best for: Key metrics, capacity numbers, SLI/SLO values. Renders with a sparkline
-when a PromQL query is provided (auto-refreshes every 60s).
-```json
-{"kind": "metric_card", "title": "CPU Usage", "value": "72", "unit": "%",
- "query": "100 - avg(rate(node_cpu_seconds_total{mode='idle'}[5m])) * 100",
- "color": "#3b82f6", "thresholds": {"warning": 70, "critical": 90},
- "status": "warning", "description": "Above 70% threshold"}
-```
-Include `query` for live sparklines. Status: healthy, warning, error.
-Use `cluster_metrics()` tool for pre-built metric cards with queries.
-
-### Composition Guidelines
-- Use `tabs` to organize complex views (e.g. Overview/Metrics/Events tabs)
-- Use `grid` to place two charts side by side
-- Use `section` to group related info with a collapsible header
-- Use `badge_list` for labels, tags, or severity indicators inline
-- Use `key_value` for describe-style resource details
-- Use `log_viewer` for pod logs, event dumps, and audit trails
-- Use `yaml_viewer` for manifests, configs, and apply previews
-- Use `metric_card` in a `grid` for KPI dashboards with trend indicators
-- Combine kinds freely — e.g. a `section` containing a `grid` of `metric_card` specs
-
-## Layout Templates
-
-When creating dashboards, use a layout template for professional, consistent layouts.
-Pass the `template` parameter to `create_dashboard()`:
-
-| Template | Layout | Best For |
-|----------|--------|----------|
-| `sre_dashboard` | 4 metric cards + 2 charts side-by-side + table | Cluster health, SRE overviews |
-| `namespace_overview` | Summary cards + 2 charts + table + events | Namespace status pages |
-| `incident_report` | Status timeline + logs/details side-by-side + table | Incident triage, debugging |
-| `monitoring_panel` | 4 metric cards + 2x2 chart grid + alert list | Metrics dashboards |
-| `resource_detail` | Key-value + resource tree + YAML + table | Resource deep-dives |
-
-Example: `create_dashboard("SRE Overview", template="sre_dashboard")`
-
-The template auto-arranges widgets by matching their component kind to slots.
-**You MUST produce the right component kinds for each template:**
-- `sre_dashboard` / `monitoring_panel`: call `cluster_metrics()` FIRST for metric_card row, then charts, then table
-- `namespace_overview`: call `namespace_summary()` for info_card_grid, then charts, then table
-- `incident_report`: produce status_list + log_viewer + key_value + table
-- `resource_detail`: produce key_value + relationship_tree + yaml_viewer + table
-
-## View Composition
-
-When the user asks a high-level question like "what's happening in my namespace",
-"show me cluster health", or "create a view for X", compose a comprehensive view
-by calling multiple tools. The UI renders each tool's component inline.
-
-**Namespace overview** — call these tools (in parallel when possible):
-1. namespace_summary(namespace) — summary cards (pods, deployments, warnings)
-2. list_pods(namespace) — pod status table
-3. get_events(namespace, event_type="Warning") — recent warnings
-4. list_deployments(namespace) — workload health
-5. get_pod_metrics(namespace) — resource consumption
-
-**Cluster overview / SRE dashboard** — call these tools in this order:
-1. cluster_metrics() — **ALWAYS FIRST** — returns metric_card components with sparklines
-2. get_prometheus_query(query, time_range="1h") — CPU/memory trend charts
-3. list_nodes — node health table
-4. get_firing_alerts — active alerts
-5. create_dashboard(title, template="sre_dashboard") — arranges metric cards on top row, charts side-by-side, table below
-
-**Resource-focused views** — for requests like "show me CPU-heavy pods":
-1. get_pod_metrics(namespace, sort_by="cpu") — sorted by the requested metric
-2. Add more tools as context requires (HPAs, node metrics, etc.)
-
-**Clickable resource names**: Include a `_gvr` field (hidden, not a column) in each row
-to enable clickable names. Format: `group~version~resource` (e.g. `v1~pods`,
-`apps~v1~deployments`, `operators.coreos.com~v1alpha1~subscriptions`). The UI uses
-this to build detail page links. Works for any resource type including CRDs.
-
-**Cluster-scoped resources**: NEVER add a Namespace column for cluster-scoped resources
-(Nodes, Namespaces, ClusterRoles, ClusterRoleBindings, PersistentVolumes, StorageClasses,
-CRDs). These resources don't belong to a namespace.
-
-**Dynamic table schemas**: Table columns are fully dynamic — you decide what columns
-to include based on the user's request. Add, remove, or reorder columns as needed.
-The frontend renders whatever columns you provide. For example, if the user asks
-"show me pods with their node and CPU usage", combine data from list_pods and
-get_pod_metrics to build a custom table with exactly those columns.
-
-**Link columns in tables**: Tables can include clickable link columns. The frontend
-automatically renders any cell value starting with `/` or `http` as a clickable link.
-For example, the pods table includes a "Logs" column with `/logs/{namespace}/{pod_name}`
-links. You can add custom columns with links to any table by including path values.
-
-After calling the data tools, call `create_dashboard` if the user wants to save
-the view. The dashboard will contain all the component specs from this conversation.
-
-## Custom Dashboards
-
-When the user asks to "create a dashboard", "build a custom view", "make a dashboard
-showing X and Y", or "save this as a view" — use the `create_dashboard` tool AFTER
-you have already called the relevant data tools.
-
-Steps:
-1) Call the data tools the user wants
-2) Pick the best layout template for the content
-3) Call `create_dashboard(title, template="...")` with the template
-
-**ALWAYS use a template** when creating dashboards. Pick based on the content:
-- Cluster health / SRE overview → `template="sre_dashboard"`
-- Namespace status → `template="namespace_overview"`
-- Debugging / incident triage → `template="incident_report"`
-- Metrics / alerting → `template="monitoring_panel"`
-- Resource deep-dive → `template="resource_detail"`
-
-**Adding to existing views:** When the user wants to add widgets to a view that already
-exists, do NOT call create_dashboard again. Instead:
-1. Call `list_saved_views` to find the view ID
-2. Call the data tools to generate the new components
-3. Call `add_widget_to_view(view_id)` for each new component
-
-Only use `create_dashboard` for NEW views. Use `add_widget_to_view` to extend existing ones.
-
-**Metric cards:** Use `cluster_metrics()` to get metric_card components for dashboard headers.
-These render as single KPI numbers with trend indicators — ideal for the top row of an
-`sre_dashboard` or `monitoring_panel` template.
-
-## Charts via PromQL
-
-**CRITICAL PromQL syntax rule:** All label matchers MUST go in a SINGLE `{}` block.
+All label matchers in a SINGLE `{}` block:
 CORRECT: `kube_pod_status_phase{namespace="prod",phase="Running"}`
-WRONG:   `kube_pod_status_phase{namespace="prod"}{phase="Running"}` (double braces = parse error)
-Use double quotes for label values, not single quotes.
+WRONG: `kube_pod_status_phase{namespace="prod"}{phase="Running"}`
 
-When the user asks for a chart, time series, or graph, use get_prometheus_query with
-a time_range parameter (e.g. "1h", "6h", "24h") to get range data that renders as
-an interactive chart. Common PromQL patterns:
+## Dashboards
 
-- **Top CPU pods**: `topk(10, sum by (pod,namespace) (rate(container_cpu_usage_seconds_total{image!=""}[5m])))`
-- **CPU by namespace**: `sum by (namespace) (rate(container_cpu_usage_seconds_total{image!=""}[5m]))`
-- **Memory by namespace**: `sum by (namespace) (container_memory_working_set_bytes{image!=""})`
-- **Filter system NS**: add `{namespace!~"openshift-.*|kube-.*"}`
-- **Node CPU usage**: `1 - avg by (instance) (rate(node_cpu_seconds_total{mode="idle"}[5m]))`
-- **Node memory pressure**: `1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)`
-- **Filter by worker nodes**: add `{node=~"worker.*"}`
-- **Sort descending**: wrap with `sort_desc(...)`
-
-For "create a chart" or "show me a graph", ALWAYS use time_range (default "1h") so the
-result is a time series chart, not a single data point.
-
-## View Generation
-
-When the user asks to "build me a view" or "create a dashboard for X", call multiple
-tools to gather the data, then call create_dashboard with a descriptive title:
-
-**Node view pattern:**
-1. namespace_summary(namespace) — summary cards
-2. get_prometheus_query("topk(10, rate(container_cpu...))", "1h") — CPU chart
-3. get_prometheus_query("node_memory...", "1h") — memory chart
-4. list_pods(namespace) — pods table
-5. get_firing_alerts — alerts
-6. create_dashboard("Node View — {name}")
-
-**Namespace view pattern:**
-1. namespace_summary(namespace) — header cards
-2. list_pods(namespace) — pod table
-3. list_deployments(namespace) — deployment table
-4. get_prometheus_query("sum by (pod) (rate(container_cpu...))", "1h") — CPU chart
-5. get_events(namespace, event_type="Warning") — events
-6. create_dashboard("Namespace View — {namespace}")
-
-## Showcase / All Component Types
-
-When the user asks to "use every component type", "showcase all components", or
-"create a view with all component types", you MUST use ALL 13 component kinds.
-Call tools that produce each kind:
-
-1. `namespace_summary` → **info_card_grid** (health cards)
-2. `list_pods` → **data_table** (pod listing)
-3. `get_prometheus_query` with time_range → **chart** (time series)
-4. `list_nodes` → **status_list** (node conditions)
-5. `get_labels` or any tool → **badge_list** (labels/tags)
-6. `describe_pod` or `describe_resource` → **key_value** (resource details)
-7. `describe_pod` → **relationship_tree** (owner chain)
-8. Combine 2+ components → **tabs** (group related widgets in tabs)
-9. Combine 2+ components → **grid** (side-by-side layout, columns=2)
-10. Wrap detail components → **section** (collapsible "Advanced Details")
-
-For kinds that tools don't produce directly (badge_list, key_value, tabs, grid,
-section), construct them manually in your response using the component spec format
-from the catalog above. Example for badge_list:
-```json
-{"kind": "badge_list", "title": "Namespace Labels", "badges": [
-  {"label": "env", "value": "production", "color": "green"},
-  {"label": "team", "value": "platform", "color": "blue"}
-]}
-```
-
-You MUST verify all 10 kinds are present before calling create_dashboard.
+Call data tools first, then `create_dashboard(title)` to save as a view.
+Use `add_widget_to_view(view_id)` to extend existing views -- never recreate.
 
 ## Modifying Existing Views
 
-When the user asks to update, modify, or change an existing view:
-
-1. Call `list_saved_views` to find the view ID
-2. Call `get_view_details(view_id)` to see current widgets and their indices
-3. To remove a widget: `update_view_widgets(view_id, action="remove_widget", widget_index=N)`
-4. To rename: `update_view_widgets(view_id, action="rename", new_title="...")`
-5. To add a new widget: call the data tool first (get_prometheus_query, list_pods, etc.),
-   then call `add_widget_to_view(view_id)` — the latest component will be added
-6. The UI auto-refreshes when you modify a view — no save prompt needed
-
-Examples:
-- "Remove the table from my cluster view" → list_saved_views → get_view_details → update_view_widgets(remove_widget)
-- "Add a memory chart to my namespace view" → get_prometheus_query(memory query) → add_widget_to_view(view_id)
-- "Rename my view to 'Production Overview'" → update_view_widgets(rename, new_title=...)
+1. `list_saved_views` -> find view ID
+2. `get_view_details(view_id)` -> see widgets and indices
+3. `update_view_widgets(view_id, action="remove_widget", widget_index=N)` -> remove
+4. `update_view_widgets(view_id, action="rename_widget", widget_index=N, new_title="...")` -> rename
+5. `add_widget_to_view(view_id)` -> add latest component to existing view
 
 ## Production Readiness Fixes
 
@@ -892,5 +689,32 @@ When asked to fix a readiness gate, take action:
 - **Alertmanager receivers**: Generate a receiver config for Slack/PagerDuty/email
 
 Always use apply_yaml with dry_run=true first to validate, then apply for real after user confirms.
-Generate complete, production-ready YAML — not placeholder values.
+Generate complete, production-ready YAML -- not placeholder values.
 """
+
+
+def get_component_hint(mode: str = "sre", tool_names: list[str] | None = None) -> str:
+    """Return relevant component hint for the agent mode and selected tools.
+
+    - view_designer: returns empty (has its own comprehensive guide in system prompt)
+    - security: returns empty (no component rendering needed)
+    - sre/both: returns core hint + relevant schemas + ops guidance
+    """
+    if mode in ("view_designer", "security"):
+        return ""
+
+    # Core guidance (always included)
+    hint = COMPONENT_HINT_CORE
+
+    # Selected schemas only
+    if tool_names:
+        schemas = _select_relevant_schemas(tool_names)
+    else:
+        schemas = list(COMPONENT_SCHEMAS.values())  # fallback: all
+
+    hint += "\n## Component Catalog\n\n" + "\n\n".join(schemas)
+
+    # Essential operational guidance (always included)
+    hint += "\n\n" + COMPONENT_HINT_OPS
+
+    return hint

@@ -415,7 +415,7 @@ def run_agent_streaming(
     # --- Harness: Cached system prompt with cluster context ---
     if use_harness:
         cluster_ctx = get_cluster_context(mode=mode)
-        hint = get_component_hint(mode)
+        hint = get_component_hint(mode, tool_names=list(tool_map.keys()))
         effective_system = build_cached_system_prompt(
             system_prompt + hint,
             cluster_ctx,
