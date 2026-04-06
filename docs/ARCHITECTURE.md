@@ -1407,6 +1407,54 @@ Use the predict_tools module's forecasting capabilities to proactively scale
 workloads before resource pressure occurs. Would combine HPA analysis with
 Prometheus trend data to recommend or apply scaling changes ahead of demand.
 
+### MCP (Model Context Protocol) Integration
+
+Pulse Agent currently uses custom `@beta_tool` functions for all cluster
+interactions. MCP servers offer a standardized alternative. The strategy:
+
+**Why we built custom tools instead of using MCP:**
+- Our tools return `(text, component_spec)` tuples for rich UI rendering — MCP tools return text only
+- Domain logic (health scoring, chart type detection, title generation) is embedded in tools
+- Integrated feedback loop (tool_usage recording, chain hints, learned queries)
+- Write confirmation gate with nonce-based replay prevention
+- MCP for Kubernetes/OpenShift was not mature when the tool system was built
+
+**Future MCP strategy — three layers:**
+
+```
+┌─────────────────────────────────────────────────────┐
+│ Layer 3: Pulse Tools (keep custom)                  │
+│   namespace_summary, cluster_metrics, create_dashboard, │
+│   critique_view — domain logic + UI components      │
+├─────────────────────────────────────────────────────┤
+│ Layer 2: MCP Clients (adopt)                        │
+│   Use MCP servers for raw infrastructure access:    │
+│   • K8s MCP → replace k8s_client.py urllib calls    │
+│   • Prometheus MCP → replace 4x copy-pasted urllib  │
+│   • ArgoCD MCP → replace gitops_tools HTTP calls    │
+├─────────────────────────────────────────────────────┤
+│ Layer 1: MCP Server (expose)                        │
+│   Expose Pulse Agent's 82 tools AS an MCP server    │
+│   so other Claude-based tools can use them           │
+└─────────────────────────────────────────────────────┘
+```
+
+**Layer 2 benefits (adopt MCP clients):**
+- Shared Prometheus MCP server eliminates 4 copies of urllib+SSL+token code
+- K8s MCP server handles auth, retries, pagination — our `safe()` wrapper becomes thinner
+- Community-maintained MCP servers get bug fixes and new features without our effort
+
+**Layer 1 benefits (expose as MCP server):**
+- Other AI tools (Cursor, Claude Desktop, Copilot) could use Pulse Agent's SRE tools
+- Fleet operations across multiple clusters via MCP federation
+- Composable with other MCP servers (Git, Slack, PagerDuty)
+
+**What stays custom (never MCP):**
+- Component rendering (`(text, component_spec)` tuples)
+- View designer tools (create_dashboard, critique_view, layout_engine)
+- Intelligence loop (tool_usage recording, chain hints)
+- Confirmation gate (nonce-based, UI-integrated)
+
 ---
 
 ## File Reference
