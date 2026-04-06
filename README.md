@@ -116,6 +116,27 @@ Pulse Agent connects directly to your cluster's Kubernetes API and uses Claude O
 - **Self-Evaluation** — Scores each interaction on resolution (40%), efficiency (30%), safety (20%), and speed (10%)
 - **Adaptive Prompting** — Augments the system prompt with relevant past incidents and runbooks before each turn
 
+## Prerequisites
+
+- **Python 3.11+** — for the agent
+- **PostgreSQL 14+** — for data persistence (views, tool usage, memory)
+- **Kubernetes/OpenShift cluster** — with cluster-admin or equivalent RBAC
+- **Claude API access** — either Anthropic API key or Google Vertex AI project
+- **Container registry** — Quay.io, Docker Hub, or any OCI-compatible registry
+
+### Container Registry Setup
+
+The default registry is `quay.io/amobrem`. To use your own:
+
+```bash
+# Set your registry
+export PULSE_AGENT_IMAGE=your-registry.io/your-org/pulse-agent
+
+# Or configure in Helm values
+helm install pulse-agent ./chart \
+  --set image.repository=your-registry.io/your-org/pulse-agent
+```
+
 ## Quick Start
 
 ### Prerequisites
