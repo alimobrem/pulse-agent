@@ -477,7 +477,7 @@ def run_agent_streaming(
             # Execute read tools in parallel
             if read_blocks:
                 start_time = time.time()
-                with concurrent.futures.ThreadPoolExecutor(max_workers=min(len(read_blocks), 3)) as pool:
+                with concurrent.futures.ThreadPoolExecutor(max_workers=min(len(read_blocks), 2)) as pool:
                     futures = {
                         pool.submit(_execute_tool_with_timeout, b.name, b.input, tool_map): b for b in read_blocks
                     }

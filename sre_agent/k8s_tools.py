@@ -2022,7 +2022,7 @@ def get_prometheus_query(query: str, time_range: str = "1h") -> str:
             headers["Authorization"] = f"Bearer {token}"
 
         req = urllib.request.Request(thanos_url, headers=headers)
-        resp = urllib.request.urlopen(req, context=ctx, timeout=30)
+        resp = urllib.request.urlopen(req, context=ctx, timeout=15)
         data = json.loads(resp.read())
     except Exception as e:
         return f"Cannot reach Prometheus/Thanos at {base_url}: {e}"
@@ -3252,7 +3252,7 @@ def list_resources(
     )
 
     try:
-        resp = urllib.request.urlopen(req, context=ctx, timeout=30)
+        resp = urllib.request.urlopen(req, context=ctx, timeout=15)
         data = json.loads(resp.read())
     except Exception as e:
         return f"Error listing {resource}: {e}"
@@ -4105,7 +4105,7 @@ def get_resource_recommendations(namespace: str, time_range: str = "24h") -> str
             headers["Authorization"] = f"Bearer {token}"
         req = urllib.request.Request(url, headers=headers)
         try:
-            resp = urllib.request.urlopen(req, context=ctx, timeout=30)
+            resp = urllib.request.urlopen(req, context=ctx, timeout=15)
             data = json.loads(resp.read())
             if data.get("status") == "success":
                 return data.get("data", {}).get("result", [])
