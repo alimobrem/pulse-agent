@@ -11,8 +11,13 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 
 logger = logging.getLogger("pulse_agent.harness")
+
+# Cache for deprioritized tools (refreshed every 10 minutes)
+_deprioritized_cache: tuple[set[str], float] | None = None
+_DEPRIORITIZE_TTL = 600  # 10 minutes
 
 
 # ---------------------------------------------------------------------------
@@ -267,6 +272,39 @@ MODE_CATEGORIES: dict[str, list[str] | None] = {
 }
 
 
+def _reorder_deprioritized(tools: list, deprioritized: set[str]) -> list:
+    """Move deprioritized tools to the end of the list (still offered, just lower priority)."""
+    if not deprioritized:
+        return tools
+    priority = [t for t in tools if t.name not in deprioritized]
+    low_priority = [t for t in tools if t.name in deprioritized]
+    return priority + low_priority
+
+
+def _get_deprioritized_tools() -> set[str]:
+    """Return tools that should be deprioritized (moved to end of list).
+
+    Queries the intelligence module for tools with <2% usage rate.
+    Cached for 10 minutes to avoid repeated DB hits.
+    """
+    global _deprioritized_cache
+    now = time.time()
+    if _deprioritized_cache and now - _deprioritized_cache[1] < _DEPRIORITIZE_TTL:
+        return _deprioritized_cache[0]
+
+    try:
+        from .intelligence import get_wasted_tools
+
+        wasted = set(get_wasted_tools())
+        _deprioritized_cache = (wasted, now)
+        if wasted:
+            logger.info("Auto-deprioritized %d tools: %s", len(wasted), ", ".join(sorted(wasted)))
+        return wasted
+    except Exception:
+        logger.debug("Failed to get deprioritized tools", exc_info=True)
+        return set()
+
+
 def select_tools(query: str, all_tools: list, all_tool_map: dict, mode: str = "sre") -> tuple[list, dict, list[str]]:
     """Select tools based on agent mode.
 
@@ -282,11 +320,14 @@ def select_tools(query: str, all_tools: list, all_tool_map: dict, mode: str = "s
     """
     categories = MODE_CATEGORIES.get(mode)
 
+    deprioritized = _get_deprioritized_tools()
+
     # Fallback: return all tools for 'both' or unknown modes
     if categories is None:
         logger.info("Tool selection: returning all %d tools for mode=%s", len(all_tools), mode)
-        tool_map = {t.name: t for t in all_tools}
-        return [t.to_dict() for t in all_tools], tool_map, list(tool_map.keys())
+        ordered = _reorder_deprioritized(all_tools, deprioritized)
+        tool_map = {t.name: t for t in ordered}
+        return [t.to_dict() for t in ordered], tool_map, list(tool_map.keys())
 
     # Collect tool names from the mode's categories
     mode_tool_names = set(ALWAYS_INCLUDE)
@@ -299,12 +340,14 @@ def select_tools(query: str, all_tools: list, all_tool_map: dict, mode: str = "s
     # Safety: if filtering removed too many, return all
     if len(filtered) < 5:
         logger.warning("Tool selection: mode=%s matched only %d tools, returning all", mode, len(filtered))
-        tool_map = {t.name: t for t in all_tools}
-        return [t.to_dict() for t in all_tools], tool_map, list(tool_map.keys())
+        ordered = _reorder_deprioritized(all_tools, deprioritized)
+        tool_map = {t.name: t for t in ordered}
+        return [t.to_dict() for t in ordered], tool_map, list(tool_map.keys())
 
-    logger.info("Tool selection: %d/%d tools for mode=%s", len(filtered), len(all_tools), mode)
-    tool_map = {t.name: t for t in filtered}
-    return [t.to_dict() for t in filtered], tool_map, list(tool_map.keys())
+    ordered = _reorder_deprioritized(filtered, deprioritized)
+    logger.info("Tool selection: %d/%d tools for mode=%s", len(ordered), len(all_tools), mode)
+    tool_map = {t.name: t for t in ordered}
+    return [t.to_dict() for t in ordered], tool_map, list(tool_map.keys())
 
 
 # ---------------------------------------------------------------------------

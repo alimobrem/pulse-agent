@@ -242,3 +242,171 @@ class TestIntegration:
         with _mock_db(fetchall_returns=rows):
             result = get_intelligence_context(max_age_days=30)
         assert "last 30 days" in result
+
+
+class TestHarnessEffectiveness:
+    def setup_method(self):
+        intel_module._intelligence_cache.clear()
+
+    def test_harness_effectiveness_returns_string(self):
+        def mock_fetchall(sql, params=None):
+            if "promql_queries" in sql:
+                return []
+            if "view_designer" in sql:
+                return []
+            if "HAVING" in sql:
+                return []
+            if "unnest" in sql:
+                return [
+                    {"tool_name": "analyze_hpa_thrashing", "offered_count": 52, "called_count": 1},
+                    {"tool_name": "forecast_quota_exhaustion", "offered_count": 48, "called_count": 0},
+                ]
+            return []
+
+        def mock_fetchone(sql, params=None):
+            if "array_length(tools_called" in sql:
+                return {"accuracy": 0.34, "avg_called": 5, "avg_offered": 15}
+            if "input_tokens" in sql and "FILTER" not in sql:
+                return None
+            return None
+
+        db = MagicMock()
+        db.fetchall.side_effect = mock_fetchall
+        db.fetchone.side_effect = mock_fetchone
+
+        with patch("sre_agent.db.get_database", return_value=db):
+            result = intel_module._compute_harness_effectiveness(7)
+
+        assert isinstance(result, str)
+        assert "Harness Effectiveness" in result
+        assert "34%" in result
+        assert "analyze_hpa_thrashing" in result
+
+    def test_harness_effectiveness_empty_data(self):
+        db = MagicMock()
+        db.fetchone.return_value = {"accuracy": None, "avg_called": 0, "avg_offered": 0}
+        db.fetchall.return_value = []
+
+        with patch("sre_agent.db.get_database", return_value=db):
+            result = intel_module._compute_harness_effectiveness(7)
+        assert result == ""
+
+
+class TestRoutingAccuracy:
+    def setup_method(self):
+        intel_module._intelligence_cache.clear()
+
+    def test_routing_accuracy_returns_string(self):
+        db = MagicMock()
+        db.fetchone.return_value = {"switches": 15, "total": 100}
+        db.fetchall.return_value = []
+
+        with patch("sre_agent.db.get_database", return_value=db):
+            result = intel_module._compute_routing_accuracy(7)
+
+        assert isinstance(result, str)
+        assert "Routing Accuracy" in result
+        assert "85%" in result
+        assert "15%" in result
+
+    def test_routing_accuracy_empty_data(self):
+        db = MagicMock()
+        db.fetchone.return_value = {"switches": 0, "total": 0}
+        db.fetchall.return_value = []
+
+        with patch("sre_agent.db.get_database", return_value=db):
+            result = intel_module._compute_routing_accuracy(7)
+        assert result == ""
+
+
+class TestFeedbackAnalysis:
+    def setup_method(self):
+        intel_module._intelligence_cache.clear()
+
+    def test_feedback_analysis_returns_string(self):
+        db = MagicMock()
+        db.fetchall.return_value = [
+            {"tool_name": "get_prometheus_query", "negative": 3, "total": 10},
+        ]
+        db.fetchone.return_value = None
+
+        with patch("sre_agent.db.get_database", return_value=db):
+            result = intel_module._compute_feedback_analysis(7)
+
+        assert isinstance(result, str)
+        assert "Feedback Analysis" in result
+        assert "get_prometheus_query" in result
+        assert "3/10" in result
+
+    def test_feedback_analysis_empty_data(self):
+        db = MagicMock()
+        db.fetchall.return_value = []
+        db.fetchone.return_value = None
+
+        with patch("sre_agent.db.get_database", return_value=db):
+            result = intel_module._compute_feedback_analysis(7)
+        assert result == ""
+
+
+class TestTokenTrending:
+    def setup_method(self):
+        intel_module._intelligence_cache.clear()
+
+    def test_token_trending_returns_string(self):
+        db = MagicMock()
+        db.fetchone.return_value = {
+            "current_avg": 3200,
+            "prev_avg": 3636,
+            "current_output": 1100,
+        }
+        db.fetchall.return_value = []
+
+        with patch("sre_agent.db.get_database", return_value=db):
+            result = intel_module._compute_token_trending(7)
+
+        assert isinstance(result, str)
+        assert "Token Trending" in result
+        assert "3,200" in result
+        assert "1,100" in result
+
+    def test_token_trending_no_prev(self):
+        db = MagicMock()
+        db.fetchone.return_value = {
+            "current_avg": 2500,
+            "prev_avg": None,
+            "current_output": 800,
+        }
+        db.fetchall.return_value = []
+
+        with patch("sre_agent.db.get_database", return_value=db):
+            result = intel_module._compute_token_trending(7)
+
+        assert "2,500" in result
+        assert "from last week" not in result
+
+    def test_token_trending_empty_data(self):
+        db = MagicMock()
+        db.fetchone.return_value = {"current_avg": None, "prev_avg": None, "current_output": None}
+        db.fetchall.return_value = []
+
+        with patch("sre_agent.db.get_database", return_value=db):
+            result = intel_module._compute_token_trending(7)
+        assert result == ""
+
+
+class TestNewMetricsEmptyData:
+    """Verify all new compute functions return empty string on no data."""
+
+    def setup_method(self):
+        intel_module._intelligence_cache.clear()
+
+    def test_empty_data_returns_empty(self):
+        db = MagicMock()
+        db.fetchone.return_value = None
+        db.fetchall.return_value = []
+
+        with patch("sre_agent.db.get_database", return_value=db):
+            assert intel_module._compute_harness_effectiveness(7) == ""
+            assert intel_module._compute_routing_accuracy(7) == ""
+            assert intel_module._compute_feedback_analysis(7) == ""
+            assert intel_module._compute_token_trending(7) == ""
