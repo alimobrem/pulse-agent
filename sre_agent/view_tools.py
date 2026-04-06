@@ -166,78 +166,301 @@ def namespace_summary(namespace: str) -> str:
 
 
 @beta_tool
-def cluster_metrics() -> str:
-    """Get key cluster metrics as metric cards: node count, pod count, CPU usage, memory usage. Returns metric_card components ideal for dashboard headers.
+def cluster_metrics(category: str = "overview") -> str:
+    """Get key cluster metrics as metric cards for dashboard headers.
 
-    Use this when the user wants metric cards, KPIs, or summary numbers at the top of a dashboard.
+    Returns different KPI cards based on the category — pick the one that
+    matches the dashboard topic, not always the generic overview.
+
+    Args:
+        category: One of: 'overview' (nodes, pods, CPU%, memory%),
+                  'network' (traffic in/out, errors, dropped packets),
+                  'storage' (PVC count, disk usage, PV available),
+                  'security' (firing alerts, degraded operators, RBAC risks),
+                  'workloads' (deployments, replicas, restarts, HPA),
+                  'control_plane' (API latency, etcd leader, scheduler).
     """
     from .errors import ToolError
     from .k8s_client import get_core_client, safe
 
-    core = get_core_client()
+    # Category-specific metric card definitions
+    _CATEGORY_CARDS: dict[str, list[dict]] = {
+        "overview": [
+            {
+                "kind": "metric_card",
+                "title": "Nodes Ready",
+                "value": "",
+                "query": "sum(kube_node_status_condition{condition='Ready',status='true'})",
+                "description": "Healthy cluster nodes",
+                "color": "#10b981",
+                "thresholds": {"warning": 2, "critical": 1},
+            },
+            {
+                "kind": "metric_card",
+                "title": "Pods Running",
+                "value": "",
+                "query": "count(kube_pod_status_phase{phase='Running'})",
+                "description": "Active workload pods",
+                "color": "#3b82f6",
+            },
+            {
+                "kind": "metric_card",
+                "title": "Cluster CPU",
+                "value": "",
+                "unit": "%",
+                "query": "100 - avg(rate(node_cpu_seconds_total{mode='idle'}[5m])) * 100",
+                "color": "#3b82f6",
+                "thresholds": {"warning": 70, "critical": 90},
+            },
+            {
+                "kind": "metric_card",
+                "title": "Cluster Memory",
+                "value": "",
+                "unit": "%",
+                "query": "100 - (sum(node_memory_MemAvailable_bytes) / sum(node_memory_MemTotal_bytes)) * 100",
+                "color": "#8b5cf6",
+                "thresholds": {"warning": 80, "critical": 95},
+            },
+        ],
+        "network": [
+            {
+                "kind": "metric_card",
+                "title": "Network Receive",
+                "value": "",
+                "unit": "B/s",
+                "query": "sum(rate(container_network_receive_bytes_total[5m]))",
+                "description": "Cluster inbound traffic",
+                "color": "#3b82f6",
+            },
+            {
+                "kind": "metric_card",
+                "title": "Network Transmit",
+                "value": "",
+                "unit": "B/s",
+                "query": "sum(rate(container_network_transmit_bytes_total[5m]))",
+                "description": "Cluster outbound traffic",
+                "color": "#8b5cf6",
+            },
+            {
+                "kind": "metric_card",
+                "title": "Packet Drops",
+                "value": "",
+                "query": "sum(rate(container_network_receive_packets_dropped_total[5m])) + sum(rate(container_network_transmit_packets_dropped_total[5m]))",
+                "description": "Total dropped packets/s",
+                "color": "#f59e0b",
+                "thresholds": {"warning": 10, "critical": 100},
+            },
+            {
+                "kind": "metric_card",
+                "title": "Network Errors",
+                "value": "",
+                "query": "sum(rate(container_network_receive_errors_total[5m])) + sum(rate(container_network_transmit_errors_total[5m]))",
+                "description": "Total network errors/s",
+                "color": "#ef4444",
+                "thresholds": {"warning": 1, "critical": 10},
+            },
+        ],
+        "storage": [
+            {
+                "kind": "metric_card",
+                "title": "PVCs Bound",
+                "value": "",
+                "query": "count(kube_persistentvolumeclaim_status_phase{phase='Bound'})",
+                "description": "Bound persistent volume claims",
+                "color": "#10b981",
+            },
+            {
+                "kind": "metric_card",
+                "title": "PVCs Pending",
+                "value": "",
+                "query": "count(kube_persistentvolumeclaim_status_phase{phase='Pending'}) or vector(0)",
+                "description": "Waiting for provisioning",
+                "color": "#f59e0b",
+                "thresholds": {"warning": 1, "critical": 5},
+            },
+            {
+                "kind": "metric_card",
+                "title": "Disk Usage",
+                "value": "",
+                "unit": "%",
+                "query": "100 - (sum(node_filesystem_avail_bytes{device=~'/.*'}) / sum(node_filesystem_size_bytes{device=~'/.*'})) * 100",
+                "description": "Cluster filesystem usage",
+                "color": "#8b5cf6",
+                "thresholds": {"warning": 80, "critical": 90},
+            },
+            {
+                "kind": "metric_card",
+                "title": "PVs Available",
+                "value": "",
+                "query": "count(kube_persistentvolume_status_phase{phase='Available'}) or vector(0)",
+                "description": "Unbound persistent volumes",
+                "color": "#3b82f6",
+            },
+        ],
+        "security": [
+            {
+                "kind": "metric_card",
+                "title": "Firing Alerts",
+                "value": "",
+                "query": "count(ALERTS{alertstate='firing'}) or vector(0)",
+                "description": "Active alert count",
+                "color": "#ef4444",
+                "thresholds": {"warning": 1, "critical": 5},
+            },
+            {
+                "kind": "metric_card",
+                "title": "Operators Available",
+                "value": "",
+                "unit": "%",
+                "query": "sum(cluster_operator_up == 1) / count(cluster_operator_up) * 100",
+                "description": "Cluster operator health",
+                "color": "#10b981",
+                "thresholds": {"warning": 95, "critical": 90},
+            },
+            {
+                "kind": "metric_card",
+                "title": "Targets Down",
+                "value": "",
+                "unit": "%",
+                "query": "100 * (1 - sum(up) / count(up))",
+                "description": "Unreachable Prometheus targets",
+                "color": "#f59e0b",
+                "thresholds": {"warning": 5, "critical": 15},
+            },
+            {
+                "kind": "metric_card",
+                "title": "API Error Rate",
+                "value": "",
+                "unit": "%",
+                "query": "sum(rate(apiserver_request_total{code=~'5..'}[5m])) / sum(rate(apiserver_request_total[5m])) * 100",
+                "description": "API server 5xx rate",
+                "color": "#ef4444",
+                "thresholds": {"warning": 1, "critical": 5},
+            },
+        ],
+        "workloads": [
+            {
+                "kind": "metric_card",
+                "title": "Deployments",
+                "value": "",
+                "query": "count(kube_deployment_status_replicas)",
+                "description": "Total deployments",
+                "color": "#3b82f6",
+            },
+            {
+                "kind": "metric_card",
+                "title": "Unavailable Replicas",
+                "value": "",
+                "query": "sum(kube_deployment_status_replicas_unavailable) or vector(0)",
+                "description": "Replicas not ready",
+                "color": "#ef4444",
+                "thresholds": {"warning": 1, "critical": 5},
+            },
+            {
+                "kind": "metric_card",
+                "title": "Pod Restarts",
+                "value": "",
+                "query": "sum(increase(kube_pod_container_status_restarts_total[1h]))",
+                "description": "Restarts in last hour",
+                "color": "#f59e0b",
+                "thresholds": {"warning": 10, "critical": 50},
+            },
+            {
+                "kind": "metric_card",
+                "title": "HPA Active",
+                "value": "",
+                "query": "count(kube_horizontalpodautoscaler_status_current_replicas)",
+                "description": "Active autoscalers",
+                "color": "#8b5cf6",
+            },
+        ],
+        "control_plane": [
+            {
+                "kind": "metric_card",
+                "title": "API Latency p99",
+                "value": "",
+                "unit": "s",
+                "query": "histogram_quantile(0.99, sum(rate(apiserver_request_duration_seconds_bucket{verb!~'WATCH|CONNECT'}[5m])) by (le))",
+                "description": "99th percentile latency",
+                "color": "#3b82f6",
+                "thresholds": {"warning": 1, "critical": 5},
+            },
+            {
+                "kind": "metric_card",
+                "title": "etcd Leader",
+                "value": "",
+                "query": "max(etcd_server_has_leader)",
+                "description": "1 = has leader",
+                "color": "#10b981",
+            },
+            {
+                "kind": "metric_card",
+                "title": "API Request Rate",
+                "value": "",
+                "unit": "/s",
+                "query": "sum(rate(apiserver_request_total[5m]))",
+                "description": "Requests per second",
+                "color": "#8b5cf6",
+            },
+            {
+                "kind": "metric_card",
+                "title": "Scheduler Latency",
+                "value": "",
+                "unit": "s",
+                "query": "histogram_quantile(0.99, sum(rate(scheduler_e2e_scheduling_duration_seconds_bucket[5m])) by (le))",
+                "description": "p99 scheduling latency",
+                "color": "#f59e0b",
+                "thresholds": {"warning": 1, "critical": 10},
+            },
+        ],
+    }
 
-    # Node count
-    nodes_result = safe(lambda: core.list_node())
-    node_count = 0
-    nodes_ready = 0
-    if not isinstance(nodes_result, ToolError):
-        node_count = len(nodes_result.items)
-        nodes_ready = sum(
-            1
-            for n in nodes_result.items
-            for c in (n.status.conditions or [])
-            if c.type == "Ready" and c.status == "True"
-        )
+    if category not in _CATEGORY_CARDS:
+        category = "overview"
 
-    # Pod count
-    pods_result = safe(lambda: core.list_pod_for_all_namespaces(limit=1000))
-    pod_count = 0
-    pods_running = 0
-    pods_failing = 0
-    if not isinstance(pods_result, ToolError):
-        pod_count = len(pods_result.items)
-        pods_running = sum(1 for p in pods_result.items if p.status.phase == "Running")
-        pods_failing = sum(1 for p in pods_result.items if p.status.phase in ("Failed", "Unknown"))
+    cards = _CATEGORY_CARDS[category]
 
-    cards = [
-        {
-            "kind": "metric_card",
-            "title": "Nodes Ready",
-            "value": f"{nodes_ready}/{node_count}",
-            "status": "healthy" if nodes_ready == node_count else "warning",
-            "description": f"{node_count} total",
-        },
-        {
-            "kind": "metric_card",
-            "title": "Pods Running",
-            "value": str(pods_running),
-            "status": "healthy" if pods_failing == 0 else "warning",
-            "description": f"{pods_failing} failing" if pods_failing else f"{pod_count} total",
-        },
-        {
-            "kind": "metric_card",
-            "title": "Cluster CPU",
-            "value": "",
-            "unit": "%",
-            "query": "100 - avg(rate(node_cpu_seconds_total{mode='idle'}[5m])) * 100",
-            "color": "#3b82f6",
-            "thresholds": {"warning": 70, "critical": 90},
-        },
-        {
-            "kind": "metric_card",
-            "title": "Cluster Memory",
-            "value": "",
-            "unit": "%",
-            "query": "100 - (sum(node_memory_MemAvailable_bytes) / sum(node_memory_MemTotal_bytes)) * 100",
-            "color": "#8b5cf6",
-            "thresholds": {"warning": 80, "critical": 95},
-        },
-    ]
+    # For overview, enrich with live K8s data
+    if category == "overview":
+        core = get_core_client()
+        nodes_result = safe(lambda: core.list_node())
+        node_count = 0
+        nodes_ready = 0
+        if not isinstance(nodes_result, ToolError):
+            node_count = len(nodes_result.items)
+            nodes_ready = sum(
+                1
+                for n in nodes_result.items
+                for c in (n.status.conditions or [])
+                if c.type == "Ready" and c.status == "True"
+            )
 
-    # CPU/memory cards use PromQL queries for live sparklines — no metrics API needed
+        pods_result = safe(lambda: core.list_pod_for_all_namespaces(limit=1000))
+        pod_count = 0
+        pods_running = 0
+        pods_failing = 0
+        if not isinstance(pods_result, ToolError):
+            pod_count = len(pods_result.items)
+            pods_running = sum(1 for p in pods_result.items if p.status.phase == "Running")
+            pods_failing = sum(1 for p in pods_result.items if p.status.phase in ("Failed", "Unknown"))
 
-    text = f"Cluster metrics: {node_count} nodes ({nodes_ready} ready), {pods_running} pods running"
-    # Return as a grid of metric_cards
+        cards = [
+            {
+                **cards[0],
+                "value": f"{nodes_ready}/{node_count}",
+                "status": "healthy" if nodes_ready == node_count else "warning",
+            },
+            {
+                **cards[1],
+                "value": str(pods_running),
+                "status": "healthy" if pods_failing == 0 else "warning",
+                "description": f"{pods_failing} failing" if pods_failing else f"{pod_count} total",
+            },
+            cards[2],
+            cards[3],
+        ]
+
+    text = f"Cluster metrics ({category}): {len(cards)} KPI cards"
     component = {"kind": "grid", "columns": len(cards), "items": cards}
     return (text, component)
 
