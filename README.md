@@ -124,17 +124,23 @@ Pulse Agent connects directly to your cluster's Kubernetes API and uses Claude O
 - **Claude API access** — either Anthropic API key or Google Vertex AI project
 - **Container registry** — Quay.io, Docker Hub, or any OCI-compatible registry
 
-### Container Registry Setup
+### Fork & Deploy Checklist
 
-The default registry is `quay.io/amobrem`. To use your own:
+If you're deploying your own instance, here's what to change:
+
+| What | Where | Default | Change to |
+|------|-------|---------|-----------|
+| **Container registry** | `PULSE_AGENT_IMAGE` env var or `chart/values.yaml` | `quay.io/amobrem/pulse-agent` | Your registry |
+| **Claude API** | env var or Helm secret | none | Your Anthropic API key or GCP Vertex AI project |
+| **CI image push** | `.github/workflows/build-push.yml` | `quay.io/amobrem` | Your registry |
 
 ```bash
-# Set your registry
+# Set your registry + API credentials
 export PULSE_AGENT_IMAGE=your-registry.io/your-org/pulse-agent
+export ANTHROPIC_API_KEY=sk-ant-...  # or ANTHROPIC_VERTEX_PROJECT_ID
 
-# Or configure in Helm values
-helm install pulse-agent ./chart \
-  --set image.repository=your-registry.io/your-org/pulse-agent
+# Deploy (recommended: use the unified deploy from the UI repo)
+cd ../OpenshiftPulse && ./deploy/deploy.sh
 ```
 
 ## Quick Start
