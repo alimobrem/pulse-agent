@@ -221,3 +221,126 @@ class TestHealthCheck:
         db = Database(_TEST_DB_URL)
         db.close()
         assert db.health_check() is False
+
+
+# ---------------------------------------------------------------------------
+# Connection pool leak tests
+# ---------------------------------------------------------------------------
+
+
+class TestConnectionPoolLeaks:
+    """Tests for database connection pool management — ensures connections
+    are returned to the pool and not leaked on error or normal operation."""
+
+    def test_execute_without_commit_returns_connection_on_error(self):
+        """execute() that raises should rollback and return connection to pool."""
+        db = Database(_TEST_DB_URL)
+        db.execute("DROP TABLE IF EXISTS leak_test CASCADE")
+        db.execute("CREATE TABLE leak_test (id INTEGER PRIMARY KEY)")
+        db.commit()
+
+        # Insert a row, then try to insert a duplicate (violates PK)
+        db.execute("INSERT INTO leak_test VALUES (1)")
+        db.commit()
+
+        # This should raise due to duplicate PK — connection must be returned
+        try:
+            db.execute("INSERT INTO leak_test VALUES (1)")
+        except Exception:
+            pass  # Expected
+
+        # The connection should have been returned to the pool.
+        # Verify by successfully using the pool again.
+        db.execute("INSERT INTO leak_test VALUES (2)")
+        db.commit()
+
+        row = db.fetchone("SELECT COUNT(*) AS cnt FROM leak_test")
+        assert row["cnt"] == 2
+
+        db.execute("DROP TABLE leak_test")
+        db.commit()
+        db.close()
+
+    def test_fetchone_auto_returns_connection(self):
+        """fetchone() should not hold connections after returning."""
+        db = Database(_TEST_DB_URL)
+        db.execute("DROP TABLE IF EXISTS leak_fo CASCADE")
+        db.execute("CREATE TABLE leak_fo (id INTEGER)")
+        db.execute("INSERT INTO leak_fo VALUES (1)")
+        db.commit()
+
+        # Call fetchone many times — should not exhaust pool
+        for _ in range(25):
+            row = db.fetchone("SELECT * FROM leak_fo")
+            assert row is not None
+
+        # Pool should still be healthy
+        assert db.health_check() is True
+
+        db.execute("DROP TABLE leak_fo")
+        db.commit()
+        db.close()
+
+    def test_fetchall_auto_returns_connection(self):
+        """fetchall() should not hold connections after returning."""
+        db = Database(_TEST_DB_URL)
+        db.execute("DROP TABLE IF EXISTS leak_fa CASCADE")
+        db.execute("CREATE TABLE leak_fa (id INTEGER)")
+        for i in range(5):
+            db.execute("INSERT INTO leak_fa VALUES (%s)", (i,))
+        db.commit()
+
+        # Call fetchall many times — should not exhaust pool
+        for _ in range(25):
+            rows = db.fetchall("SELECT * FROM leak_fa ORDER BY id")
+            assert len(rows) == 5
+
+        assert db.health_check() is True
+
+        db.execute("DROP TABLE leak_fa")
+        db.commit()
+        db.close()
+
+    def test_multiple_execute_commit_cycles(self):
+        """Multiple execute+commit cycles should not leak connections."""
+        db = Database(_TEST_DB_URL)
+        db.execute("DROP TABLE IF EXISTS leak_cycle CASCADE")
+        db.execute("CREATE TABLE leak_cycle (id INTEGER)")
+        db.commit()
+
+        # Run many execute+commit cycles
+        for i in range(30):
+            db.execute("INSERT INTO leak_cycle VALUES (%s)", (i,))
+            db.commit()
+
+        row = db.fetchone("SELECT COUNT(*) AS cnt FROM leak_cycle")
+        assert row["cnt"] == 30
+        assert db.health_check() is True
+
+        db.execute("DROP TABLE leak_cycle")
+        db.commit()
+        db.close()
+
+    def test_fire_and_forget_pattern(self):
+        """The fire-and-forget pattern (execute+commit in try/except) should not leak."""
+        db = Database(_TEST_DB_URL)
+        db.execute("DROP TABLE IF EXISTS leak_ff CASCADE")
+        db.execute("CREATE TABLE leak_ff (id INTEGER PRIMARY KEY)")
+        db.commit()
+
+        # Simulate fire-and-forget with mixed success/failure
+        for i in range(20):
+            try:
+                db.execute("INSERT INTO leak_ff VALUES (%s)", (i % 5,))  # duplicates after 5
+                db.commit()
+            except Exception:
+                pass  # Fire-and-forget ignores errors
+
+        # Should still be able to query
+        rows = db.fetchall("SELECT * FROM leak_ff ORDER BY id")
+        assert len(rows) == 5  # Only 0-4 succeed
+        assert db.health_check() is True
+
+        db.execute("DROP TABLE leak_ff")
+        db.commit()
+        db.close()
