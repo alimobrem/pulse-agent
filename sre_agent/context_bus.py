@@ -81,8 +81,7 @@ class ContextBus:
                         json.dumps(entry.resources),
                     ),
                 )
-                db.commit()
-                # Prune old entries beyond max_entries (use id for stable ordering)
+                # Prune old entries beyond max_entries (same connection, single commit)
                 db.execute(
                     """DELETE FROM context_entries WHERE id NOT IN (
                        SELECT id FROM context_entries ORDER BY id DESC LIMIT ?

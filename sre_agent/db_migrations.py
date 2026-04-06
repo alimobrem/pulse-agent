@@ -71,8 +71,9 @@ def _migrate_004_token_tracking(db: Database) -> None:
     for col in ["input_tokens", "output_tokens", "cache_read_tokens", "cache_creation_tokens"]:
         try:
             db.execute(f"ALTER TABLE tool_turns ADD COLUMN {col} INTEGER")
+            db.commit()
         except Exception:
-            pass  # Column may already exist
+            pass  # Column may already exist (execute rolls back on error)
 
 
 MIGRATIONS = [

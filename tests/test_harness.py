@@ -142,6 +142,7 @@ class TestGetClusterContext:
             patch("sre_agent.harness.gather_cluster_context", return_value="cached data") as mock_gather,
             patch("sre_agent.tool_chains.ensure_hints_fresh"),
             patch("sre_agent.tool_chains.get_chain_hints_text", return_value=""),
+            patch("sre_agent.intelligence.get_intelligence_context", return_value=""),
         ):
             result1 = get_cluster_context(max_age=60, mode="sre")
             result2 = get_cluster_context(max_age=60, mode="sre")
@@ -159,6 +160,7 @@ class TestGetClusterContext:
             patch("sre_agent.harness.gather_cluster_context", return_value="new data"),
             patch("sre_agent.tool_chains.ensure_hints_fresh"),
             patch("sre_agent.tool_chains.get_chain_hints_text", return_value=""),
+            patch("sre_agent.intelligence.get_intelligence_context", return_value=""),
         ):
             result = get_cluster_context(max_age=60, mode="sre")
         assert result == "new data"
