@@ -104,6 +104,29 @@ def _build_context_prefix(data: dict) -> str:
     if not context or not isinstance(context, dict) or len(str(context)) > 2000:
         return ""
 
+    # Check for custom view context first
+    view_id = _sanitize_context_field(context.get("viewId", ""))
+    if view_id:
+        # User is viewing a custom dashboard — inject view details
+        try:
+            from . import db as _ctx_db
+
+            view = _ctx_db.get_view(view_id)
+            if view:
+                widget_count = len(view.get("layout", []))
+                widget_summary = ", ".join(
+                    f"{w.get('kind', '?')}: {w.get('title', 'untitled')}" for w in view.get("layout", [])[:8]
+                )
+                return (
+                    f"[UI Context: Dashboard '{view['title']}' (ID: {view_id}, {widget_count} widgets)]\n"
+                    f"Widgets: {widget_summary}\n"
+                    f"IMPORTANT: The user is viewing this dashboard. Use view_id='{view_id}' "
+                    f"for any update_view_widgets or get_view_details calls.\n\n"
+                )
+        except Exception:
+            pass
+        return f"[UI Context: Dashboard {view_id}]\n\n"
+
     kind = _sanitize_context_field(context.get("kind", ""))
     ns = _sanitize_context_field(context.get("namespace", ""))
     name = _sanitize_context_field(context.get("name", ""))
