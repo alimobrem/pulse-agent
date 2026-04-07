@@ -101,13 +101,14 @@ class TestDeduplication:
         result = validate_components(d)
         assert result.deduped_count == 1
 
-    def test_dedup_by_title_and_kind(self):
+    def test_same_kind_title_different_query_kept(self):
+        """Same (kind, title) but different query should NOT be deduped."""
         d = copy.deepcopy(GOLDEN_DASHBOARD)
         dup = copy.deepcopy(d[1])
         dup["query"] = "different_query"
         d.append(dup)
         result = validate_components(d)
-        assert result.deduped_count == 1
+        assert result.deduped_count == 0
 
     def test_dedup_preserves_order(self):
         d = copy.deepcopy(GOLDEN_DASHBOARD)

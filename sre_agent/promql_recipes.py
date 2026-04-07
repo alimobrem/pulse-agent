@@ -1,4 +1,4 @@
-"""PromQL recipe registry — 79 production-tested queries organized by category."""
+"""PromQL recipe registry — 73 production-tested queries organized by category."""
 
 from __future__ import annotations
 

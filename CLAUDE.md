@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-Pulse Agent — AI-powered OpenShift/Kubernetes SRE and Security agent built on Claude. Connects to live clusters via the K8s API and uses Claude Opus for diagnostics, incident triage, and automated remediation. v1.13.0, Protocol v2, 82 tools, 16 scanners, 1078 tests, 73 PromQL recipes, 84 eval prompts. Aladdin MVP foundation: chart-first canvas view builder, generic list_resources with K8s Table API, 14 smart column renderers, resource relationship tracer. Auto-routing orchestrator classifies queries and routes to SRE or Security agent. Generative views: tools return component specs for rich UI rendering, user-scoped custom dashboards with share/clone. Tool usage tracking: full audit log with chain intelligence (bigram discovery, next-tool hints injected into system prompt).
+Pulse Agent — AI-powered OpenShift/Kubernetes SRE and Security agent built on Claude. Connects to live clusters via the K8s API and uses Claude Opus for diagnostics, incident triage, and automated remediation. v1.13.0, Protocol v2, 82 tools, 16 scanners, 1116 tests, 73 PromQL recipes, 84 eval prompts. Aladdin MVP foundation: chart-first canvas view builder, generic list_resources with K8s Table API, 14 smart column renderers, resource relationship tracer. Auto-routing orchestrator classifies queries and routes to SRE or Security agent. Generative views: tools return component specs for rich UI rendering, user-scoped custom dashboards with share/clone. Tool usage tracking: full audit log with chain intelligence (bigram discovery, next-tool hints injected into system prompt).
 
 **UI Repository:** `/Users/amobrem/ali/OpenshiftPulse` — React/TypeScript frontend (Zustand stores, incident views, admin dashboard).
 
@@ -150,8 +150,9 @@ Rules: validate inputs with `_validate_k8s_name()`/`_validate_k8s_namespace()`, 
 - `runbooks.py` — 10 built-in SRE runbooks injected into system prompt
 - `memory/` — self-improving agent (PostgreSQL, pattern detection, learned runbooks)
 - `view_tools.py` — `namespace_summary` + `create_dashboard` tools for generative views
-- `view_validator.py` — component validation + dedup before view save (blocks bad dashboards)
-- `view_critic.py` — post-creation quality scoring rubric (0-10 scale, dedup/title/balance checks)
+- `quality_engine.py` — unified dashboard validation + quality scoring (merged view_validator + view_critic)
+- `view_validator.py` — backward-compatible wrapper around quality_engine
+- `view_critic.py` — backward-compatible wrapper around quality_engine
 - `db.py` — Database abstraction (PostgreSQL production, SQLite tests) + view CRUD functions
 - `k8s_client.py` — lazy-initialized K8s client with `safe()` wrapper
 - `context_bus.py` — shared context bus for cross-agent communication

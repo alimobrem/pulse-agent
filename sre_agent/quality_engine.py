@@ -315,9 +315,9 @@ def evaluate_components(
 
 
 def _deduplicate(components: list[dict]) -> list[dict]:
-    """Remove components with identical query or identical kind+title (case-insensitive)."""
+    """Remove components with identical query, or identical (kind, title, query) triple."""
     seen_queries: set[str] = set()
-    seen_kind_title: set[tuple[str, str]] = set()
+    seen_kind_title_query: set[tuple[str, str, str]] = set()
     out: list[dict] = []
 
     for comp in components:
@@ -327,14 +327,14 @@ def _deduplicate(components: list[dict]) -> list[dict]:
 
         if query and query in seen_queries:
             continue
-        key = (kind, title)
-        if kind and title and key in seen_kind_title:
+        key = (kind, title, query)
+        if kind and title and key in seen_kind_title_query:
             continue
 
         if query:
             seen_queries.add(query)
         if kind and title:
-            seen_kind_title.add(key)
+            seen_kind_title_query.add(key)
         out.append(comp)
 
     return out

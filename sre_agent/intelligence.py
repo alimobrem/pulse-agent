@@ -69,13 +69,14 @@ def _compute_query_reliability(days: int) -> str:
 
         db = get_database()
         rows = db.fetchall(
-            f"SELECT query_template, success_count, failure_count "
-            f"FROM promql_queries "
-            f"WHERE (last_success > NOW() - INTERVAL '{days} days' "
-            f"   OR last_failure > NOW() - INTERVAL '{days} days') "
-            f"AND success_count + failure_count >= 3 "
-            f"ORDER BY success_count + failure_count DESC "
-            f"LIMIT 20",
+            "SELECT query_template, success_count, failure_count "
+            "FROM promql_queries "
+            "WHERE (last_success > NOW() - INTERVAL '1 day' * ? "
+            "   OR last_failure > NOW() - INTERVAL '1 day' * ?) "
+            "AND success_count + failure_count >= 3 "
+            "ORDER BY success_count + failure_count DESC "
+            "LIMIT 20",
+            (days, days),
         )
         if not rows:
             return ""
@@ -121,24 +122,26 @@ def _compute_dashboard_patterns(days: int) -> str:
         db = get_database()
 
         tool_rows = db.fetchall(
-            f"SELECT tool_name, COUNT(*) as call_count "
-            f"FROM tool_usage "
-            f"WHERE agent_mode = 'view_designer' "
-            f"  AND timestamp > NOW() - INTERVAL '{days} days' "
-            f"  AND status = 'success' "
-            f"GROUP BY tool_name "
-            f"ORDER BY call_count DESC "
-            f"LIMIT 10",
+            "SELECT tool_name, COUNT(*) as call_count "
+            "FROM tool_usage "
+            "WHERE agent_mode = 'view_designer' "
+            "  AND timestamp > NOW() - INTERVAL '1 day' * ? "
+            "  AND status = 'success' "
+            "GROUP BY tool_name "
+            "ORDER BY call_count DESC "
+            "LIMIT 10",
+            (days,),
         )
 
         avg_row = db.fetchone(
-            f"SELECT AVG(tool_count)::int as avg_tools FROM ("
-            f"    SELECT session_id, COUNT(*) as tool_count "
-            f"    FROM tool_usage "
-            f"    WHERE agent_mode = 'view_designer' "
-            f"      AND timestamp > NOW() - INTERVAL '{days} days' "
-            f"    GROUP BY session_id"
-            f") sub",
+            "SELECT AVG(tool_count)::int as avg_tools FROM ("
+            "    SELECT session_id, COUNT(*) as tool_count "
+            "    FROM tool_usage "
+            "    WHERE agent_mode = 'view_designer' "
+            "      AND timestamp > NOW() - INTERVAL '1 day' * ? "
+            "    GROUP BY session_id"
+            ") sub",
+            (days,),
         )
 
         if not tool_rows:
@@ -164,16 +167,17 @@ def _compute_error_hotspots(days: int) -> str:
         db = get_database()
 
         hotspot_rows = db.fetchall(
-            f"SELECT tool_name, "
-            f"       COUNT(*) FILTER (WHERE status = 'error') as error_count, "
-            f"       COUNT(*) as total_count "
-            f"FROM tool_usage "
-            f"WHERE timestamp > NOW() - INTERVAL '{days} days' "
-            f"GROUP BY tool_name "
-            f"HAVING COUNT(*) > 5 "
-            f"   AND COUNT(*) FILTER (WHERE status = 'error')::float / COUNT(*) > 0.05 "
-            f"ORDER BY COUNT(*) FILTER (WHERE status = 'error')::float / COUNT(*) DESC "
-            f"LIMIT 5",
+            "SELECT tool_name, "
+            "       COUNT(*) FILTER (WHERE status = 'error') as error_count, "
+            "       COUNT(*) as total_count "
+            "FROM tool_usage "
+            "WHERE timestamp > NOW() - INTERVAL '1 day' * ? "
+            "GROUP BY tool_name "
+            "HAVING COUNT(*) > 5 "
+            "   AND COUNT(*) FILTER (WHERE status = 'error')::float / COUNT(*) > 0.05 "
+            "ORDER BY COUNT(*) FILTER (WHERE status = 'error')::float / COUNT(*) DESC "
+            "LIMIT 5",
+            (days,),
         )
 
         if not hotspot_rows:
@@ -190,15 +194,15 @@ def _compute_error_hotspots(days: int) -> str:
             err_msg = ""
             try:
                 err_row = db.fetchone(
-                    f"SELECT error_message, COUNT(*) as cnt "
-                    f"FROM tool_usage "
-                    f"WHERE tool_name = ? AND status = 'error' "
-                    f"  AND timestamp > NOW() - INTERVAL '{days} days' "
-                    f"  AND error_message IS NOT NULL "
-                    f"GROUP BY error_message "
-                    f"ORDER BY cnt DESC "
-                    f"LIMIT 1",
-                    (tool,),
+                    "SELECT error_message, COUNT(*) as cnt "
+                    "FROM tool_usage "
+                    "WHERE tool_name = ? AND status = 'error' "
+                    "  AND timestamp > NOW() - INTERVAL '1 day' * ? "
+                    "  AND error_message IS NOT NULL "
+                    "GROUP BY error_message "
+                    "ORDER BY cnt DESC "
+                    "LIMIT 1",
+                    (tool, days),
                 )
                 if err_row and err_row.get("error_message"):
                     err_msg = err_row["error_message"][:80]
@@ -223,13 +227,14 @@ def _compute_token_efficiency(days: int) -> str:
 
         db = get_database()
         row = db.fetchone(
-            f"SELECT COALESCE(ROUND(AVG(input_tokens)), 0) AS avg_input, "
-            f"COALESCE(ROUND(AVG(output_tokens)), 0) AS avg_output, "
-            f"COALESCE(ROUND(AVG(cache_read_tokens)), 0) AS avg_cache, "
-            f"COUNT(*) AS total_turns "
-            f"FROM tool_turns "
-            f"WHERE input_tokens IS NOT NULL "
-            f"AND timestamp > NOW() - INTERVAL '{days} days'",
+            "SELECT COALESCE(ROUND(AVG(input_tokens)), 0) AS avg_input, "
+            "COALESCE(ROUND(AVG(output_tokens)), 0) AS avg_output, "
+            "COALESCE(ROUND(AVG(cache_read_tokens)), 0) AS avg_cache, "
+            "COUNT(*) AS total_turns "
+            "FROM tool_turns "
+            "WHERE input_tokens IS NOT NULL "
+            "AND timestamp > NOW() - INTERVAL '1 day' * ?",
+            (days,),
         )
         if not row or not row.get("total_turns"):
             return ""
@@ -258,13 +263,14 @@ def _compute_harness_effectiveness(days: int) -> str:
 
         # Selection accuracy: avg ratio of tools_called / tools_offered
         acc_row = db.fetchone(
-            f"SELECT AVG(array_length(tools_called, 1)::float "
-            f"/ NULLIF(array_length(tools_offered, 1), 0)) as accuracy, "
-            f"COALESCE(ROUND(AVG(array_length(tools_called, 1))), 0) as avg_called, "
-            f"COALESCE(ROUND(AVG(array_length(tools_offered, 1))), 0) as avg_offered "
-            f"FROM tool_turns "
-            f"WHERE tools_offered IS NOT NULL AND tools_called IS NOT NULL "
-            f"AND timestamp > NOW() - INTERVAL '{days} days'",
+            "SELECT AVG(array_length(tools_called, 1)::float "
+            "/ NULLIF(array_length(tools_offered, 1), 0)) as accuracy, "
+            "COALESCE(ROUND(AVG(array_length(tools_called, 1))), 0) as avg_called, "
+            "COALESCE(ROUND(AVG(array_length(tools_offered, 1))), 0) as avg_offered "
+            "FROM tool_turns "
+            "WHERE tools_offered IS NOT NULL AND tools_called IS NOT NULL "
+            "AND timestamp > NOW() - INTERVAL '1 day' * ?",
+            (days,),
         )
 
         if not acc_row or acc_row.get("accuracy") is None:
@@ -281,25 +287,26 @@ def _compute_harness_effectiveness(days: int) -> str:
 
         # Wasted tools: offered 20+ times but called <5% of the time
         wasted_rows = db.fetchall(
-            f"WITH offered AS ("
-            f"    SELECT unnest(tools_offered) as tool_name, COUNT(*) as offered_count "
-            f"    FROM tool_turns "
-            f"    WHERE timestamp > NOW() - INTERVAL '{days} days' AND tools_offered IS NOT NULL "
-            f"    GROUP BY 1"
-            f"), "
-            f"called AS ("
-            f"    SELECT unnest(tools_called) as tool_name, COUNT(*) as called_count "
-            f"    FROM tool_turns "
-            f"    WHERE timestamp > NOW() - INTERVAL '{days} days' AND tools_called IS NOT NULL "
-            f"    GROUP BY 1"
-            f") "
-            f"SELECT o.tool_name, o.offered_count, COALESCE(c.called_count, 0) as called_count "
-            f"FROM offered o "
-            f"LEFT JOIN called c ON o.tool_name = c.tool_name "
-            f"WHERE o.offered_count >= 20 "
-            f"AND COALESCE(c.called_count, 0)::float / o.offered_count < 0.05 "
-            f"ORDER BY o.offered_count DESC "
-            f"LIMIT 10",
+            "WITH offered AS ("
+            "    SELECT unnest(tools_offered) as tool_name, COUNT(*) as offered_count "
+            "    FROM tool_turns "
+            "    WHERE timestamp > NOW() - INTERVAL '1 day' * ? AND tools_offered IS NOT NULL "
+            "    GROUP BY 1"
+            "), "
+            "called AS ("
+            "    SELECT unnest(tools_called) as tool_name, COUNT(*) as called_count "
+            "    FROM tool_turns "
+            "    WHERE timestamp > NOW() - INTERVAL '1 day' * ? AND tools_called IS NOT NULL "
+            "    GROUP BY 1"
+            ") "
+            "SELECT o.tool_name, o.offered_count, COALESCE(c.called_count, 0) as called_count "
+            "FROM offered o "
+            "LEFT JOIN called c ON o.tool_name = c.tool_name "
+            "WHERE o.offered_count >= 20 "
+            "AND COALESCE(c.called_count, 0)::float / o.offered_count < 0.05 "
+            "ORDER BY o.offered_count DESC "
+            "LIMIT 10",
+            (days, days),
         )
 
         if wasted_rows:
@@ -324,16 +331,17 @@ def _compute_routing_accuracy(days: int) -> str:
         db = get_database()
 
         row = db.fetchone(
-            f"SELECT "
-            f"    COUNT(*) FILTER (WHERE agent_mode != prev_mode) as switches, "
-            f"    COUNT(*) as total "
-            f"FROM ("
-            f"    SELECT agent_mode, "
-            f"           LAG(agent_mode) OVER (PARTITION BY session_id ORDER BY turn_number) as prev_mode "
-            f"    FROM tool_turns "
-            f"    WHERE timestamp > NOW() - INTERVAL '{days} days'"
-            f") sub "
-            f"WHERE prev_mode IS NOT NULL",
+            "SELECT "
+            "    COUNT(*) FILTER (WHERE agent_mode != prev_mode) as switches, "
+            "    COUNT(*) as total "
+            "FROM ("
+            "    SELECT agent_mode, "
+            "           LAG(agent_mode) OVER (PARTITION BY session_id ORDER BY turn_number) as prev_mode "
+            "    FROM tool_turns "
+            "    WHERE timestamp > NOW() - INTERVAL '1 day' * ?"
+            ") sub "
+            "WHERE prev_mode IS NOT NULL",
+            (days,),
         )
 
         if not row or not row.get("total"):
@@ -362,17 +370,18 @@ def _compute_feedback_analysis(days: int) -> str:
         db = get_database()
 
         rows = db.fetchall(
-            f"SELECT u.tool_name, "
-            f"       COUNT(*) FILTER (WHERE t.feedback = 'negative') as negative, "
-            f"       COUNT(*) as total "
-            f"FROM tool_turns t "
-            f"JOIN tool_usage u ON t.session_id = u.session_id AND t.turn_number = u.turn_number "
-            f"WHERE t.feedback IS NOT NULL "
-            f"AND t.timestamp > NOW() - INTERVAL '{days} days' "
-            f"GROUP BY u.tool_name "
-            f"HAVING COUNT(*) FILTER (WHERE t.feedback = 'negative') > 0 "
-            f"ORDER BY COUNT(*) FILTER (WHERE t.feedback = 'negative')::float / COUNT(*) DESC "
-            f"LIMIT 5",
+            "SELECT u.tool_name, "
+            "       COUNT(*) FILTER (WHERE t.feedback = 'negative') as negative, "
+            "       COUNT(*) as total "
+            "FROM tool_turns t "
+            "JOIN tool_usage u ON t.session_id = u.session_id AND t.turn_number = u.turn_number "
+            "WHERE t.feedback IS NOT NULL "
+            "AND t.timestamp > NOW() - INTERVAL '1 day' * ? "
+            "GROUP BY u.tool_name "
+            "HAVING COUNT(*) FILTER (WHERE t.feedback = 'negative') > 0 "
+            "ORDER BY COUNT(*) FILTER (WHERE t.feedback = 'negative')::float / COUNT(*) DESC "
+            "LIMIT 5",
+            (days,),
         )
 
         if not rows:
@@ -396,13 +405,14 @@ def _compute_token_trending(days: int) -> str:
         db = get_database()
 
         row = db.fetchone(
-            f"SELECT "
-            f"    AVG(input_tokens) FILTER (WHERE timestamp > NOW() - INTERVAL '{days} days') as current_avg, "
-            f"    AVG(input_tokens) FILTER (WHERE timestamp BETWEEN "
-            f"NOW() - INTERVAL '{days * 2} days' AND NOW() - INTERVAL '{days} days') as prev_avg, "
-            f"    AVG(output_tokens) FILTER (WHERE timestamp > NOW() - INTERVAL '{days} days') as current_output "
-            f"FROM tool_turns "
-            f"WHERE input_tokens IS NOT NULL",
+            "SELECT "
+            "    AVG(input_tokens) FILTER (WHERE timestamp > NOW() - INTERVAL '1 day' * ?) as current_avg, "
+            "    AVG(input_tokens) FILTER (WHERE timestamp BETWEEN "
+            "NOW() - INTERVAL '1 day' * ? AND NOW() - INTERVAL '1 day' * ?) as prev_avg, "
+            "    AVG(output_tokens) FILTER (WHERE timestamp > NOW() - INTERVAL '1 day' * ?) as current_output "
+            "FROM tool_turns "
+            "WHERE input_tokens IS NOT NULL",
+            (days, days * 2, days, days),
         )
 
         if not row or row.get("current_avg") is None:
@@ -440,24 +450,25 @@ def get_wasted_tools(days: int = 7) -> list[str]:
         db = get_database()
 
         rows = db.fetchall(
-            f"WITH offered AS ("
-            f"    SELECT unnest(tools_offered) as tool_name, COUNT(*) as offered_count "
-            f"    FROM tool_turns "
-            f"    WHERE timestamp > NOW() - INTERVAL '{days} days' AND tools_offered IS NOT NULL "
-            f"    GROUP BY 1"
-            f"), "
-            f"called AS ("
-            f"    SELECT unnest(tools_called) as tool_name, COUNT(*) as called_count "
-            f"    FROM tool_turns "
-            f"    WHERE timestamp > NOW() - INTERVAL '{days} days' AND tools_called IS NOT NULL "
-            f"    GROUP BY 1"
-            f") "
-            f"SELECT o.tool_name "
-            f"FROM offered o "
-            f"LEFT JOIN called c ON o.tool_name = c.tool_name "
-            f"WHERE o.offered_count >= 20 "
-            f"AND COALESCE(c.called_count, 0)::float / o.offered_count < 0.02 "
-            f"ORDER BY o.offered_count DESC",
+            "WITH offered AS ("
+            "    SELECT unnest(tools_offered) as tool_name, COUNT(*) as offered_count "
+            "    FROM tool_turns "
+            "    WHERE timestamp > NOW() - INTERVAL '1 day' * ? AND tools_offered IS NOT NULL "
+            "    GROUP BY 1"
+            "), "
+            "called AS ("
+            "    SELECT unnest(tools_called) as tool_name, COUNT(*) as called_count "
+            "    FROM tool_turns "
+            "    WHERE timestamp > NOW() - INTERVAL '1 day' * ? AND tools_called IS NOT NULL "
+            "    GROUP BY 1"
+            ") "
+            "SELECT o.tool_name "
+            "FROM offered o "
+            "LEFT JOIN called c ON o.tool_name = c.tool_name "
+            "WHERE o.offered_count >= 20 "
+            "AND COALESCE(c.called_count, 0)::float / o.offered_count < 0.02 "
+            "ORDER BY o.offered_count DESC",
+            (days, days),
         )
 
         return [row["tool_name"] for row in rows] if rows else []
