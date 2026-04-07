@@ -10,20 +10,22 @@ from __future__ import annotations
 _ROLE_ORDER = ["kpi_group", "kpi", "status", "chart", "detail", "table", "container"]
 
 # kind -> (role, default_w, default_h)
+# kind -> (role, default_w, default_h)
+# Heights use rowHeight=30px grid units (1 unit = ~46px with 16px margin)
 _KIND_MAP: dict[str, tuple[str, int, int]] = {
-    "metric_card": ("kpi", 1, 3),
-    "info_card_grid": ("kpi_group", 4, 3),
-    "chart": ("chart", 2, 6),
-    "node_map": ("chart", 4, 6),
-    "data_table": ("table", 4, 6),
-    "status_list": ("status", 4, 3),
+    "metric_card": ("kpi", 1, 4),
+    "info_card_grid": ("kpi_group", 4, 5),
+    "chart": ("chart", 2, 12),
+    "node_map": ("chart", 4, 12),
+    "data_table": ("table", 4, 12),
+    "status_list": ("status", 4, 6),
     "badge_list": ("status", 4, 3),
-    "log_viewer": ("detail", 2, 6),
-    "key_value": ("detail", 2, 5),
-    "yaml_viewer": ("detail", 2, 5),
-    "relationship_tree": ("detail", 2, 5),
-    "tabs": ("container", 4, 8),
-    "section": ("container", 4, 5),
+    "log_viewer": ("detail", 2, 12),
+    "key_value": ("detail", 2, 10),
+    "yaml_viewer": ("detail", 2, 10),
+    "relationship_tree": ("detail", 2, 10),
+    "tabs": ("container", 4, 16),
+    "section": ("container", 4, 10),
 }
 
 # Detail pairing: kind -> set of compatible partner kinds
@@ -44,8 +46,8 @@ def _classify(component: dict) -> tuple[str, int, int]:
         cols = component.get("columns", 2)
         rows = max(1, -(-len(items) // cols))  # ceil division
         if any(item.get("kind") == "metric_card" for item in items):
-            return "kpi_group", 4, 2 + rows * 2
-        return "container", 4, 2 + rows * 3
+            return "kpi_group", 4, 3 + rows * 4
+        return "container", 4, 4 + rows * 6
 
     if kind in _KIND_MAP:
         return _KIND_MAP[kind]
