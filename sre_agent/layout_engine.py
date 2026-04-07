@@ -11,9 +11,9 @@ _ROLE_ORDER = ["kpi_group", "kpi", "status", "chart", "detail", "table", "contai
 
 # kind -> (role, default_w, default_h)
 _KIND_MAP: dict[str, tuple[str, int, int]] = {
-    "metric_card": ("kpi", 1, 2),
-    "info_card_grid": ("kpi_group", 4, 2),
-    "chart": ("chart", 2, 5),
+    "metric_card": ("kpi", 1, 3),
+    "info_card_grid": ("kpi_group", 4, 3),
+    "chart": ("chart", 2, 6),
     "node_map": ("chart", 4, 6),
     "data_table": ("table", 4, 6),
     "status_list": ("status", 4, 3),
@@ -41,9 +41,11 @@ def _classify(component: dict) -> tuple[str, int, int]:
 
     if kind == "grid":
         items = component.get("items", [])
+        cols = component.get("columns", 2)
+        rows = max(1, -(-len(items) // cols))  # ceil division
         if any(item.get("kind") == "metric_card" for item in items):
-            return "kpi_group", 4, 2
-        return "container", 4, 5
+            return "kpi_group", 4, max(4, 2 + rows * 2)
+        return "container", 4, max(5, 2 + rows * 3)
 
     if kind in _KIND_MAP:
         return _KIND_MAP[kind]
