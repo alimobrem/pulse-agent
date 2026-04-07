@@ -504,24 +504,19 @@ Each tool call that returns a component spec automatically adds it to a
 API layer intercepts this signal, collects all accumulated components, and
 saves them as a view.
 
-### Validator and Critic
+### Quality Engine
 
-Two quality gates ensure dashboard quality:
+`sre_agent/quality_engine.py` is the unified validation and scoring module
+(merged from the former `view_validator.py` and `view_critic.py`, which remain
+as thin backward-compatible wrappers). It runs validation and quality scoring
+in a single `evaluate_components()` call returning a `QualityResult`:
 
-1. **`view_validator.py`** -- Pre-save validation:
-   - Component deduplication (matching PromQL queries, matching titles)
-   - Schema conformance for each component kind
-   - Title uniqueness enforcement
-   - Widget count limits (max 8, penalize 10+)
-   - PromQL syntax validation (unbalanced braces, double label blocks)
-
-2. **`view_critic.py`** -- Post-creation quality scoring (0-10 rubric):
-   - Metric cards present? (2 pts)
-   - 2+ charts with distinct queries? (2 pts)
-   - At least 1 data_table? (1 pt)
-   - Descriptive titles (not "Chart", "Table")? (2 pts)
-   - No duplicate PromQL queries? (2 pts)
-   - Widget count <= 8? (1 pt)
+- Component deduplication (matching PromQL queries or identical kind+title+query triples)
+- Schema conformance for each component kind
+- Title uniqueness enforcement
+- Widget count limits (max 8, penalize 10+)
+- PromQL syntax validation (unbalanced braces, double label blocks)
+- Quality scoring rubric (0-10): metric cards (2 pts), 2+ charts (2 pts), data table (1 pt), descriptive titles (2 pts), no duplicate queries (2 pts), widget count (1 pt)
 
 ### Semantic Layout Engine
 
@@ -1593,8 +1588,9 @@ Key decisions made during development and the reasoning behind them.
 | `sre_agent/promql_recipes.py` | 73 PromQL recipes across 16 categories |
 | `sre_agent/prometheus.py` | Shared Prometheus client |
 | `sre_agent/layout_engine.py` | Semantic auto-layout for dashboards |
-| `sre_agent/view_validator.py` | Pre-save dashboard validation |
-| `sre_agent/view_critic.py` | Post-creation quality scoring |
+| `sre_agent/quality_engine.py` | Unified dashboard validation + quality scoring |
+| `sre_agent/view_validator.py` | Backward-compatible wrapper around quality_engine |
+| `sre_agent/view_critic.py` | Backward-compatible wrapper around quality_engine |
 | `sre_agent/intelligence.py` | Analytics feedback loop |
 | `sre_agent/tool_usage.py` | Tool invocation audit log |
 | `sre_agent/tool_chains.py` | Bigram chain discovery and hints |

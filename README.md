@@ -92,9 +92,9 @@ Pulse Agent connects directly to your cluster's Kubernetes API and uses Claude O
 - **Role-Based Auto-Layout** — Replaced 5 fixed dashboard templates with a semantic layout engine (`layout_engine.py`) that arranges widgets based on their role (KPI, chart, table, status) and content relationships
 - **Adaptive Grid** — Automatically assigns widget sizes and positions based on component type and dashboard composition
 
-### View Validator
-- **Pre-Save Validation** — `view_validator.py` validates dashboard components before save: deduplication, schema conformance, title uniqueness, widget count limits
-- **Quality Critic** — Enhanced `view_critic.py` scoring rubric evaluates dashboard quality on multiple dimensions before persisting
+### Quality Engine
+- **Unified Validation & Scoring** — `quality_engine.py` validates and scores dashboard components in a single pass: deduplication, schema conformance, title uniqueness, widget count limits, and quality rubric (0-10 scale)
+- **Backward-Compatible** — `view_validator.py` and `view_critic.py` remain as thin wrappers
 
 ### Tool Analytics
 - **Full Audit Log** — Every tool invocation recorded to PostgreSQL (`tool_usage` table): tool name, category, status, duration, input summary, error details, session/turn tracking
@@ -604,8 +604,9 @@ sre_agent/
 ├── promql_recipes.py    # 73 production-tested PromQL queries across 16 categories
 ├── prometheus.py        # Shared Prometheus client with SSL CA handling
 ├── layout_engine.py     # Semantic layout engine — role-based auto-layout for dashboards
-├── view_validator.py    # Dashboard validation (dedup, schema, titles, widget count)
-├── view_critic.py       # Dashboard quality scoring rubric
+├── quality_engine.py    # Unified dashboard validation + quality scoring
+├── view_validator.py    # Backward-compatible wrapper around quality_engine
+├── view_critic.py       # Backward-compatible wrapper around quality_engine
 ├── intelligence.py      # Intelligence loop — analytics feedback into system prompt
 ├── tool_usage.py        # Tool invocation audit log (PostgreSQL)
 ├── tool_chains.py       # Tool chain discovery and next-tool hints (bigram analysis)
