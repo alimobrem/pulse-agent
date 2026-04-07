@@ -473,6 +473,12 @@ EVAL_PROMPTS: list[tuple[str, list[str], str, str]] = [
         "Widget addition to existing view",
     ),
     (
+        "add a bar chart showing the top namespaces by pod count",
+        ["emit_component"],
+        "view_designer",
+        "Emit bar_list component",
+    ),
+    (
         "remove the third widget from my dashboard",
         ["update_view_widgets"],
         "view_designer",

@@ -706,6 +706,40 @@ def remove_widget_from_view(view_id: str, widget_title: str) -> str:
 
 
 @beta_tool
+def emit_component(kind: str, spec_json: str) -> str:
+    """Emit a custom component for the current dashboard. Use for bar_list, progress_list, stat_card, or any component type.
+
+    The component is added to the session and will be included when create_dashboard is called.
+
+    Args:
+        kind: Component kind (e.g. 'bar_list', 'progress_list', 'stat_card', 'status_list').
+        spec_json: JSON string with the component spec. Must include all required fields for the kind.
+            Example bar_list: {"title": "Top Pods", "items": [{"label": "nginx", "value": 42}]}
+            Example progress_list: {"title": "Node CPU", "items": [{"label": "node-1", "value": 70, "max": 100, "unit": "%"}]}
+            Example stat_card: {"title": "Error Rate", "value": "2.3", "unit": "%", "trend": "down", "trendValue": "12%"}
+    """
+    import json as _json
+
+    try:
+        spec = _json.loads(spec_json)
+    except _json.JSONDecodeError as e:
+        return f"Invalid JSON: {e}"
+
+    spec["kind"] = kind
+
+    from .quality_engine import VALID_KINDS
+
+    if kind not in VALID_KINDS:
+        return f"Invalid kind '{kind}'. Valid: {', '.join(sorted(VALID_KINDS))}"
+
+    text = f"Emitted {kind} component"
+    if spec.get("title"):
+        text += f": {spec['title']}"
+
+    return (text, spec)
+
+
+@beta_tool
 def undo_view_change(view_id: str, version: int = -1) -> str:
     """Undo the last change to a view, or restore a specific version. Every view change is automatically versioned.
 
@@ -831,6 +865,7 @@ register_tool(get_view_details)
 register_tool(update_view_widgets)
 register_tool(add_widget_to_view)
 register_tool(remove_widget_from_view)
+register_tool(emit_component)
 register_tool(undo_view_change)
 register_tool(get_view_versions)
 
@@ -852,6 +887,7 @@ VIEW_TOOLS = [
     update_view_widgets,
     add_widget_to_view,
     remove_widget_from_view,
+    emit_component,
     undo_view_change,
     get_view_versions,
     critique_view,

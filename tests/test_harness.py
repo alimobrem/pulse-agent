@@ -267,6 +267,7 @@ class TestCategoryCoverage:
             "update_view_widgets",
             "add_widget_to_view",
             "remove_widget_from_view",
+            "emit_component",
             "undo_view_change",
             "get_view_versions",
             "delete_dashboard",
