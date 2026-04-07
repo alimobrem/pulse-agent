@@ -139,6 +139,9 @@ Minimum: 3 widgets (metrics + chart + table). Maximum: 8 (use tabs if more neede
 | Pod logs | `get_pod_logs(ns, pod)` | log_viewer |
 | Resource details | `describe_pod(ns, pod)` | key_value |
 | Ownership chain | `get_resource_relationships(ns, kind, name)` | relationship_tree |
+| Ranked list | `emit_component("bar_list", ...)` | bar_list |
+| Utilization bars | `emit_component("progress_list", ...)` | progress_list |
+| Single big stat | `emit_component("stat_card", ...)` | stat_card |
 
 ## Validation Rules
 
@@ -179,6 +182,14 @@ Minimum: 3 widgets (metrics + chart + table). Maximum: 8 (use tabs if more neede
 4. get_events(ns)
 5. create_dashboard(title="Incident: pod-name")
 ```
+
+## Additional Component Types
+
+Use `emit_component(kind, spec_json)` for these specialized components:
+
+- **bar_list** — Horizontal ranked bars. Use for "top N" views (tools, namespaces by pod count, images by vulnerability). Spec: `{"title": "...", "items": [{"label": "name", "value": 42, "badge": "2 err", "badgeVariant": "error"}]}`
+- **progress_list** — Utilization/capacity bars with auto green/yellow/red. Use for node CPU/memory, PVC usage, quota. Spec: `{"title": "...", "items": [{"label": "node-1", "value": 70, "max": 100, "unit": "%"}]}`
+- **stat_card** — Single big number with trend arrow. Use for prominent KPIs like error rate, uptime, SLA. Spec: `{"title": "...", "value": "2.3", "unit": "%", "trend": "down", "trendValue": "12%", "trendGood": "down"}`
 
 ## Color Semantics
 - Red (#ef4444): errors, critical, failing
