@@ -31,6 +31,9 @@ VALID_KINDS = frozenset(
         "tabs",
         "grid",
         "section",
+        "bar_list",
+        "progress_list",
+        "stat_card",
     }
 )
 
@@ -352,7 +355,7 @@ def _validate_component(comp: dict, result: QualityResult) -> None:
         result.errors.append(f"Invalid kind '{kind}' — must be one of: {', '.join(sorted(VALID_KINDS))}.")
         return
 
-    title_required = kind not in ("grid", "tabs", "section")
+    title_required = kind not in ("grid", "tabs", "section", "bar_list", "progress_list")
     if title_required and (not title or not str(title).strip()):
         result.errors.append(f"Component (kind={kind}) missing required 'title' field.")
         return
@@ -379,6 +382,34 @@ def _validate_component(comp: dict, result: QualityResult) -> None:
         if items:
             for item in items:
                 _validate_component(item, result)
+
+    elif kind == "bar_list":
+        items = comp.get("items")
+        if not items:
+            result.errors.append("bar_list must have at least 1 item.")
+        else:
+            for item in items:
+                if not item.get("label"):
+                    result.errors.append("bar_list item missing 'label'.")
+                if "value" not in item:
+                    result.errors.append("bar_list item missing 'value'.")
+
+    elif kind == "progress_list":
+        items = comp.get("items")
+        if not items:
+            result.errors.append("progress_list must have at least 1 item.")
+        else:
+            for item in items:
+                if not item.get("label"):
+                    result.errors.append("progress_list item missing 'label'.")
+                if "value" not in item:
+                    result.errors.append("progress_list item missing 'value'.")
+                if not item.get("max") or item.get("max", 0) <= 0:
+                    result.errors.append(f"progress_list item '{item.get('label', '?')}' must have 'max' > 0.")
+
+    elif kind == "stat_card":
+        if not comp.get("value"):
+            result.errors.append(f"Stat card '{title}' must have 'value'.")
 
 
 def _check_generic_title(title: str, kind: str, result: QualityResult) -> None:
