@@ -252,6 +252,7 @@ In the `domainRoutes()` function, add after the `agent` route:
 
 Create `/Users/amobrem/ali/OpenshiftPulse/src/kubeview/views/ToolsView.tsx`:
 
+{% raw %}
 ```tsx
 import { Wrench } from 'lucide-react';
 
@@ -742,6 +743,7 @@ function StatCard({ label, value, icon }: { label: string; value: string; icon: 
   );
 }
 ```
+{% endraw %}
 
 - [ ] **Step 2: Verify it compiles**
 
@@ -795,6 +797,7 @@ type AgentTab = 'settings' | 'memory' | 'views' | 'tools';
 
 5. Add the `ToolsSummaryTab` component at the bottom of the file (before the last closing of the file or after the `SettingsTabContent` function):
 
+{% raw %}
 ```typescript
 function ToolsSummaryTab() {
   const navigate = useNavigate();
@@ -872,6 +875,7 @@ function ToolsSummaryTab() {
   );
 }
 ```
+{% endraw %}
 
 - [ ] **Step 2: Verify it compiles**
 
