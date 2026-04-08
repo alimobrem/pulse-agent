@@ -69,6 +69,7 @@ def correlate_incident(
                     "severity": "warning" if e.type == "Warning" else "info",
                     "summary": f"[{e.type}] {e.involved_object.kind}/{e.involved_object.name}: {e.reason} — {e.message}",
                     "namespace": e.involved_object.namespace or "",
+                    "resource": f"{e.involved_object.kind}/{e.involved_object.name}",
                 }
             )
 
@@ -97,6 +98,7 @@ def correlate_incident(
                             "summary": f"Deployment {dep.metadata.namespace}/{dep.metadata.name}: "
                             f"{cond.type}={cond.status} — {cond.message}",
                             "namespace": dep.metadata.namespace,
+                            "resource": f"Deployment/{dep.metadata.name}",
                         }
                     )
 
@@ -128,6 +130,7 @@ def correlate_incident(
                         "severity": "change",
                         "summary": f"New ReplicaSet for {rs.metadata.namespace}/{owner}: images={', '.join(images)}",
                         "namespace": rs.metadata.namespace,
+                        "resource": f"Deployment/{owner}",
                     }
                 )
 
@@ -175,6 +178,7 @@ def correlate_incident(
                             "summary": f"[ALERT] {labels.get('alertname', '?')}: "
                             f"{annotations.get('summary', annotations.get('message', ''))}",
                             "namespace": labels.get("namespace", "cluster"),
+                            "resource": f"Alert/{labels.get('alertname', '?')}",
                         }
                     )
             except (ValueError, TypeError):
@@ -203,6 +207,7 @@ def correlate_incident(
                                 "summary": f"ArgoCD sync: {app['metadata']['name']} — "
                                 f"phase={op.get('phase', '?')} {op.get('message', '')}",
                                 "namespace": app["metadata"].get("namespace", ""),
+                                "resource": f"ArgoApp/{app['metadata']['name']}",
                             }
                         )
                 except (ValueError, TypeError):
@@ -271,21 +276,9 @@ def correlate_incident(
         "change": "normal",
     }
 
-    import re
-
-    def _extract_resource(entry: dict) -> str:
-        """Extract resource name from timeline entry summary."""
-        summary = entry.get("summary", "")
-        # Pattern: [Type] Kind/Name: ... or Deployment ns/name: ...
-        m = re.search(r"(?:^|\] )(\w+/[\w.-]+)", summary)
-        if m:
-            return m.group(1)
-        # Fallback: use source type
-        return entry["source"].replace("-", " ").title()
-
     lanes_by_resource: dict[str, list[dict]] = defaultdict(list)
     for entry in timeline:
-        resource = _extract_resource(entry)
+        resource = entry.get("resource", entry["source"].replace("-", " ").title())
         lanes_by_resource[resource].append(entry)
 
     component = {
