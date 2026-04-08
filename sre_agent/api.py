@@ -391,6 +391,7 @@ async def _run_agent_ws(
     current_user: str = "anonymous",
     mode: str = "sre",
     turn_number: int = 1,
+    user_query: str = "",
 ):
     """Run an agent turn and stream results over WebSocket."""
     from .view_tools import set_current_user
@@ -669,22 +670,6 @@ async def _run_agent_ws(
     try:
         from .tool_usage import record_turn
 
-        # Extract the user's text (not tool results or content blocks)
-        user_msgs = [m for m in messages if m["role"] == "user"]
-        query_text = ""
-        if user_msgs:
-            raw = user_msgs[-1]["content"]
-            if isinstance(raw, str):
-                query_text = raw
-            elif isinstance(raw, list):
-                # Content blocks — find the text block
-                for block in raw:
-                    if isinstance(block, dict) and block.get("type") == "text":
-                        query_text = block.get("text", "")
-                        break
-                if not query_text:
-                    query_text = str(raw)
-
         # Determine tools offered from tool_defs
         offered = [td.get("name", "") for td in tool_defs if isinstance(td, dict)]
 
@@ -692,7 +677,7 @@ async def _run_agent_ws(
             session_id=ws_id,
             turn_number=turn_number,
             agent_mode=mode,
-            query_summary=query_text,
+            query_summary=user_query[:200],
             tools_offered=offered,
             tools_called=session_tools,
             **turn_token_usage,
@@ -1004,6 +989,7 @@ async def websocket_agent(websocket: WebSocket, mode: str):
                     current_user=ws_user,
                     mode=mode,
                     turn_number=turn_counter,
+                    user_query=content,
                 )
                 messages.append({"role": "assistant", "content": full_response})
 
@@ -1231,6 +1217,7 @@ async def websocket_auto_agent(websocket: WebSocket):
                     current_user=ws_user,
                     mode=intent,
                     turn_number=turn_counter,
+                    user_query=content,
                 )
                 messages.append({"role": "assistant", "content": full_response})
 
