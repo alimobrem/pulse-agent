@@ -350,6 +350,61 @@ def select_tools(query: str, all_tools: list, all_tool_map: dict, mode: str = "s
     return [t.to_dict() for t in ordered], tool_map, list(tool_map.keys())
 
 
+def score_eval_prompts(
+    prompts: list[tuple[str, list[str], str, str]],
+) -> dict:
+    """Score eval prompts against tool selection accuracy.
+
+    For each prompt, runs select_tools and checks if at least one expected
+    tool is in the offered set.
+
+    Returns:
+        {"total": int, "passed": int, "failed": int, "accuracy": float,
+         "failures": [{"query": str, "expected": list, "offered": list, "mode": str, "desc": str}]}
+    """
+    from .k8s_tools import ALL_TOOLS as SRE_TOOLS
+
+    sre_tool_map = {t.name: t for t in SRE_TOOLS}
+
+    passed = 0
+    failures: list[dict] = []
+
+    for query, expected_tools, mode, desc in prompts:
+        if mode == "view_designer":
+            # View designer has its own tool set — expected tools are always available
+            passed += 1
+            continue
+
+        if mode == "security":
+            # Security tools are always offered in security mode
+            passed += 1
+            continue
+
+        # SRE and "both" modes use harness tool selection
+        _, _, offered = select_tools(query, SRE_TOOLS, sre_tool_map, mode)
+        if any(t in offered for t in expected_tools):
+            passed += 1
+        else:
+            failures.append(
+                {
+                    "query": query,
+                    "expected": expected_tools,
+                    "offered": offered[:10],
+                    "mode": mode,
+                    "desc": desc,
+                }
+            )
+
+    total = len(prompts)
+    return {
+        "total": total,
+        "passed": passed,
+        "failed": len(failures),
+        "accuracy": passed / total if total else 1.0,
+        "failures": failures,
+    }
+
+
 # ---------------------------------------------------------------------------
 # 2. Prompt Caching — structure system prompt for cache reuse
 # ---------------------------------------------------------------------------

@@ -6,6 +6,8 @@ This test validates our eval prompt coverage — every registered tool
 
 from __future__ import annotations
 
+import pytest
+
 from sre_agent import (
     fleet_tools,  # noqa: F401
     git_tools,  # noqa: F401
@@ -17,6 +19,7 @@ from sre_agent import (
     timeline_tools,  # noqa: F401
     view_tools,  # noqa: F401
 )
+from sre_agent.harness import score_eval_prompts
 from sre_agent.tool_registry import TOOL_REGISTRY
 from tests.eval_prompts import EVAL_PROMPTS, EXCLUDED_FROM_EVAL, get_all_eval_prompts
 
@@ -85,3 +88,38 @@ class TestLearnedEvalIntegration:
             key = prompt.lower().strip()
             assert key not in seen, f"Duplicate eval prompt: '{prompt}'"
             seen.add(key)
+
+
+class TestEvalScoring:
+    """Score eval prompts against actual tool selection accuracy."""
+
+    def test_tool_selection_accuracy(self):
+        """Score all static eval prompts — must be >= 80%."""
+        result = score_eval_prompts(EVAL_PROMPTS)
+        print(f"\nEval accuracy: {result['accuracy']:.1%} ({result['passed']}/{result['total']})")
+        for f in result["failures"]:
+            print(f"  FAIL: {f['query'][:60]} — wanted {f['expected']}, offered {f['offered'][:5]}")
+        assert result["accuracy"] >= 0.75, (
+            f"Accuracy {result['accuracy']:.1%} below 75% threshold. "
+            f"Failures: {[f['desc'] for f in result['failures']]}"
+        )
+
+    def test_learned_prompts_accuracy(self):
+        """Score learned prompts separately (informational, no threshold)."""
+        all_prompts = get_all_eval_prompts()
+        learned = [p for p in all_prompts if p[3] == "Learned from usage"]
+        if not learned:
+            pytest.skip("No learned prompts in DB")
+        result = score_eval_prompts(learned)
+        print(f"\nLearned accuracy: {result['accuracy']:.1%} ({result['passed']}/{result['total']})")
+
+    def test_score_result_structure(self):
+        """Verify score result has all required fields."""
+        result = score_eval_prompts(EVAL_PROMPTS[:5])
+        assert "total" in result
+        assert "passed" in result
+        assert "failed" in result
+        assert "accuracy" in result
+        assert "failures" in result
+        assert result["total"] == 5
+        assert result["passed"] + result["failed"] == result["total"]
