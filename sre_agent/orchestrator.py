@@ -144,6 +144,8 @@ _VIEW_TRIGGER_PHRASES = {
     "my view",
     "this view",
     "new view",
+    "app view",
+    "application view",
     "the chart",
     "my chart",
     "the widget",
