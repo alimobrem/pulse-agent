@@ -150,6 +150,27 @@ class TestNewComponentValidation:
         errs = self._errors({"kind": "stat_card", "value": "42%"})
         assert any("title" in e.lower() for e in errs)
 
+    def test_timeline_valid(self):
+        assert (
+            self._errors(
+                {
+                    "kind": "timeline",
+                    "lanes": [
+                        {
+                            "label": "Alerts",
+                            "category": "alert",
+                            "events": [{"timestamp": 1000, "label": "test", "severity": "info"}],
+                        }
+                    ],
+                }
+            )
+            == []
+        )
+
+    def test_timeline_empty_lanes(self):
+        errs = self._errors({"kind": "timeline", "lanes": []})
+        assert any("at least 1 lane" in e for e in errs)
+
 
 # ---------------------------------------------------------------------------
 # Scoring (from view_critic)

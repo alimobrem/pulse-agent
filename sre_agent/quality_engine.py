@@ -34,6 +34,7 @@ VALID_KINDS = frozenset(
         "bar_list",
         "progress_list",
         "stat_card",
+        "timeline",
     }
 )
 
@@ -355,7 +356,7 @@ def _validate_component(comp: dict, result: QualityResult) -> None:
         result.errors.append(f"Invalid kind '{kind}' — must be one of: {', '.join(sorted(VALID_KINDS))}.")
         return
 
-    title_required = kind not in ("grid", "tabs", "section", "bar_list", "progress_list")
+    title_required = kind not in ("grid", "tabs", "section", "bar_list", "progress_list", "timeline")
     if title_required and (not title or not str(title).strip()):
         result.errors.append(f"Component (kind={kind}) missing required 'title' field.")
         return
@@ -411,6 +412,17 @@ def _validate_component(comp: dict, result: QualityResult) -> None:
     elif kind == "stat_card":
         if not comp.get("value"):
             result.errors.append(f"Stat card '{title or 'untitled'}' must have 'value'.")
+
+    elif kind == "timeline":
+        lanes = comp.get("lanes")
+        if not lanes:
+            result.errors.append("timeline must have at least 1 lane.")
+        else:
+            for lane in lanes:
+                if not lane.get("label"):
+                    result.errors.append("timeline lane missing 'label'.")
+                if not lane.get("events"):
+                    result.errors.append(f"timeline lane '{lane.get('label', '?')}' must have at least 1 event.")
 
 
 def _check_generic_title(title: str, kind: str, result: QualityResult) -> None:
