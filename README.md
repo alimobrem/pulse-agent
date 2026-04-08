@@ -96,6 +96,23 @@ Pulse Agent connects directly to your cluster's Kubernetes API and uses Claude O
 - **Unified Validation & Scoring** — `quality_engine.py` validates and scores dashboard components in a single pass: deduplication, schema conformance, title uniqueness, widget count limits, and quality rubric (0-10 scale)
 - **Backward-Compatible** — `view_validator.py` and `view_critic.py` remain as thin wrappers
 
+### New Component Types
+- **bar_list** — Horizontal ranked bar chart for "top N" views (tools, namespaces, images). Clickable items with optional error badges
+- **progress_list** — Utilization/capacity bars with auto green/yellow/red thresholds. For node CPU/memory, PVC usage, quota consumption
+- **stat_card** — Single big number with trend arrow and delta. For prominent KPIs like error rate, uptime, SLA
+- **emit_component** — Generic tool that validates and emits any component type, enabling the agent to produce bar_list, progress_list, stat_card without dedicated data tools
+
+### Chart Type Auto-Selection
+- **10 chart types** — line, area, stacked_area, bar, stacked_bar, donut, pie, treemap, radar, scatter
+- **Auto-selection** — `_pick_chart_type` selects based on query patterns and data shape (e.g., `count by (phase)` → donut, `topk(...)` → bar, `sum by (namespace)` with 10+ results → treemap)
+- **Instant query charts** — Instant Prometheus queries with categorical data produce donut/bar charts instead of tables
+
+### Robust Dashboard Tables
+- **Global search** — Filter across all columns instantly
+- **Row-click navigation** — Click any K8s resource row to navigate to its detail view (in-app, no page reload)
+- **CSV/JSON export** — Download filtered table data with date-stamped filenames
+- **Column sort, toggle, per-column filters** — Full table controls via settings panel
+
 ### Tool Analytics
 - **Full Audit Log** — Every tool invocation recorded to PostgreSQL (`tool_usage` table): tool name, category, status, duration, input summary, error details, session/turn tracking
 - **Turn Tracking** — Per-turn data in `tool_turns`: query summary, tools offered vs called, user feedback, token usage (input/output/cache_read/cache_creation)
@@ -380,7 +397,7 @@ Built-in optimizations for getting the most out of Claude (`PULSE_AGENT_HARNESS=
 
 | Feature | What It Does | Impact |
 |---------|-------------|--------|
-| **Dynamic Tool Selection** | Categorizes 82 tools into 8 groups, loads only relevant ones per query | 82->15-25 tools, faster + cheaper |
+| **Dynamic Tool Selection** | Categorizes 84 tools into 8 groups, loads only relevant ones per query | 84->15-25 tools, faster + cheaper |
 | **Prompt Caching** | Marks system prompt + runbooks with `cache_control: ephemeral` | ~90% cost reduction on context |
 | **Cluster Context Injection** | Pre-fetches node count, namespaces, OCP version, failing pods, firing alerts | Saves 2-3 tool calls per query |
 | **Component Rendering Hints** | Guides Claude to focus on analysis, not data formatting | Cleaner responses |
@@ -756,7 +773,7 @@ Suites:
 ---
 
 <p align="center">
-  <strong>82 tools</strong> &bull; <strong>16 scanners</strong> &bull; <strong>10 runbooks</strong> &bull; <strong>73 PromQL recipes</strong> &bull; <strong>84 eval prompts</strong> &bull; <strong>1,078 tests</strong> &bull; <strong>Protocol v2</strong>
+  <strong>84 tools</strong> &bull; <strong>16 scanners</strong> &bull; <strong>10 runbooks</strong> &bull; <strong>73 PromQL recipes</strong> &bull; <strong>86 eval prompts</strong> &bull; <strong>1,131 tests</strong> &bull; <strong>Protocol v2</strong>
 </p>
 
 <p align="center">
