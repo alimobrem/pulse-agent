@@ -665,6 +665,14 @@ Structured UI components returned by agent tools via the `component` event. The 
 | `tabs` | Tabbed content | `tabs[]{label, content: ComponentSpec}` |
 | `grid` | Grid layout | `columns`, `items: ComponentSpec[]` |
 | `section` | Titled section | `title`, `content: ComponentSpec` |
+| `relationship_tree` | Resource hierarchy | `nodes[]`, `rootId` |
+| `log_viewer` | Pod log stream | `lines[]{timestamp?, level?, message}` |
+| `yaml_viewer` | YAML/JSON viewer | `content`, `language?` |
+| `metric_card` | KPI with sparkline | `title`, `value`, `query?`, `status?` |
+| `node_map` | Node topology | `nodes[]{name, status, cpuPct?, memPct?}` |
+| `bar_list` | Horizontal ranked bars | `items[]{label, value, badge?, href?}` |
+| `progress_list` | Utilization bars | `items[]{label, value, max, unit?}`, `thresholds?` |
+| `stat_card` | Single big KPI | `title`, `value`, `unit?`, `trend?`, `trendValue?`, `status?` |
 
 ### Badge Variants
 

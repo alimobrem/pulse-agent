@@ -99,6 +99,59 @@ class TestValidation:
 
 
 # ---------------------------------------------------------------------------
+# New component type validation
+# ---------------------------------------------------------------------------
+
+
+class TestNewComponentValidation:
+    """Test per-component validation for new types using _validate_component."""
+
+    def _errors(self, comp: dict) -> list[str]:
+        from sre_agent.quality_engine import QualityResult, _validate_component
+
+        r = QualityResult()
+        _validate_component(comp, r)
+        return r.errors
+
+    def test_bar_list_valid(self):
+        assert self._errors({"kind": "bar_list", "items": [{"label": "foo", "value": 42}]}) == []
+
+    def test_bar_list_empty_items(self):
+        errs = self._errors({"kind": "bar_list", "items": []})
+        assert any("at least 1 item" in e for e in errs)
+
+    def test_bar_list_missing_label(self):
+        errs = self._errors({"kind": "bar_list", "items": [{"value": 42}]})
+        assert any("label" in e.lower() for e in errs)
+
+    def test_bar_list_missing_value(self):
+        errs = self._errors({"kind": "bar_list", "items": [{"label": "x"}]})
+        assert any("value" in e.lower() for e in errs)
+
+    def test_progress_list_valid(self):
+        assert self._errors({"kind": "progress_list", "items": [{"label": "n", "value": 70, "max": 100}]}) == []
+
+    def test_progress_list_max_zero(self):
+        errs = self._errors({"kind": "progress_list", "items": [{"label": "x", "value": 50, "max": 0}]})
+        assert any("max" in e.lower() and "> 0" in e for e in errs)
+
+    def test_progress_list_max_negative(self):
+        errs = self._errors({"kind": "progress_list", "items": [{"label": "x", "value": 50, "max": -5}]})
+        assert len(errs) > 0
+
+    def test_stat_card_valid(self):
+        assert self._errors({"kind": "stat_card", "title": "CPU", "value": "42%"}) == []
+
+    def test_stat_card_missing_value(self):
+        errs = self._errors({"kind": "stat_card", "title": "CPU"})
+        assert any("value" in e.lower() for e in errs)
+
+    def test_stat_card_missing_title(self):
+        errs = self._errors({"kind": "stat_card", "value": "42%"})
+        assert any("title" in e.lower() for e in errs)
+
+
+# ---------------------------------------------------------------------------
 # Scoring (from view_critic)
 # ---------------------------------------------------------------------------
 

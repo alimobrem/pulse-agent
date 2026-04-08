@@ -404,12 +404,13 @@ def _validate_component(comp: dict, result: QualityResult) -> None:
                     result.errors.append("progress_list item missing 'label'.")
                 if "value" not in item:
                     result.errors.append("progress_list item missing 'value'.")
-                if not item.get("max") or item.get("max", 0) <= 0:
+                max_val = item.get("max", 0)
+                if max_val <= 0:
                     result.errors.append(f"progress_list item '{item.get('label', '?')}' must have 'max' > 0.")
 
     elif kind == "stat_card":
         if not comp.get("value"):
-            result.errors.append(f"Stat card '{title}' must have 'value'.")
+            result.errors.append(f"Stat card '{title or 'untitled'}' must have 'value'.")
 
 
 def _check_generic_title(title: str, kind: str, result: QualityResult) -> None:

@@ -733,10 +733,14 @@ def emit_component(kind: str, spec_json: str) -> str:
 
     spec["kind"] = kind
 
-    from .quality_engine import VALID_KINDS
+    from .quality_engine import VALID_KINDS, evaluate_components
 
     if kind not in VALID_KINDS:
         return f"Invalid kind '{kind}'. Valid: {', '.join(sorted(VALID_KINDS))}"
+
+    result = evaluate_components([spec], min_widgets=1, max_widgets=1)
+    if not result.valid:
+        return f"Invalid {kind} spec: {'; '.join(result.errors)}"
 
     text = f"Emitted {kind} component"
     if spec.get("title"):
