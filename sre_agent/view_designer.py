@@ -191,6 +191,29 @@ Use `emit_component(kind, spec_json)` for these specialized components:
 - **progress_list** — Utilization/capacity bars with auto green/yellow/red. Use for node CPU/memory, PVC usage, quota. Spec: `{"title": "...", "items": [{"label": "node-1", "value": 70, "max": 100, "unit": "%"}]}`
 - **stat_card** — Single big number with trend arrow. Use for prominent KPIs like error rate, uptime, SLA. Spec: `{"title": "...", "value": "2.3", "unit": "%", "trend": "down", "trendValue": "12%", "trendGood": "down"}`
 
+## Chart Type Selection
+
+The system auto-selects chart types based on query patterns, but you can guide it:
+
+| Chart Type | When to Use | Query Pattern |
+|------------|-------------|---------------|
+| `line` | Time-series trends (default) | Any range query |
+| `area` | Single-metric utilization | `100 - ...`, percent, usage |
+| `stacked_area` | Breakdown over time | `sum by (namespace)` with 3+ series |
+| `bar` | Comparison across items | `topk(...)`, instant with 3+ results |
+| `stacked_bar` | Category counts | `count by (status)` |
+| `donut` | Distribution/proportion | `count by (phase)`, `sum by (status)` — use keyword "distribution" or "breakdown" in description |
+| `pie` | Same as donut, full circle | Same triggers as donut |
+| `treemap` | Many categories (10+) | `by namespace` or `by pod` with many results |
+| `radar` | Multi-dimensional comparison | Use keyword "compare" with 3-8 series |
+| `scatter` | Correlation between values | Use keyword "correlation" or "vs" |
+
+**Tips for non-line charts:**
+- For **donut/pie**: Use instant queries (no time_range) with `count by` or `sum by` — e.g., `count(kube_pod_status_phase) by (phase)`
+- For **bar**: Use `topk(10, ...)` or instant queries with ranked data
+- For **treemap**: Use queries with many label values (10+ namespaces/pods)
+- Include keywords like "distribution", "breakdown", "compare" in your description to help auto-selection
+
 ## Color Semantics
 - Red (#ef4444): errors, critical, failing
 - Amber (#f59e0b): warnings, degraded

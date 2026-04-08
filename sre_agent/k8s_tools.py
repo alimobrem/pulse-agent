@@ -2194,23 +2194,59 @@ def get_prometheus_query(query: str, time_range: str = "1h", title: str = "", de
             return "Linear projection based on recent trends — shows estimated future values"
         return f"{'Time series' if tr else 'Snapshot'} with {count} {'series' if tr else 'results'}"
 
-    def _pick_chart_type(q: str, chart_series: list, raw_results: list) -> str:
+    def _pick_chart_type(q: str, chart_series: list, raw_results: list, *, is_instant: bool = False) -> str:
         """Pick the best chart type based on query pattern and data shape."""
         q_lower = q.lower()
         num_series = len(chart_series)
+
+        # Pie/donut: categorical data with few items (distribution/proportion queries)
+        pie_signals = (
+            "distribution",
+            "breakdown",
+            "proportion",
+            "share",
+            "by phase",
+            "by status",
+            "by type",
+            "by reason",
+            "by severity",
+            "by kind",
+            "pie",
+            "donut",
+        )
+        if any(s in q_lower for s in pie_signals) and 2 <= num_series <= 10:
+            return "donut"
+        # Instant queries with "count by" or "sum by" and few results → donut
+        if is_instant and num_series <= 8 and any(p in q_lower for p in ("count by", "sum by", "group by")):
+            return "donut"
+
+        # Treemap: hierarchical breakdown with many categories
+        if num_series > 10 and any(w in q_lower for w in ("by namespace", "by pod", "by container")):
+            return "treemap"
+
+        # Radar: multi-dimensional comparison (e.g., comparing metrics across nodes)
+        radar_signals = ("compare", "radar", "spider", "score", "rating")
+        if any(s in q_lower for s in radar_signals) and 3 <= num_series <= 8:
+            return "radar"
+
+        # Scatter: correlation between two values
+        if any(s in q_lower for s in ("scatter", "correlation", "vs ", " vs.")):
+            return "scatter"
 
         # Stacked area: "sum by" queries showing namespace/pod breakdown
         if "sum by" in q_lower and num_series >= 3:
             if "cpu" in q_lower or "memory" in q_lower or "network" in q_lower:
                 return "stacked_area"
 
-        # Bar chart: topk queries, comparison across items
+        # Bar chart: topk queries, comparison across items, or few data points
         if "topk" in q_lower or num_series >= 5:
-            # Check if values are relatively flat (comparison, not trend)
             if chart_series:
                 data = chart_series[0].get("data", [])
                 if len(data) <= 5:
                     return "bar"
+        # Instant queries with ranked data → bar
+        if is_instant and num_series >= 3:
+            return "bar"
 
         # Area chart: single series utilization/percentage metrics
         if num_series == 1:
@@ -2296,6 +2332,49 @@ def get_prometheus_query(query: str, time_range: str = "1h", title: str = "", de
             lines.append(f"... and {len(results) - 50} more results (truncated)")
 
         text = "\n".join(lines)
+
+        # Try chart for instant queries with categorical data (pie/donut/bar)
+        chart_type = _pick_chart_type(query, [], results, is_instant=True) if 2 <= len(results) <= 20 else None
+        if chart_type and chart_type in ("donut", "pie", "bar", "treemap", "radar"):
+            import math
+
+            chart_series = []
+            for i, r in enumerate(results[:10]):
+                metric = r.get("metric", {})
+                label_parts = [f"{v}" for k, v in metric.items() if k != "__name__"]
+                label = ", ".join(label_parts) or metric.get("__name__", f"item-{i}")
+                _ts, val = r.get("value", [0, "0"])
+                try:
+                    fval = float(val)
+                    if math.isnan(fval):
+                        continue
+                except (ValueError, TypeError):
+                    continue
+                chart_series.append(
+                    {
+                        "label": label[:60],
+                        "data": [[0, fval]],
+                        "color": _CHART_COLORS[i % len(_CHART_COLORS)],
+                    }
+                )
+
+            if chart_series:
+                component = {
+                    "kind": "chart",
+                    "chartType": chart_type,
+                    "title": title or _title_from_query(query),
+                    "description": description or _desc_from_query(query, "", len(chart_series)),
+                    "series": chart_series,
+                    "query": query,
+                    "height": 300,
+                }
+                try:
+                    from .promql_recipes import record_query_result
+
+                    record_query_result(query, success=True, series_count=len(chart_series))
+                except Exception:
+                    pass
+                return (text, component)
 
         # Build columns from label keys
         if label_keys:
