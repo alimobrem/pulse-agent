@@ -1837,6 +1837,66 @@ async def eval_status(
         return payload
 
 
+@app.get("/eval/score")
+async def eval_tool_selection_score(
+    authorization: str | None = Header(None),
+    token: str | None = Query(None),
+):
+    """Score tool selection accuracy for static + learned eval prompts."""
+    _verify_rest_token(authorization, token)
+
+    from .harness import score_eval_prompts
+    from .tool_usage import get_learned_eval_prompts
+
+    # Import static prompts
+    try:
+        from tests.eval_prompts import EVAL_PROMPTS
+    except ImportError:
+        EVAL_PROMPTS = []
+
+    # Score static
+    static_result = (
+        score_eval_prompts(EVAL_PROMPTS)
+        if EVAL_PROMPTS
+        else {"total": 0, "passed": 0, "failed": 0, "accuracy": 0, "failures": []}
+    )
+
+    # Score learned
+    learned = get_learned_eval_prompts(days=30)
+    clean_learned = [p for p in learned if not p[0].startswith("[{")]
+    learned_result = (
+        score_eval_prompts(clean_learned)
+        if clean_learned
+        else {"total": 0, "passed": 0, "failed": 0, "accuracy": 0, "failures": []}
+    )
+
+    # Combined
+    combined_total = static_result["total"] + learned_result["total"]
+    combined_passed = static_result["passed"] + learned_result["passed"]
+
+    return {
+        "static": {
+            "accuracy": static_result["accuracy"],
+            "passed": static_result["passed"],
+            "total": static_result["total"],
+        },
+        "learned": {
+            "accuracy": learned_result["accuracy"],
+            "passed": learned_result["passed"],
+            "total": learned_result["total"],
+        },
+        "combined": {
+            "accuracy": combined_passed / combined_total if combined_total else 0,
+            "passed": combined_passed,
+            "total": combined_total,
+        },
+        "failures": [
+            {"query": f["query"][:80], "expected": f["expected"], "mode": f["mode"]}
+            for f in static_result["failures"][:10]
+        ],
+    }
+
+
 # ---------------------------------------------------------------------------
 # View Management (user-scoped custom dashboards)
 # ---------------------------------------------------------------------------

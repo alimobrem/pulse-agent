@@ -113,6 +113,12 @@ Pulse Agent connects directly to your cluster's Kubernetes API and uses Claude O
 - **CSV/JSON export** — Download filtered table data with date-stamped filenames
 - **Column sort, toggle, per-column filters** — Full table controls via settings panel
 
+### Eval Scoring & Self-Improving Evals
+- **Tool Selection Accuracy** — 86 static eval prompts scored against the harness: does `select_tools()` offer the right tools for each query? Current baseline: **79.1%** (68/86)
+- **Learned Eval Prompts** — Auto-generated from real user interactions via implicit positive feedback (user didn't retry = good response). Merged with static prompts at test time
+- **Scoring API** — `GET /eval/score` returns accuracy breakdown (static, learned, combined) with failure details
+- **Regression Gate** — CI test fails if accuracy drops below 75%
+
 ### Tool Analytics
 - **Full Audit Log** — Every tool invocation recorded to PostgreSQL (`tool_usage` table): tool name, category, status, duration, input summary, error details, session/turn tracking
 - **Turn Tracking** — Per-turn data in `tool_turns`: query summary, tools offered vs called, user feedback, token usage (input/output/cache_read/cache_creation)
