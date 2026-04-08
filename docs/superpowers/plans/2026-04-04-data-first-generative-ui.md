@@ -662,6 +662,7 @@ git commit -m "feat: add discover_metrics tool for data-first dashboard generati
 
 Create `tests/test_verify_query.py`:
 
+{% raw %}
 ```python
 """Tests for the verify_query tool."""
 
@@ -751,6 +752,7 @@ class TestVerifyQuery:
         result = verify_query.call({"query": ""})
         assert "Error" in result or "empty" in result.lower()
 ```
+{% endraw %}
 
 - [ ] **Step 2: Run tests to verify they fail**
 
