@@ -2260,52 +2260,61 @@ def get_prometheus_query(query: str, time_range: str = "1h", title: str = "", de
         # Default: line chart for time-series trends
         return "line"
 
+    def _build_chart_component(chart_type: str, chart_series: list, tr: str = "") -> dict:
+        """Build a chart component dict. Shared by range and instant query paths."""
+        comp: dict = {
+            "kind": "chart",
+            "chartType": chart_type,
+            "title": title or _title_from_query(query),
+            "description": description or _desc_from_query(query, tr, len(chart_series)),
+            "series": chart_series,
+            "height": 300,
+            "query": query,
+        }
+        if tr:
+            comp["timeRange"] = tr
+        return comp
+
+    def _record_success(series_count: int) -> None:
+        """Fire-and-forget query result recording."""
+        try:
+            from .promql_recipes import record_query_result
+
+            record_query_result(query, success=True, series_count=series_count)
+        except Exception:
+            pass
+
+    def _extract_label(metric: dict, index: int) -> str:
+        """Extract a display label from a Prometheus metric dict."""
+        label_parts = [f"{v}" for k, v in metric.items() if k != "__name__"]
+        return (", ".join(label_parts) or metric.get("__name__", f"series-{index}"))[:60]
+
     lines = []
     if result_type == "matrix":
         # Range query → build a ChartSpec
+        import math
+
         series = []
         for i, r in enumerate(results[:10]):
             metric = r.get("metric", {})
-            label_parts = [f"{v}" for k, v in metric.items() if k != "__name__"]
-            label = ", ".join(label_parts) or metric.get("__name__", f"series-{i}")
+            label = _extract_label(metric, i)
             values = r.get("values", [])
-            import math
-
             data = [[int(float(ts) * 1000), float(val)] for ts, val in values if not math.isnan(float(val))]
             latest = values[-1][1] if values else "?"
             lines.append(f"{label} = {latest} (latest of {len(values)} samples)")
-            series.append({"label": label[:60], "data": data, "color": _CHART_COLORS[i % len(_CHART_COLORS)]})
+            series.append({"label": label, "data": data, "color": _CHART_COLORS[i % len(_CHART_COLORS)]})
 
         if len(results) > 10:
             lines.append(f"... and {len(results) - 10} more series (truncated to top 10 for chart)")
 
         text = "\n".join(lines)
-
-        # Pick chart type based on data shape and query pattern
         chart_type = _pick_chart_type(query, series, results)
-
-        component = {
-            "kind": "chart",
-            "chartType": chart_type,
-            "title": title or _title_from_query(query),
-            "description": description or _desc_from_query(query, time_range, len(series)),
-            "series": series,
-            "yAxisLabel": "",
-            "height": 300,
-            "query": query,
-            "timeRange": time_range,
-        }
-        try:
-            from .promql_recipes import record_query_result
-
-            record_query_result(query, success=True, series_count=len(series))
-        except Exception:
-            pass
+        component = _build_chart_component(chart_type, series, tr=time_range)
+        _record_success(len(series))
         return (text, component)
 
     else:
-        # Instant query (vector) → build a DataTableSpec
-        # Detect label keys from first result to build dynamic columns
+        # Instant query (vector) → build a DataTableSpec or chart
         rows = []
         label_keys = []
         if results:
@@ -2341,8 +2350,7 @@ def get_prometheus_query(query: str, time_range: str = "1h", title: str = "", de
             chart_series = []
             for i, r in enumerate(results[:10]):
                 metric = r.get("metric", {})
-                label_parts = [f"{v}" for k, v in metric.items() if k != "__name__"]
-                label = ", ".join(label_parts) or metric.get("__name__", f"item-{i}")
+                label = _extract_label(metric, i)
                 _ts, val = r.get("value", [0, "0"])
                 try:
                     fval = float(val)
@@ -2351,29 +2359,12 @@ def get_prometheus_query(query: str, time_range: str = "1h", title: str = "", de
                 except (ValueError, TypeError):
                     continue
                 chart_series.append(
-                    {
-                        "label": label[:60],
-                        "data": [[0, fval]],
-                        "color": _CHART_COLORS[i % len(_CHART_COLORS)],
-                    }
+                    {"label": label, "data": [[0, fval]], "color": _CHART_COLORS[i % len(_CHART_COLORS)]}
                 )
 
             if chart_series:
-                component = {
-                    "kind": "chart",
-                    "chartType": chart_type,
-                    "title": title or _title_from_query(query),
-                    "description": description or _desc_from_query(query, "", len(chart_series)),
-                    "series": chart_series,
-                    "query": query,
-                    "height": 300,
-                }
-                try:
-                    from .promql_recipes import record_query_result
-
-                    record_query_result(query, success=True, series_count=len(chart_series))
-                except Exception:
-                    pass
+                component = _build_chart_component(chart_type, chart_series)
+                _record_success(len(chart_series))
                 return (text, component)
 
         # Build columns from label keys
