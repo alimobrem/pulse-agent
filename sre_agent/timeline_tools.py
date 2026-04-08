@@ -271,21 +271,40 @@ def correlate_incident(
         "change": "normal",
     }
 
-    lanes_by_source: dict[str, list[dict]] = defaultdict(list)
+    import re
+
+    def _extract_resource(entry: dict) -> str:
+        """Extract resource name from timeline entry summary."""
+        summary = entry.get("summary", "")
+        # Pattern: [Type] Kind/Name: ... or Deployment ns/name: ...
+        m = re.search(r"(?:^|\] )(\w+/[\w.-]+)", summary)
+        if m:
+            return m.group(1)
+        # Fallback: use source type
+        return entry["source"].replace("-", " ").title()
+
+    lanes_by_resource: dict[str, list[dict]] = defaultdict(list)
     for entry in timeline:
-        lanes_by_source[entry["source"]].append(entry)
+        resource = _extract_resource(entry)
+        lanes_by_resource[resource].append(entry)
 
     component = {
         "kind": "timeline",
         "title": f"Incident Timeline — {namespace} (last {minutes_back}m)",
-        "description": f"{len(timeline)} events correlated across {len(lanes_by_source)} sources",
+        "description": f"{len(timeline)} events correlated across {len(lanes_by_resource)} resources",
         "lanes": [],
     }
 
-    for source, entries in lanes_by_source.items():
+    for resource, entries in lanes_by_resource.items():
+        # Determine category from the most common source in this resource's events
+        source_counts: dict[str, int] = defaultdict(int)
+        for e in entries:
+            source_counts[e["source"]] += 1
+        dominant_source = max(source_counts, key=source_counts.get)  # type: ignore[arg-type]
+
         lane = {
-            "label": source.replace("-", " ").title(),
-            "category": category_map.get(source, "event"),
+            "label": resource,
+            "category": category_map.get(dominant_source, "event"),
             "events": [
                 {
                     "timestamp": int(datetime.fromisoformat(e["time"].replace("Z", "+00:00")).timestamp() * 1000),
