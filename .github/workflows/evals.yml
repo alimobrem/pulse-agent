@@ -5,6 +5,7 @@ on:
     branches: [main]
   push:
     branches: [main]
+    tags: ["v*"]
   schedule:
     - cron: "0 6 * * *"
   workflow_dispatch:
@@ -136,11 +137,12 @@ jobs:
           python -m sre_agent.evals.replay_cli --all --dry-run --format json > artifacts/replay.json || true
           python -m sre_agent.evals.replay_cli --all --dry-run --format text > artifacts/replay.txt || true
 
-      - name: Run live replay with LLM judge (daily cron, manual dispatch, or prompt changes)
+      - name: Run live replay with LLM judge (releases, daily cron, prompt changes, manual)
         if: >-
           (github.event_name == 'schedule')
           || (github.event_name == 'workflow_dispatch' && inputs.run_live_judge)
           || (steps.prompt_changes.outputs.has_changes == 'true')
+          || startsWith(github.ref, 'refs/tags/v')
         env:
           ANTHROPIC_VERTEX_PROJECT_ID: ${{ secrets.VERTEX_PROJECT_ID }}
           CLOUD_ML_REGION: ${{ secrets.VERTEX_REGION }}
