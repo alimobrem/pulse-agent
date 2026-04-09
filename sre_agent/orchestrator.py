@@ -49,6 +49,10 @@ SRE_KEYWORDS = [
 ]
 
 SECURITY_KEYWORDS = [
+    "security",
+    "security scan",
+    "security audit",
+    "security check",
     "rbac",
     "role",
     "permission",
@@ -61,6 +65,7 @@ SECURITY_KEYWORDS = [
     "audit",
     "compliance",
     "vulnerability",
+    "vulnerabilities",
     "tls",
     "certificate",
     "access control",
