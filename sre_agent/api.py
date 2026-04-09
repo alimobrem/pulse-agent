@@ -1566,6 +1566,50 @@ async def rest_briefing(
     return get_briefing(hours)
 
 
+@app.get("/monitor/scanners")
+async def rest_list_scanners(
+    authorization: str | None = Header(None),
+    token: str | None = Query(None),
+):
+    """List all scanners with metadata and current configuration."""
+    _verify_rest_token(authorization, token)
+    from .monitor import SCANNER_REGISTRY
+
+    return {"scanners": [{"id": k, **v} for k, v in SCANNER_REGISTRY.items()]}
+
+
+@app.get("/monitor/history")
+async def rest_scan_history(
+    authorization: str | None = Header(None),
+    token: str | None = Query(None),
+    limit: int = Query(20, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+):
+    """Get paginated scan run history."""
+    _verify_rest_token(authorization, token)
+    from . import db
+
+    database = db.get_database()
+    rows = database.fetchall(
+        "SELECT id, timestamp, duration_ms, total_findings, scanner_results "
+        "FROM scan_runs ORDER BY timestamp DESC LIMIT ? OFFSET ?",
+        (limit, offset),
+    )
+    total_row = database.fetchone("SELECT COUNT(*) as cnt FROM scan_runs")
+    total = total_row["cnt"] if total_row else 0
+
+    import json
+
+    results = []
+    for row in rows:
+        entry = dict(row)
+        if isinstance(entry.get("scanner_results"), str):
+            entry["scanner_results"] = json.loads(entry["scanner_results"])
+        results.append(entry)
+
+    return {"runs": results, "total": total, "limit": limit, "offset": offset}
+
+
 @app.get("/predictions")
 async def rest_predictions(
     authorization: str | None = Header(None),
