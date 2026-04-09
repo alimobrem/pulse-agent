@@ -8,6 +8,11 @@ on:
   schedule:
     - cron: "0 6 * * *"
   workflow_dispatch:
+    inputs:
+      run_live_judge:
+        description: "Run live replay with LLM judge scoring (costs API calls)"
+        type: boolean
+        default: false
 
 jobs:
   evals:
@@ -131,6 +136,29 @@ jobs:
           python -m sre_agent.evals.replay_cli --all --dry-run --format json > artifacts/replay.json || true
           python -m sre_agent.evals.replay_cli --all --dry-run --format text > artifacts/replay.txt || true
 
+      - name: Run live replay with LLM judge (daily cron, manual dispatch, or prompt changes)
+        if: >-
+          (github.event_name == 'schedule')
+          || (github.event_name == 'workflow_dispatch' && inputs.run_live_judge)
+          || (steps.prompt_changes.outputs.has_changes == 'true')
+        env:
+          ANTHROPIC_VERTEX_PROJECT_ID: ${{ secrets.VERTEX_PROJECT_ID }}
+          CLOUD_ML_REGION: ${{ secrets.VERTEX_REGION }}
+          GOOGLE_APPLICATION_CREDENTIALS: ${{ secrets.GCP_SA_KEY_PATH }}
+        run: |
+          mkdir -p artifacts
+          if [ -n "$ANTHROPIC_VERTEX_PROJECT_ID" ]; then
+            python -m sre_agent.evals.replay_cli --all --judge --model claude-sonnet-4-6 --format json > artifacts/live_judge.json 2>/dev/null || true
+            python -m sre_agent.evals.replay_cli --all --judge --model claude-sonnet-4-6 --format text > artifacts/live_judge.txt 2>/dev/null || true
+            echo "### Live Judge Results" >> "$GITHUB_STEP_SUMMARY"
+            if [ -s artifacts/live_judge.txt ]; then
+              tail -5 artifacts/live_judge.txt >> "$GITHUB_STEP_SUMMARY"
+            fi
+          else
+            echo "Skipping live judge — no Vertex AI credentials configured"
+            echo "Set VERTEX_PROJECT_ID and VERTEX_REGION secrets to enable"
+          fi
+
       - name: Run safety and integration evals (non-gating)
         run: |
           python -m sre_agent.evals.cli --suite safety --format json --output artifacts/safety.json
@@ -173,7 +201,9 @@ jobs:
           release = read_json(artifacts / "release.json")
           safety = read_json(artifacts / "safety.json")
           integration = read_json(artifacts / "integration.json")
+          view_designer = read_json(artifacts / "view_designer.json")
           outcomes = read_json(artifacts / "outcomes.json")
+          live_judge = read_json(artifacts / "live_judge.json")
 
           if release:
               lines.append(
@@ -189,6 +219,19 @@ jobs:
               lines.append(
                   f"- integration suite: {'PASS' if integration.get('gate_passed') else 'FAIL'} "
                   f"(scenarios={integration.get('scenario_count')})"
+              )
+          if view_designer:
+              lines.append(
+                  f"- view_designer gate: {'PASS' if view_designer.get('gate_passed') else 'FAIL'} "
+                  f"(scenarios={view_designer.get('scenario_count')}, avg={view_designer.get('average_overall')})"
+              )
+          if live_judge and isinstance(live_judge, list):
+              passed = sum(1 for r in live_judge if r.get("score", {}).get("passed"))
+              judges = [r["judge"]["total"] for r in live_judge if r.get("judge") and isinstance(r["judge"].get("total"), (int, float))]
+              judge_avg = sum(judges) / len(judges) if judges else 0
+              lines.append(
+                  f"- live judge: {passed}/{len(live_judge)} replay passed, "
+                  f"judge avg={judge_avg:.1f}/100 ({len(judges)} judged)"
               )
           if outcomes:
               policy = outcomes.get("policy", {})
