@@ -155,7 +155,12 @@ class MemoryManager:
         self.store.record_metric("tool_count", float(eval_result.tool_count))
 
         runbook_id = None
-        if outcome == "resolved" and len(self._tool_calls) >= 2:
+        # Create runbook from explicit thumbs-up OR high-scoring interactions with 2+ tools
+        # Score is 0-1 scale (0.7 = 7/10 in the UI)
+        should_learn = (outcome == "resolved" and len(self._tool_calls) >= 2) or (
+            eval_result.score >= 0.7 and len(self._tool_calls) >= 2 and outcome != "unresolved"
+        )
+        if should_learn:
             if not is_duplicate_runbook(self.store, self._tool_calls):
                 runbook_id = extract_runbook(self.store, incident_id)
 
