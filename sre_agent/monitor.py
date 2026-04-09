@@ -1623,6 +1623,7 @@ class MonitorSession:
         # Noise learning: track findings that appear then quickly disappear
         self._transient_counts: dict[str, int] = {}  # finding_key -> count of transient appearances
         self._noise_threshold = float(os.environ.get("PULSE_AGENT_NOISE_THRESHOLD", "0.7"))
+        self._session_id = f"mon-{uuid.uuid4().hex[:12]}"  # Unique session ID for DB tracking
 
     def resolve_action_response(self, action_id: str, approved: bool) -> bool:
         """Resolve an outstanding action approval request."""
@@ -2151,6 +2152,7 @@ class MonitorSession:
         self._recent_fixes = {k: v for k, v in self._recent_fixes.items() if v > eviction_cutoff}
         self._recent_investigations = {k: v for k, v in self._recent_investigations.items() if v > eviction_cutoff}
         all_findings: list[dict] = []
+        scanner_results: list[dict] = []
 
         # Fetch pods once and share across pod-based scanners (H1)
         _POD_SCANNERS = {"crashloop", "oom", "image_pull"}
@@ -2160,15 +2162,83 @@ class MonitorSession:
         except Exception as e:
             logger.error("Failed to fetch shared pod list: %s", e)
 
+        # Run all standard scanners with timing
         for category, scanner in _get_all_scanners():
+            scanner_start = time.monotonic()
             try:
                 if category in _POD_SCANNERS and shared_pods is not None:
                     findings = await asyncio.to_thread(scanner, shared_pods)
                 else:
                     findings = await asyncio.to_thread(scanner)
+                elapsed_ms = int((time.monotonic() - scanner_start) * 1000)
+                registry = SCANNER_REGISTRY.get(category, {})
+                scanner_results.append(
+                    {
+                        "name": category,
+                        "displayName": registry.get("displayName", category),
+                        "description": registry.get("description", ""),
+                        "duration_ms": elapsed_ms,
+                        "findings_count": len(findings) if isinstance(findings, list) else 0,
+                        "checks": registry.get("checks", []),
+                        "status": "warning" if findings else "clean",
+                    }
+                )
                 all_findings.extend(findings)
             except Exception as e:
+                elapsed_ms = int((time.monotonic() - scanner_start) * 1000)
                 logger.error("Scanner %s failed: %s", category, e)
+                scanner_results.append(
+                    {
+                        "name": category,
+                        "displayName": SCANNER_REGISTRY.get(category, {}).get("displayName", category),
+                        "description": SCANNER_REGISTRY.get(category, {}).get("description", ""),
+                        "duration_ms": elapsed_ms,
+                        "findings_count": 0,
+                        "status": "error",
+                        "error": str(e)[:100],
+                        "checks": SCANNER_REGISTRY.get(category, {}).get("checks", []),
+                    }
+                )
+
+        # Run security posture check every 3rd scan
+        if self._scan_counter % 3 == 0:
+            from .security_tools import get_security_summary
+
+            scanner_start = time.monotonic()
+            try:
+                sec_result = await asyncio.to_thread(get_security_summary)
+                elapsed_ms = int((time.monotonic() - scanner_start) * 1000)
+                # Parse security summary to extract findings count
+                findings_count = 0
+                if "CRITICAL:" in sec_result or "WARNING:" in sec_result:
+                    findings_count = sec_result.count("CRITICAL:") + sec_result.count("WARNING:")
+                registry = SCANNER_REGISTRY.get("security", {})
+                scanner_results.append(
+                    {
+                        "name": "security",
+                        "displayName": registry.get("displayName", "Security Posture"),
+                        "description": registry.get("description", ""),
+                        "duration_ms": elapsed_ms,
+                        "findings_count": findings_count,
+                        "checks": registry.get("checks", []),
+                        "status": "warning" if findings_count > 0 else "clean",
+                    }
+                )
+            except Exception as e:
+                elapsed_ms = int((time.monotonic() - scanner_start) * 1000)
+                logger.error("Security scanner failed: %s", e)
+                scanner_results.append(
+                    {
+                        "name": "security",
+                        "displayName": "Security Posture",
+                        "description": "Comprehensive security check",
+                        "duration_ms": elapsed_ms,
+                        "findings_count": 0,
+                        "status": "error",
+                        "error": str(e)[:100],
+                        "checks": SCANNER_REGISTRY.get("security", {}).get("checks", []),
+                    }
+                )
 
         # Deduplicate: only send new/changed findings
         current_keys = set()
@@ -2263,6 +2333,7 @@ class MonitorSession:
 
         # Push monitor status
         scan_duration = time.time() - scan_start
+        scan_duration_ms = int(scan_duration * 1000)
         await self.send(
             {
                 "type": "monitor_status",
@@ -2270,6 +2341,31 @@ class MonitorSession:
                 "lastScan": _ts(),
                 "findingsCount": len(self._last_findings),
                 "nextScan": _ts() + self.scan_interval * 1000,
+            }
+        )
+
+        # Save scan run to database
+        try:
+            from . import db_schema
+
+            db = get_database()
+            db.executescript(db_schema.SCAN_RUNS_SCHEMA)  # Ensure table exists
+            db.execute(
+                "INSERT INTO scan_runs (duration_ms, total_findings, scanner_results, session_id) VALUES (?, ?, ?, ?)",
+                (scan_duration_ms, len(all_findings), json.dumps(scanner_results), self._session_id),
+            )
+            db.commit()
+        except Exception as e:
+            logger.debug("Failed to save scan run: %s", e, exc_info=True)
+
+        # Emit scan report WebSocket message
+        await self.send(
+            {
+                "type": "scan_report",
+                "scanId": self._scan_counter,
+                "duration_ms": scan_duration_ms,
+                "total_findings": len(all_findings),
+                "scanners": scanner_results,
             }
         )
 

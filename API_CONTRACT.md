@@ -611,6 +611,68 @@ Sent after each scan cycle. Contains the IDs of all currently active findings. T
 }
 ```
 
+#### `scan_report` — Per-scanner timing and results
+
+Emitted after each scan cycle completes. Includes per-scanner timing, findings count, and status.
+
+```json
+{
+  "type": "scan_report",
+  "scanId": 42,
+  "duration_ms": 1234,
+  "total_findings": 5,
+  "scanners": [
+    {
+      "name": "crashloop",
+      "displayName": "Crashlooping Pods",
+      "description": "Detects pods with restart count above threshold",
+      "duration_ms": 123,
+      "findings_count": 2,
+      "checks": ["restart count > threshold", "container state = CrashLoopBackOff"],
+      "status": "warning"
+    },
+    {
+      "name": "pending",
+      "displayName": "Pending Pods",
+      "description": "Finds pods stuck in Pending state for >5 minutes",
+      "duration_ms": 89,
+      "findings_count": 0,
+      "checks": ["pod phase = Pending", "age > 5 minutes"],
+      "status": "clean"
+    },
+    {
+      "name": "security",
+      "displayName": "Security Posture",
+      "description": "Comprehensive security check: pod security, resource limits, network policies, RBAC, service accounts",
+      "duration_ms": 567,
+      "findings_count": 3,
+      "checks": ["privileged containers", "missing resource limits", "missing health probes", "default service account", "untrusted registries", "missing network policies", "cluster-admin bindings", "secret rotation > 90 days"],
+      "status": "warning"
+    }
+  ]
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `scanId` | `number` | Sequential scan counter (increments each scan) |
+| `duration_ms` | `number` | Total scan duration in milliseconds |
+| `total_findings` | `number` | Total findings across all scanners |
+| `scanners` | `array` | Per-scanner results |
+| `scanners[].name` | `string` | Scanner identifier (matches SCANNER_REGISTRY key) |
+| `scanners[].displayName` | `string` | Human-readable scanner name |
+| `scanners[].description` | `string` | Scanner description |
+| `scanners[].duration_ms` | `number` | Scanner execution time in milliseconds |
+| `scanners[].findings_count` | `number` | Number of findings from this scanner |
+| `scanners[].checks` | `array` | List of checks performed by this scanner |
+| `scanners[].status` | `string` | Scanner status: `"clean"`, `"warning"`, or `"error"` |
+| `scanners[].error` | `string?` | Error message if scanner failed (status = "error") |
+
+**Notes:**
+- The security scanner runs every 3rd scan (scanId % 3 == 0) to reduce overhead
+- Scan reports are persisted to the `scan_runs` table with session_id for historical analysis
+- Scanner timing can be used to identify slow scanners and optimize scan cycles
+
 #### `fix_history` — Response to `get_fix_history`
 
 ```json
