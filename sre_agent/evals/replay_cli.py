@@ -48,8 +48,8 @@ def _make_parser() -> argparse.ArgumentParser:
     )
     p.add_argument(
         "--model",
-        default="claude-3-5-haiku@20241022",
-        help="Model for the agent (default: claude-3-5-haiku@20241022).",
+        default="claude-sonnet-4-6",
+        help="Model for the agent (default: claude-sonnet-4-6).",
     )
     p.add_argument(
         "--dry-run",
@@ -115,6 +115,19 @@ def _run_fixture(
     import os
 
     os.environ["PULSE_AGENT_HARNESS"] = "0"  # Disable harness for replay
+    os.environ["PULSE_AGENT_MODEL"] = model  # Force model (override cached settings)
+
+    # Reset settings singleton so model change takes effect
+    import sre_agent.config as _cfg
+
+    _cfg._settings = None
+
+    # Detect if model supports extended thinking
+    thinking = {"type": "adaptive"}
+    if "haiku" in model.lower() or "claude-3-opus" in model.lower() or "claude-3-sonnet" in model.lower():
+        thinking = {"type": "disabled"}
+        # Haiku has lower max_tokens limit
+        os.environ["PULSE_AGENT_MAX_TOKENS"] = "8192"
 
     if dry_run:
         # Use mock client — no API key needed
@@ -123,9 +136,8 @@ def _run_fixture(
     else:
         from ..agent import create_client
 
-        os.environ.setdefault("PULSE_AGENT_MODEL", model)
         client = create_client()
-    result = harness.run(client=client, prompt=fixture["prompt"])
+    result = harness.run(client=client, prompt=fixture["prompt"], thinking=thinking)
     score = score_replay(result, fixture["expected"])
 
     output = {

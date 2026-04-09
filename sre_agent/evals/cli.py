@@ -201,6 +201,27 @@ def main() -> None:
         comparison_output, comparison_passed = _run_comparison(json_str, args.compare, args.format)
         print(f"\n{comparison_output}")
 
+    # Record to DB (fire-and-forget)
+    try:
+        from .history import record_eval_run
+
+        record_eval_run(
+            suite_name=args.suite,
+            source="cli",
+            scenario_count=result.scenario_count,
+            passed_count=result.passed_count,
+            gate_passed=result.gate_passed,
+            average_overall=result.average_overall,
+            dimensions=result.dimension_averages,
+            blocker_counts=result.blocker_counts,
+            scenarios=[
+                {"scenario_id": s.scenario_id, "overall": s.overall, "passed_gate": s.passed_gate}
+                for s in result.scenarios
+            ],
+        )
+    except Exception:
+        pass
+
     # Exit codes
     if args.fail_on_gate and not result.gate_passed:
         sys.exit(1)

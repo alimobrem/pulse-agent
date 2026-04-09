@@ -66,6 +66,7 @@ class ReplayHarness:
         tool_defs: list | None = None,
         tool_map: dict | None = None,
         write_tools: set[str] | None = None,
+        thinking: dict | None = None,
     ) -> dict:
         """Execute the agent loop and return results.
 
@@ -102,15 +103,18 @@ class ReplayHarness:
             self.tool_calls.append({"name": tool_name, "timestamp": time.time()})
 
         start = time.monotonic()
-        response = run_agent_streaming(
-            client=client,
-            messages=[{"role": "user", "content": prompt}],
-            system_prompt=system_prompt,
-            tool_defs=tool_defs,
-            tool_map=effective_map,
-            write_tools=write_tools or set(),
-            on_tool_use=_on_tool_use,
-        )
+        kwargs: dict[str, Any] = {
+            "client": client,
+            "messages": [{"role": "user", "content": prompt}],
+            "system_prompt": system_prompt,
+            "tool_defs": tool_defs,
+            "tool_map": effective_map,
+            "write_tools": write_tools or set(),
+            "on_tool_use": _on_tool_use,
+        }
+        if thinking is not None:
+            kwargs["thinking"] = thinking
+        response = run_agent_streaming(**kwargs)
         elapsed_ms = (time.monotonic() - start) * 1000
 
         return {

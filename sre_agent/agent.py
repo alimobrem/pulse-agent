@@ -316,6 +316,7 @@ def run_agent_streaming(
     on_tool_result=None,
     on_usage=None,
     mode: str = "sre",
+    thinking: dict | None = None,
 ) -> str:
     """Run an agent turn with streaming, handling the tool loop manually.
 
@@ -389,11 +390,12 @@ def run_agent_streaming(
         stream_ctx = None
         for attempt in range(max_retries + 1):
             try:
+                effective_thinking = thinking if thinking is not None else {"type": "adaptive"}
                 stream_ctx = client.messages.stream(
                     model=model,
                     max_tokens=max_tokens,
                     system=effective_system,
-                    thinking={"type": "adaptive"},
+                    thinking=effective_thinking,
                     tools=tool_defs,
                     messages=messages,
                 )
