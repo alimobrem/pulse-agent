@@ -1,0 +1,87 @@
+- generic [ref=e3]:
+  - generic [ref=e4]:
+    - generic [ref=e5]:
+      - button "OpenShift Pulse" [ref=e6] [cursor=pointer]:
+        - img [ref=e7]
+        - generic [ref=e11]: OpenShift Pulse
+      - button "Search resources, views... ⌘K" [ref=e13] [cursor=pointer]:
+        - img [ref=e14]
+        - generic [ref=e17]: Search resources, views...
+        - generic [ref=e18]: ⌘K
+      - button "Create" [ref=e19] [cursor=pointer]:
+        - img [ref=e20]
+        - generic [ref=e21]: Create
+    - generic [ref=e22]:
+      - generic [ref=e24]:
+        - img [ref=e25]
+        - generic [ref=e29]: cluster
+      - button "All" [ref=e31] [cursor=pointer]:
+        - img [ref=e32]
+        - generic [ref=e36]: All
+        - img [ref=e37]
+      - button "No issues" [ref=e39] [cursor=pointer]:
+        - img [ref=e40]
+      - button "User menu" [ref=e44] [cursor=pointer]:
+        - img [ref=e46]
+  - tablist "Open tabs" [ref=e49]:
+    - tab "Welcome Close tab" [ref=e50] [cursor=pointer]:
+      - img [ref=e51]
+      - generic [ref=e53]: Welcome
+      - button "Unpin tab" [ref=e54]:
+        - img [ref=e55]
+      - button "Close tab" [ref=e59]:
+        - img [ref=e60]
+    - tab "Pulse Close tab" [ref=e63] [cursor=pointer]:
+      - img [ref=e64]
+      - generic [ref=e66]: Pulse
+      - button "Unpin tab" [ref=e67]:
+        - img [ref=e68]
+      - button "Close tab" [ref=e72]:
+        - img [ref=e73]
+    - tab "Admin Close tab" [ref=e76] [cursor=pointer]:
+      - img [ref=e77]
+      - generic [ref=e79]: Admin
+      - button "Unpin tab" [ref=e80]:
+        - img [ref=e81]
+      - button "Close tab" [ref=e85]:
+        - img [ref=e86]
+    - tab "Incidents Close tab" [ref=e89] [cursor=pointer]:
+      - img [ref=e90]
+      - generic [ref=e92]: Incidents
+      - button "Pin tab" [ref=e93]:
+        - img [ref=e94]
+      - button "Close tab" [ref=e96]:
+        - img [ref=e97]
+    - tab "Workloads Close tab" [ref=e100] [cursor=pointer]:
+      - img [ref=e101]
+      - generic [ref=e105]: Workloads
+      - button "Pin tab" [ref=e106]:
+        - img [ref=e107]
+      - button "Close tab" [ref=e109]:
+        - img [ref=e110]
+    - tab "Compute Close tab" [selected] [ref=e113] [cursor=pointer]:
+      - img [ref=e114]
+      - generic [ref=e117]: Compute
+      - button "Pin tab" [ref=e118]:
+        - img [ref=e119]
+      - button "Close tab" [ref=e121]:
+        - img [ref=e122]
+    - button "New tab (⌘K)" [ref=e125] [cursor=pointer]:
+      - img [ref=e126]
+    - button "Close all" [ref=e127] [cursor=pointer]:
+      - img [ref=e128]
+      - text: Close all
+  - main [ref=e132]
+  - generic [ref=e135]:
+    - generic [ref=e136]:
+      - generic [ref=e139]: Connected
+      - generic [ref=e140]: synced 0s ago ago
+      - generic [ref=e141]: · Compute
+    - generic [ref=e142]:
+      - button "Agent" [ref=e143] [cursor=pointer]:
+        - img [ref=e144]
+        - text: Agent
+      - generic [ref=e147]: 6 tabs
+      - generic [ref=e148]: all namespaces
+      - generic [ref=e149]: ⌘K search · ⌘B browse
+  - status "Notifications"

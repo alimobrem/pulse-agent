@@ -1,0 +1,111 @@
+- generic [ref=e3]:
+  - generic [ref=e4]:
+    - generic [ref=e5]:
+      - button "OpenShift Pulse" [ref=e6] [cursor=pointer]:
+        - img [ref=e7]
+        - generic [ref=e11]: OpenShift Pulse
+      - button "Search resources, views... ⌘K" [ref=e13] [cursor=pointer]:
+        - img [ref=e14]
+        - generic [ref=e17]: Search resources, views...
+        - generic [ref=e18]: ⌘K
+      - button "Create" [ref=e19] [cursor=pointer]:
+        - img [ref=e20]
+        - generic [ref=e21]: Create
+    - generic [ref=e22]:
+      - generic [ref=e24]:
+        - img [ref=e25]
+        - generic [ref=e29]: cluster
+      - button "All" [ref=e31] [cursor=pointer]:
+        - img [ref=e32]
+        - generic [ref=e36]: All
+        - img [ref=e37]
+      - button "No issues" [ref=e39] [cursor=pointer]:
+        - img [ref=e40]
+      - button "User menu" [ref=e44] [cursor=pointer]:
+        - img [ref=e46]
+  - tablist "Open tabs" [ref=e49]:
+    - tab "Welcome Close tab" [ref=e50] [cursor=pointer]:
+      - img [ref=e51]
+      - generic [ref=e53]: Welcome
+      - button "Unpin tab" [ref=e54]:
+        - img [ref=e55]
+      - button "Close tab" [ref=e59]:
+        - img [ref=e60]
+    - tab "Pulse Close tab" [selected] [ref=e63] [cursor=pointer]:
+      - img [ref=e64]
+      - generic [ref=e66]: Pulse
+      - button "Unpin tab" [ref=e67]:
+        - img [ref=e68]
+      - button "Close tab" [ref=e72]:
+        - img [ref=e73]
+    - tab "Admin Close tab" [ref=e76] [cursor=pointer]:
+      - img [ref=e77]
+      - generic [ref=e79]: Admin
+      - button "Unpin tab" [ref=e80]:
+        - img [ref=e81]
+      - button "Close tab" [ref=e85]:
+        - img [ref=e86]
+    - tab "Incidents Close tab" [ref=e89] [cursor=pointer]:
+      - img [ref=e90]
+      - generic [ref=e92]: Incidents
+      - button "Pin tab" [ref=e93]:
+        - img [ref=e94]
+      - button "Close tab" [ref=e96]:
+        - img [ref=e97]
+    - button "New tab (⌘K)" [ref=e100] [cursor=pointer]:
+      - img [ref=e101]
+  - main [ref=e103]:
+    - generic [ref=e105]:
+      - generic [ref=e106]:
+        - generic [ref=e107]:
+          - img [ref=e108]
+          - generic [ref=e111]:
+            - heading "Cluster Pulse" [level=1] [ref=e112]
+            - paragraph [ref=e113]: Health overview
+        - button "0/0 nodes" [ref=e115] [cursor=pointer]:
+          - img [ref=e116]
+          - text: 0/0 nodes
+      - generic [ref=e118]:
+        - generic [ref=e119]:
+          - generic [ref=e120]:
+            - img [ref=e121]
+            - generic [ref=e124]: Pulse AI starts in confirmation mode. Review recommendations first, then raise trust as confidence grows.
+            - button "Try it" [ref=e125] [cursor=pointer]
+            - button "Dismiss" [ref=e126] [cursor=pointer]:
+              - img [ref=e127]
+          - generic [ref=e132]:
+            - img [ref=e133]
+            - generic [ref=e135]: Overnight Activity
+            - generic [ref=e136]: No recent actions
+        - complementary [ref=e147]:
+          - heading "Active Issues" [level=3] [ref=e150]
+          - generic [ref=e155]:
+            - generic [ref=e156]:
+              - img [ref=e157]
+              - heading "Quick Actions" [level=3] [ref=e159]
+            - generic [ref=e160]:
+              - button "Incidents" [ref=e161] [cursor=pointer]:
+                - text: Incidents
+                - img [ref=e162]
+              - button "Readiness" [ref=e164] [cursor=pointer]:
+                - text: Readiness
+                - img [ref=e165]
+              - button "Alerts" [ref=e167] [cursor=pointer]:
+                - text: Alerts
+                - img [ref=e168]
+              - button "Reviews" [ref=e170] [cursor=pointer]:
+                - text: Reviews
+                - img [ref=e171]
+  - generic [ref=e173]:
+    - generic [ref=e174]:
+      - generic [ref=e177]: Connected
+      - generic [ref=e178]: synced 0s ago ago
+      - generic [ref=e179]: · Cluster Pulse
+    - generic [ref=e180]:
+      - button "Agent" [ref=e181] [cursor=pointer]:
+        - img [ref=e182]
+        - text: Agent
+      - generic [ref=e185]: 4 tabs
+      - generic [ref=e186]: all namespaces
+      - generic [ref=e187]: ⌘K search · ⌘B browse
+  - status "Notifications"

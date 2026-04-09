@@ -1,0 +1,3 @@
+[    1807ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ https://openshiftpulse-openshiftpulse.apps.rosa.kx9m9-gg955-qam.cyad.p3.openshiftapps.com/api/kubernetes/apis/operator.openshift.io/v1/etcds/cluster:0
+[    1921ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ https://openshiftpulse-openshiftpulse.apps.rosa.kx9m9-gg955-qam.cyad.p3.openshiftapps.com/api/kubernetes/api/v1/namespaces/openshift-ingress/secrets/router-certs-default:0
+[    1972ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ https://openshiftpulse-openshiftpulse.apps.rosa.kx9m9-gg955-qam.cyad.p3.openshiftapps.com/api/kubernetes/apis/config.openshift.io/v1/backups:0

@@ -1,0 +1,8 @@
+- generic [active] [ref=e1]:
+  - generic [ref=e2]:
+    - img "Red Hat OpenShift logo" [ref=e4]
+    - button "Log in with OpenShift" [ref=e7] [cursor=pointer]
+  - contentinfo [ref=e8]:
+    - text: Secured with
+    - link "OpenShift oauth-proxy" [ref=e9] [cursor=pointer]:
+      - /url: https://github.com/openshift/oauth-proxy#oauth2_proxy
