@@ -252,6 +252,27 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_views_owner_title ON views(owner, title);
 CREATE INDEX IF NOT EXISTS idx_view_versions_view ON view_versions(view_id, version DESC);
 """
 
+EVAL_RUNS_SCHEMA = """
+CREATE TABLE IF NOT EXISTS eval_runs (
+    id              SERIAL PRIMARY KEY,
+    timestamp       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    suite_name      TEXT NOT NULL,
+    source          TEXT NOT NULL DEFAULT 'cli',
+    model           TEXT DEFAULT '',
+    scenario_count  INTEGER NOT NULL,
+    passed_count    INTEGER NOT NULL,
+    gate_passed     BOOLEAN NOT NULL,
+    average_overall REAL NOT NULL,
+    dimensions      JSONB,
+    blocker_counts  JSONB,
+    scenarios       JSONB,
+    prompt_audit    JSONB,
+    judge_avg       REAL
+);
+CREATE INDEX IF NOT EXISTS idx_eval_runs_suite ON eval_runs(suite_name, timestamp DESC);
+CREATE INDEX IF NOT EXISTS idx_eval_runs_ts ON eval_runs(timestamp DESC);
+"""
+
 ALL_SCHEMAS = (
     INCIDENTS_SCHEMA
     + RUNBOOKS_SCHEMA
@@ -269,4 +290,5 @@ ALL_SCHEMAS = (
     + TOOL_USAGE_INDEX_SCHEMA
     + PROMQL_QUERIES_SCHEMA
     + SCAN_RUNS_SCHEMA
+    + EVAL_RUNS_SCHEMA
 )

@@ -97,9 +97,56 @@ async def eval_status(
             },
             "prompt_audit": prompt_audit,
         }
+        # Record runs to DB for trend tracking (fire-and-forget)
+        try:
+            from ..evals.history import record_eval_run
+
+            for suite_result in [release, safety, integration, view_designer]:
+                record_eval_run(
+                    suite_name=suite_result.suite_name,
+                    source="api",
+                    scenario_count=suite_result.scenario_count,
+                    passed_count=suite_result.passed_count,
+                    gate_passed=suite_result.gate_passed,
+                    average_overall=suite_result.average_overall,
+                    dimensions=suite_result.dimension_averages,
+                    blocker_counts=suite_result.blocker_counts,
+                )
+        except Exception:
+            pass
+
         _EVAL_STATUS_CACHE = payload
         _EVAL_STATUS_CACHE_TS_MS = now_ms
         return payload
+
+
+@router.get("/eval/history")
+async def eval_history(
+    suite: str | None = Query(None),
+    days: int = Query(30, ge=1, le=365),
+    limit: int = Query(100, ge=1, le=500),
+    authorization: str | None = Header(None),
+    token: str | None = Query(None),
+):
+    """Eval run history for trend charts."""
+    _verify_rest_token(authorization, token)
+    from ..evals.history import get_eval_history
+
+    return get_eval_history(suite_name=suite, days=days, limit=limit)
+
+
+@router.get("/eval/trend")
+async def eval_trend(
+    suite: str = Query("release"),
+    days: int = Query(30, ge=1, le=365),
+    authorization: str | None = Header(None),
+    token: str | None = Query(None),
+):
+    """Eval score trend summary with sparkline data."""
+    _verify_rest_token(authorization, token)
+    from ..evals.history import get_eval_trend
+
+    return get_eval_trend(suite_name=suite, days=days)
 
 
 @router.get("/eval/score")
