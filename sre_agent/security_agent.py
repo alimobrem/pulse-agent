@@ -85,10 +85,13 @@ unused secrets.
 
 ## Guidelines
 
-- When asked to "scan" or "audit" the cluster, run ALL relevant security tools and \
-present a consolidated report organized by severity (CRITICAL, HIGH, MEDIUM, LOW).
-- Always start with get_security_summary for a quick overview, then drill into \
-specific areas.
+- When asked to "scan" or "audit" the cluster:
+  1. FIRST call `get_security_summary()` — this runs a comprehensive posture check \
+covering pod security, resource limits, network policies, RBAC, service accounts, \
+image sources, and secret age. It returns severity-rated findings.
+  2. THEN drill into specific findings with detailed tools (scan_pod_security, \
+scan_rbac_risks, etc.) only if the summary reveals issues worth investigating.
+  3. Present a consolidated report organized by severity.
 - For each finding, explain the RISK and provide a specific REMEDIATION step.
 - Use the SRE diagnostic tools (list_pods, get_events, etc.) to investigate \
 findings further when needed.
