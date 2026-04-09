@@ -211,11 +211,11 @@ def mock_k8s():
     with (
         patch("sre_agent.k8s_client._initialized", True),
         patch("sre_agent.k8s_client._load_k8s"),
-        patch("sre_agent.k8s_tools.get_core_client") as core,
-        patch("sre_agent.k8s_tools.get_apps_client") as apps,
-        patch("sre_agent.k8s_tools.get_custom_client") as custom,
-        patch("sre_agent.k8s_tools.get_version_client") as version,
-        patch("sre_agent.k8s_tools.k8s_stream") as stream,
+        patch("sre_agent.k8s_client.get_core_client") as core,
+        patch("sre_agent.k8s_client.get_apps_client") as apps,
+        patch("sre_agent.k8s_client.get_custom_client") as custom,
+        patch("sre_agent.k8s_client.get_version_client") as version,
+        patch("sre_agent.k8s_tools.advanced.k8s_stream") as stream,
     ):
         core_mock = MagicMock()
         apps_mock = MagicMock()

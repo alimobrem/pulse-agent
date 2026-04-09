@@ -23,10 +23,10 @@ def ws_client(pulse_token, monkeypatch, tmp_path):
     with (
         patch("sre_agent.k8s_client._initialized", True),
         patch("sre_agent.k8s_client._load_k8s"),
-        patch("sre_agent.k8s_tools.get_core_client", return_value=MagicMock()),
-        patch("sre_agent.k8s_tools.get_apps_client", return_value=MagicMock()),
-        patch("sre_agent.k8s_tools.get_custom_client", return_value=MagicMock()),
-        patch("sre_agent.k8s_tools.get_version_client", return_value=MagicMock()),
+        patch("sre_agent.k8s_client.get_core_client", return_value=MagicMock()),
+        patch("sre_agent.k8s_client.get_apps_client", return_value=MagicMock()),
+        patch("sre_agent.k8s_client.get_custom_client", return_value=MagicMock()),
+        patch("sre_agent.k8s_client.get_version_client", return_value=MagicMock()),
     ):
         from sre_agent.api import app
 
