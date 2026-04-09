@@ -100,8 +100,8 @@ class TestWebSocketProtocol:
     def test_message_triggers_agent_response(self, ws_client, pulse_token):
         """Send a message and verify we get at least a done or error event back."""
         with (
-            patch("sre_agent.api.run_agent_streaming", return_value="Test response"),
-            patch("sre_agent.api.create_client", return_value=MagicMock()),
+            patch("sre_agent.api.agent_ws.run_agent_streaming", return_value="Test response"),
+            patch("sre_agent.api.agent_ws.create_client", return_value=MagicMock()),
             ws_client.websocket_connect(f"/ws/sre?token={pulse_token}") as ws,
         ):
             ws.send_json({"type": "message", "content": "hello"})

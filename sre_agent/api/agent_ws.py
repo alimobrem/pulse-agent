@@ -1,0 +1,520 @@
+"""Core agent WebSocket streaming logic and confirmation flow."""
+
+from __future__ import annotations
+
+import asyncio
+import concurrent.futures
+import json
+import logging
+import time
+import uuid
+from typing import TYPE_CHECKING
+
+from ..agent import create_client, run_agent_streaming
+from ..config import get_settings
+from .sanitize import _sanitize_components
+
+if TYPE_CHECKING:
+    from fastapi import WebSocket
+
+logger = logging.getLogger("pulse_agent.api")
+
+# WebSocket connection liveness tracking
+_ws_alive: dict[str, bool] = {}
+
+# Pending confirmation requests keyed by session ID (uuid4, NOT id(websocket))
+_pending_confirms: dict[str, asyncio.Future] = {}
+# JIT nonces for confirmation -- prevents replay/forgery
+_pending_nonces: dict[str, str] = {}
+# Timestamps for TTL-based cleanup
+_pending_timestamps: dict[str, float] = {}
+# TTL for stale pending state (2 minutes)
+_PENDING_TTL_SECONDS = 120
+
+# Max WebSocket message size (1MB)
+MAX_MESSAGE_SIZE = 1_048_576
+
+# Rate limiting: max messages per minute per connection
+MAX_MESSAGES_PER_MINUTE = 10
+
+
+def _build_tool_result_handler(session_id: str, agent_mode: str, write_tools: set[str]):
+    """Build an on_tool_result callback that records to tool_usage table."""
+
+    def on_tool_result(info: dict):
+        try:
+            from ..harness import get_tool_category
+            from ..tool_usage import record_tool_call
+
+            record_tool_call(
+                session_id=session_id,
+                turn_number=info["turn_number"],
+                agent_mode=agent_mode,
+                tool_name=info["tool_name"],
+                tool_category=get_tool_category(info["tool_name"]),
+                input_data=info.get("input"),
+                status=info["status"],
+                error_message=info.get("error_message"),
+                error_category=info.get("error_category"),
+                duration_ms=info.get("duration_ms", 0),
+                result_bytes=info.get("result_bytes", 0),
+                requires_confirmation=info["tool_name"] in write_tools,
+                was_confirmed=info.get("was_confirmed"),
+            )
+        except Exception:
+            logger.debug("Tool result recording failed", exc_info=True)
+
+    return on_tool_result
+
+
+async def _run_agent_ws(
+    websocket: WebSocket,
+    messages: list[dict],
+    system_prompt: str,
+    tool_defs: list,
+    tool_map: dict,
+    write_tools: set[str],
+    session_id: str,
+    current_user: str = "anonymous",
+    mode: str = "sre",
+    turn_number: int = 1,
+    user_query: str = "",
+):
+    """Run an agent turn and stream results over WebSocket."""
+    from ..view_tools import set_current_user
+
+    set_current_user(current_user)
+    client = create_client()
+    ws_id = session_id
+
+    # Capture the running loop BEFORE entering the thread
+    loop = asyncio.get_running_loop()
+
+    async def _safe_send(data: dict):
+        """Send JSON to WebSocket, swallowing errors if client disconnected."""
+        try:
+            await websocket.send_json(data)
+        except Exception:
+            pass  # Client disconnected -- expected during shutdown
+
+    def _schedule_send(data: dict):
+        """Thread-safe: schedule a WebSocket send on the event loop."""
+        asyncio.run_coroutine_threadsafe(_safe_send(data), loop)
+
+    def on_text(delta: str):
+        _schedule_send({"type": "text_delta", "text": delta})
+
+    def on_thinking(delta: str):
+        _schedule_send({"type": "thinking_delta", "thinking": delta})
+
+    session_tools: list[str] = []
+    session_components: list[dict] = []
+    turn_token_usage: dict[str, int] = {}
+
+    def on_usage(**kwargs):
+        # Accumulate tokens across iterations (agent loop may call API multiple times)
+        for key in ("input_tokens", "output_tokens", "cache_read_tokens", "cache_creation_tokens"):
+            turn_token_usage[key] = turn_token_usage.get(key, 0) + kwargs.get(key, 0)
+
+    def on_tool_use(name: str):
+        session_tools.append(name)
+        _schedule_send({"type": "tool_use", "tool": name})
+
+    def on_component(name: str, spec: dict):
+        session_components.append(spec)
+        _schedule_send({"type": "component", "spec": spec, "tool": name})
+
+    def on_confirm(tool_name: str, tool_input: dict) -> bool:
+        """Request confirmation from the web UI and block until response."""
+        try:
+            # Check if the WebSocket is still alive before waiting
+            if not _ws_alive.get(ws_id, True):
+                return False
+
+            # Create the future and send the confirm request to the UI
+            confirm_future = asyncio.run_coroutine_threadsafe(
+                _create_and_register_future(ws_id, tool_name, tool_input, websocket),
+                loop,
+            ).result(timeout=5)
+
+            # Block the agent thread -- wait for the UI to set the future result
+            waiter = concurrent.futures.Future()
+
+            def _on_done(f):
+                try:
+                    waiter.set_result(f.result())
+                except Exception:
+                    waiter.set_result(False)
+
+            loop.call_soon_threadsafe(confirm_future.add_done_callback, _on_done)
+
+            approved = waiter.result(timeout=120)
+            logger.info("Confirmation resolved: tool=%s approved=%s", tool_name, approved)
+            return approved
+
+        except Exception as e:
+            logger.error("Confirmation failed: %s", e)
+            _schedule_send({"type": "error", "message": "Confirmation timed out or failed. Operation cancelled."})
+            return False
+        finally:
+            _pending_confirms.pop(ws_id, None)
+
+    # Augment system prompt with memory context and start timing
+    effective_system = system_prompt
+    manager = None
+    if get_settings().memory:
+        try:
+            from ..memory import get_manager
+
+            manager = get_manager()
+            if manager:
+                last_user = next((m["content"] for m in reversed(messages) if m["role"] == "user"), "")
+                if isinstance(last_user, str) and last_user:
+                    effective_system = manager.augment_prompt(system_prompt, last_user)
+                manager.start_turn()  # Start timing BEFORE agent runs
+        except Exception as e:
+            logger.debug("Memory retrieval failed: %s", e)
+
+    # Build tool result recording handler
+    tool_result_handler = _build_tool_result_handler(ws_id, mode, write_tools)
+
+    # Run the blocking agent in a thread
+    full_response = await asyncio.to_thread(
+        run_agent_streaming,
+        client=client,
+        messages=messages,
+        system_prompt=effective_system,
+        tool_defs=tool_defs,
+        tool_map=tool_map,
+        write_tools=write_tools,
+        on_text=on_text,
+        on_thinking=on_thinking,
+        on_tool_use=on_tool_use,
+        on_confirm=on_confirm,
+        on_component=on_component,
+        on_tool_result=tool_result_handler,
+        on_usage=on_usage,
+        mode=mode,
+    )
+
+    # Process structured signals from tool results -- no regex scanning needed.
+    # Tools return signals as "__SIGNAL__" + JSON in their text result.
+    from ..view_tools import SIGNAL_PREFIX
+
+    _view_updated_ids = set()
+
+    def _extract_signals(messages_list):
+        """Extract structured signals from tool_result content blocks ONLY.
+
+        Security: only scans tool_result blocks (role=user, type=tool_result).
+        User-typed messages are never scanned, preventing signal injection.
+        """
+        signals = []
+        for msg in messages_list:
+            # Only scan tool result messages (role=user with list content containing tool_result blocks)
+            if msg.get("role") != "user":
+                continue
+            content = msg.get("content", "")
+            if not isinstance(content, list):
+                continue
+            for block in content:
+                if not isinstance(block, dict) or block.get("type") != "tool_result":
+                    continue
+                text = block.get("content", "")
+                if text and SIGNAL_PREFIX in text:
+                    try:
+                        json_str = text.split(SIGNAL_PREFIX, 1)[1].strip()
+                        signals.append(json.loads(json_str))
+                    except (json.JSONDecodeError, IndexError):
+                        pass
+        return signals
+
+    for sig in _extract_signals(messages):
+        sig_type = sig.get("type")
+
+        if sig_type == "view_spec" and session_components:
+            import time as _time
+
+            from .. import db as _db
+            from ..view_validator import validate_components as _validate
+
+            _sanitize_components(session_components)
+
+            # Validate and deduplicate components before saving
+            _vr = _validate(session_components)
+            session_components = _vr.components  # Use deduped list
+            if _vr.deduped_count > 0:
+                logger.info("Deduped %d duplicate components from view", _vr.deduped_count)
+
+            if not _vr.valid:
+                # Log warnings but SAVE ANYWAY -- the agent needs the view to exist
+                # so critique_view can score it and guide fixes. Blocking here causes
+                # the agent to enter a confused loop ("view not found").
+                logger.warning(
+                    "View has validation issues (saving anyway): %s",
+                    "; ".join(_vr.errors),
+                )
+                await websocket.send_json(
+                    {
+                        "type": "view_validation_warning",
+                        "errors": _vr.errors,
+                        "warnings": _vr.warnings,
+                        "deduped_count": _vr.deduped_count,
+                    }
+                )
+
+            view_id = sig.get("view_id", f"cv-{uuid.uuid4().hex[:12]}")
+            view_title = sig.get("title", "Custom View")
+            view_desc = sig.get("description", "")
+            view_template = sig.get("template", "")
+
+            # Compute positions using semantic layout engine
+            from ..layout_engine import compute_layout
+
+            positions = compute_layout(session_components)
+
+            existing = _db.get_view_by_title(current_user, view_title)
+            if existing:
+                old_layout = existing.get("layout", [])
+                merged_layout = old_layout + session_components
+                # Re-validate the merged layout (dedup + structural checks)
+                _vr_merged = _validate(merged_layout)
+                merged_layout = _vr_merged.components  # Always use deduped
+                if not _vr_merged.valid:
+                    logger.warning("Merged view has issues (saving anyway): %s", "; ".join(_vr_merged.errors))
+                positions = compute_layout(merged_layout)
+                update_kwargs: dict = {"layout": merged_layout, "description": view_desc}
+                if positions:
+                    update_kwargs["positions"] = positions
+                # Use view's actual owner for update (identity may differ)
+                actual_owner = existing.get("owner", current_user)
+                _db.update_view(existing["id"], actual_owner, _snapshot=True, _action="agent_update", **update_kwargs)
+                _view_updated_ids.add(existing["id"])
+                logger.info(
+                    "Updated existing view: id=%s title=%s (+%d components)",
+                    existing["id"],
+                    view_title,
+                    len(session_components),
+                )
+                # Emit view_spec so the UI navigates to the updated view
+                spec = {
+                    "id": existing["id"],
+                    "title": view_title,
+                    "description": view_desc,
+                    "layout": merged_layout,
+                    "positions": positions or {},
+                    "generatedAt": int(_time.time() * 1000),
+                }
+                await websocket.send_json({"type": "view_spec", "spec": spec})
+                # Don't clear session_components -- agent may call create_dashboard again in same turn
+            else:
+                _db.save_view(current_user, view_id, view_title, view_desc, session_components, positions=positions)
+                _view_updated_ids.add(view_id)
+                logger.info(
+                    "Saved new view: id=%s title=%s components=%d template=%s",
+                    view_id,
+                    view_title,
+                    len(session_components),
+                    view_template or "none",
+                )
+                spec = {
+                    "id": view_id,
+                    "title": view_title,
+                    "description": view_desc,
+                    "layout": session_components,
+                    "positions": positions or {},
+                    "generatedAt": int(_time.time() * 1000),
+                }
+                if view_template:
+                    spec["templateId"] = view_template
+
+                await websocket.send_json({"type": "view_spec", "spec": spec})
+                # Don't clear -- components persist for the rest of the turn
+
+        elif sig_type == "view_updated":
+            _view_updated_ids.add(sig.get("view_id", ""))
+
+        elif sig_type == "add_widget" and session_components:
+            from .. import db as _db
+
+            vid = sig.get("view_id", "")
+            _view_updated_ids.add(vid)
+            latest_component = session_components[-1]
+            view = _db.get_view(vid, current_user)
+            if view:
+                new_layout = view.get("layout", []) + [latest_component]
+                _db.update_view(vid, current_user, _snapshot=True, _action="add_widget", layout=new_layout)
+
+    for vid in _view_updated_ids:
+        if not vid:
+            continue
+        try:
+            await websocket.send_json({"type": "view_updated", "viewId": vid})
+        except Exception:
+            pass
+
+    # Record turn-level data (tools + token usage)
+    try:
+        from ..tool_usage import record_turn
+
+        # Determine tools offered from tool_defs
+        offered = [td.get("name", "") for td in tool_defs if isinstance(td, dict)]
+
+        record_turn(
+            session_id=ws_id,
+            turn_number=turn_number,
+            agent_mode=mode,
+            query_summary=user_query[:200],
+            tools_offered=offered,
+            tools_called=session_tools,
+            **turn_token_usage,
+        )
+    except Exception:
+        logger.debug("Failed to record turn", exc_info=True)
+
+    # Record interaction for memory scoring (start_turn was called before agent ran)
+    if manager and hasattr(manager, "finish_turn") and user_query:
+        try:
+            for t in session_tools:
+                manager.record_tool_call(t, {})
+            manager.finish_turn(user_query, full_response)
+        except Exception:
+            pass
+
+    return full_response
+
+
+def _cleanup_stale_pending():
+    """Remove stale pending confirms/nonces older than TTL."""
+    now = time.time()
+    stale = [sid for sid, ts in _pending_timestamps.items() if now - ts > _PENDING_TTL_SECONDS]
+    for sid in stale:
+        future = _pending_confirms.pop(sid, None)
+        if future and not future.done():
+            future.cancel()
+        _pending_nonces.pop(sid, None)
+        _pending_timestamps.pop(sid, None)
+    if stale:
+        logger.info("Cleaned up %d stale pending confirmation(s)", len(stale))
+
+
+async def _create_and_register_future(ws_id: str, tool_name: str, tool_input: dict, websocket: WebSocket):
+    """Create a Future on the event loop and send the confirm request with a JIT nonce."""
+    import secrets
+
+    _cleanup_stale_pending()  # Opportunistic cleanup
+    loop = asyncio.get_running_loop()
+    future = loop.create_future()
+    nonce = secrets.token_urlsafe(16)
+    _pending_confirms[ws_id] = future
+    _pending_nonces[ws_id] = nonce
+    _pending_timestamps[ws_id] = time.time()
+    await websocket.send_json(
+        {
+            "type": "confirm_request",
+            "tool": tool_name,
+            "input": tool_input,
+            "nonce": nonce,
+        }
+    )
+    return future
+
+
+def _make_receive_loop(
+    websocket: WebSocket,
+    session_id: str,
+    messages: list[dict],
+    incoming: asyncio.Queue,
+):
+    """Create a shared WebSocket receive loop for SRE/Security/Auto-agent endpoints.
+
+    Handles: confirm_response (with nonce + memory learning), clear, feedback, message routing.
+    """
+    from fastapi import WebSocketDisconnect
+
+    async def _receive_loop():
+        try:
+            while True:
+                raw = await websocket.receive_text()
+                if len(raw) > MAX_MESSAGE_SIZE:
+                    await websocket.send_json({"type": "error", "message": "Message too large"})
+                    continue
+                try:
+                    data = json.loads(raw)
+                except json.JSONDecodeError:
+                    await websocket.send_json({"type": "error", "message": "Invalid JSON"})
+                    continue
+
+                msg_type = data.get("type")
+
+                if msg_type == "confirm_response":
+                    future = _pending_confirms.get(session_id)
+                    expected_nonce = _pending_nonces.get(session_id)
+                    received_nonce = data.get("nonce", "")
+
+                    if not future or future.done():
+                        logger.warning("Confirm response received but no pending future (session=%s)", session_id)
+                    elif expected_nonce and received_nonce != expected_nonce:
+                        logger.warning("Confirm response nonce mismatch -- possible replay (session=%s)", session_id)
+                        future.set_result(False)
+                    else:
+                        approved = data.get("approved", False)
+                        future.set_result(approved)
+                        logger.info("Confirmation received: approved=%s nonce=%s", approved, received_nonce[:8])
+                        try:
+                            from ..memory import get_manager
+
+                            manager = get_manager()
+                            if manager and approved:
+                                manager.update_last_outcome(True)
+                        except Exception:
+                            pass
+                    _pending_nonces.pop(session_id, None)
+                    continue
+
+                if msg_type == "clear":
+                    messages.clear()
+                    await websocket.send_json({"type": "cleared"})
+                    continue
+
+                if msg_type == "feedback":
+                    resolved = data.get("resolved", False)
+                    try:
+                        from ..memory import get_manager
+
+                        manager = get_manager()
+                        if manager:
+                            result = manager.update_last_outcome(resolved)
+                            await websocket.send_json(
+                                {
+                                    "type": "feedback_ack",
+                                    "resolved": resolved,
+                                    "score": result.get("score", 0) if result else 0,
+                                    "runbookExtracted": bool(result and result.get("runbook_id")),
+                                }
+                            )
+                        else:
+                            await websocket.send_json({"type": "feedback_ack", "resolved": resolved, "score": 0})
+                    except Exception as e:
+                        logger.debug("Feedback recording failed: %s", e)
+                        await websocket.send_json({"type": "feedback_ack", "resolved": resolved, "score": 0})
+
+                    # Link feedback to tool tracking
+                    try:
+                        from ..tool_usage import update_turn_feedback
+
+                        update_turn_feedback(session_id=session_id, feedback="positive" if resolved else "negative")
+                    except Exception:
+                        pass
+
+                    continue
+
+                await incoming.put(data)
+        except WebSocketDisconnect:
+            _ws_alive[session_id] = False
+            await incoming.put(None)
+        except Exception:
+            _ws_alive[session_id] = False
+            await incoming.put(None)
+
+    return _receive_loop
