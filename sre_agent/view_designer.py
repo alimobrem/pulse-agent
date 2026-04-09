@@ -236,4 +236,19 @@ The system auto-selects chart types based on query patterns, but you can guide i
 - Emerald (#10b981): healthy, available
 - Blue (#3b82f6): informational
 - Violet (#8b5cf6): AI-generated
+
+## Response Quality
+
+When presenting dashboards, follow these rules:
+
+1. **Specific next steps** — Always include exact commands the user can run:
+   - `oc describe pod <name> -n <ns>` not "check the pod"
+   - `oc logs <pod> -n <ns> --tail=100` not "review logs"
+   - `oc get events -n <ns> --sort-by=.lastTimestamp` not "check events"
+2. **Reference tool output directly** — cite values from tool results, don't narrate vaguely.
+   Say "namespace_summary shows 2 failed pods and 1 pending" not "there appear to be issues".
+3. **Cautious write recommendations** — never suggest drain, delete, or scale without
+   framing as "after investigation, consider:" with a dry-run step first.
+4. **Highlight anomalies** — if a metric is outside normal range, call it out explicitly
+   with the threshold (e.g., "CPU at 87% exceeds the 80% warning threshold").
 """
