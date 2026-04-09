@@ -1800,6 +1800,53 @@ async def memory_patterns(
     return {"patterns": patterns}
 
 
+@app.get("/memory/summary")
+async def memory_summary(
+    authorization: str | None = Header(None),
+    token: str | None = Query(None),
+):
+    """Get summary stats for the agent intelligence page."""
+    _verify_rest_token(authorization, token)
+    from .memory import get_manager
+
+    manager = get_manager()
+    if not manager:
+        return {"incidents_count": 0, "runbooks_count": 0, "patterns_count": 0, "avg_score": 0, "top_namespaces": []}
+
+    db = manager.store.db
+    incidents_row = db.fetchone("SELECT COUNT(*) as cnt, COALESCE(AVG(score), 0) as avg FROM incidents")
+    runbooks_row = db.fetchone("SELECT COUNT(*) as cnt FROM runbooks")
+    patterns_row = db.fetchone("SELECT COUNT(*) as cnt FROM patterns")
+    ns_rows = db.fetchall(
+        "SELECT namespace, COUNT(*) as cnt FROM incidents WHERE namespace != '' GROUP BY namespace ORDER BY cnt DESC LIMIT 5"
+    )
+
+    # Get eval accuracy if available
+    eval_accuracy = 0.0
+    try:
+        from .harness import score_eval_prompts
+
+        # Only import eval prompts if available (won't be in production)
+        try:
+            from tests.eval_prompts import EVAL_PROMPTS
+
+            result = score_eval_prompts(EVAL_PROMPTS)
+            eval_accuracy = result["accuracy"]
+        except ImportError:
+            pass
+    except Exception:
+        pass
+
+    return {
+        "incidents_count": incidents_row["cnt"] if incidents_row else 0,
+        "avg_score": round(float(incidents_row["avg"] if incidents_row else 0), 1),
+        "runbooks_count": runbooks_row["cnt"] if runbooks_row else 0,
+        "patterns_count": patterns_row["cnt"] if patterns_row else 0,
+        "eval_accuracy": round(eval_accuracy, 3),
+        "top_namespaces": [r["namespace"] for r in (ns_rows or [])],
+    }
+
+
 @app.get("/context")
 async def get_shared_context(
     authorization: str | None = Header(None),
