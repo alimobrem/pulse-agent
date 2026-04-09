@@ -492,26 +492,125 @@ def scan_secrets(namespace: str = "ALL") -> str:
 
 @beta_tool
 def get_security_summary() -> str:
-    """Get a high-level cluster security posture summary: counts of issues by category."""
-    summary = {}
+    """Comprehensive cluster security posture scan with severity-rated findings.
 
-    # Count pods with no security context
-    pods = safe(lambda: get_core_client().list_pod_for_all_namespaces())
+    Checks: pod security, network policies, RBAC, resource limits, probes,
+    service accounts, image sources, and secret age.
+    """
+    findings: list[dict] = []
+    stats: dict[str, int] = {}
+
+    core = get_core_client()
+
+    # 1. Pod security checks
+    pods = safe(lambda: core.list_pod_for_all_namespaces())
     if not isinstance(pods, ToolError):
+        stats["total_pods"] = len(pods.items)
         no_sc = 0
         privileged = 0
+        no_limits = 0
+        no_probes = 0
+        default_sa = 0
+        untrusted_images = 0
+
+        trusted_registries = {
+            "registry.redhat.io",
+            "registry.access.redhat.com",
+            "quay.io",
+            "gcr.io",
+            "ghcr.io",
+            "docker.io",
+            "image-registry.openshift-image-registry.svc",
+        }
+
         for pod in pods.items:
+            ns = pod.metadata.namespace
+            if ns.startswith(("openshift-", "kube-")):
+                continue
+
+            # Default service account
+            sa_name = getattr(pod.spec, "service_account_name", None) or "default"
+            if sa_name == "default":
+                default_sa += 1
+
             for c in pod.spec.containers or []:
                 if c.security_context is None:
                     no_sc += 1
                 elif c.security_context.privileged:
                     privileged += 1
-        summary["containers_no_security_context"] = no_sc
-        summary["privileged_containers"] = privileged
-        summary["total_pods"] = len(pods.items)
 
-    # Count namespaces without network policies
-    ns_list = safe(lambda: get_core_client().list_namespace())
+                # Resource limits
+                res = getattr(c, "resources", None)
+                if not res or not getattr(res, "limits", None):
+                    no_limits += 1
+
+                # Liveness/readiness probes
+                if not getattr(c, "liveness_probe", None) and not getattr(c, "readiness_probe", None):
+                    no_probes += 1
+
+                # Image registry check
+                image = getattr(c, "image", "") or ""
+                registry = image.split("/")[0] if "/" in image else ""
+                if registry and "." in registry and not any(registry.endswith(tr) for tr in trusted_registries):
+                    untrusted_images += 1
+
+        if privileged > 0:
+            findings.append(
+                {
+                    "severity": "critical",
+                    "category": "Pod Security",
+                    "detail": f"{privileged} privileged containers found",
+                }
+            )
+        if no_sc > 0:
+            findings.append(
+                {
+                    "severity": "warning",
+                    "category": "Pod Security",
+                    "detail": f"{no_sc} containers have no security context",
+                }
+            )
+        if no_limits > 0:
+            findings.append(
+                {
+                    "severity": "warning",
+                    "category": "Resource Limits",
+                    "detail": f"{no_limits} containers have no resource limits — risk of resource exhaustion",
+                }
+            )
+        if no_probes > 0:
+            findings.append(
+                {
+                    "severity": "info",
+                    "category": "Health Probes",
+                    "detail": f"{no_probes} containers have no liveness or readiness probes",
+                }
+            )
+        if default_sa > 0:
+            findings.append(
+                {
+                    "severity": "warning",
+                    "category": "Service Accounts",
+                    "detail": f"{default_sa} pods use the default service account — should use dedicated SAs",
+                }
+            )
+        if untrusted_images > 0:
+            findings.append(
+                {
+                    "severity": "warning",
+                    "category": "Image Sources",
+                    "detail": f"{untrusted_images} containers use images from untrusted registries",
+                }
+            )
+
+        stats["privileged_containers"] = privileged
+        stats["containers_no_security_context"] = no_sc
+        stats["containers_no_limits"] = no_limits
+        stats["containers_no_probes"] = no_probes
+        stats["pods_default_sa"] = default_sa
+
+    # 2. Network policies
+    ns_list = safe(lambda: core.list_namespace())
     netpols = safe(lambda: get_networking_client().list_network_policy_for_all_namespaces())
     if not isinstance(ns_list, ToolError) and not isinstance(netpols, ToolError):
         ns_with_policies = {np.metadata.namespace for np in netpols.items}
@@ -520,21 +619,71 @@ def get_security_summary() -> str:
             for ns in ns_list.items
             if not ns.metadata.name.startswith(("openshift-", "kube-", "default"))
         ]
-        summary["user_namespaces"] = len(user_ns)
-        summary["namespaces_without_network_policy"] = len([n for n in user_ns if n not in ns_with_policies])
+        missing = [n for n in user_ns if n not in ns_with_policies]
+        stats["namespaces_without_network_policy"] = len(missing)
+        if missing:
+            findings.append(
+                {
+                    "severity": "warning",
+                    "category": "Network Policy",
+                    "detail": f"{len(missing)} namespaces have no network policies: {', '.join(missing[:5])}",
+                }
+            )
 
-    # Count cluster-admin bindings (non-system)
+    # 3. RBAC — cluster-admin bindings
     crbs = safe(lambda: get_rbac_client().list_cluster_role_binding())
     if not isinstance(crbs, ToolError):
-        admin_bindings = 0
+        admin_subjects = []
         for crb in crbs.items:
             if crb.role_ref.name == "cluster-admin":
                 for s in crb.subjects or []:
                     if s.name and not s.name.startswith("system:"):
-                        admin_bindings += 1
-        summary["non_system_cluster_admin_bindings"] = admin_bindings
+                        admin_subjects.append(f"{s.kind}/{s.name}")
+        stats["non_system_cluster_admin_bindings"] = len(admin_subjects)
+        if admin_subjects:
+            findings.append(
+                {
+                    "severity": "warning",
+                    "category": "RBAC",
+                    "detail": f"{len(admin_subjects)} non-system cluster-admin bindings: {', '.join(admin_subjects[:5])}",
+                }
+            )
 
-    return json.dumps(summary, indent=2)
+    # 4. Old secrets (>90 days)
+    secrets = safe(lambda: core.list_secret_for_all_namespaces())
+    if not isinstance(secrets, ToolError):
+        now = datetime.now(UTC)
+        old_secrets = 0
+        for s in secrets.items:
+            if s.metadata.namespace.startswith(("openshift-", "kube-")):
+                continue
+            if s.type in ("kubernetes.io/service-account-token", "kubernetes.io/dockercfg"):
+                continue
+            age = (now - s.metadata.creation_timestamp.replace(tzinfo=UTC)).days
+            if age > 90:
+                old_secrets += 1
+        if old_secrets > 0:
+            findings.append(
+                {
+                    "severity": "info",
+                    "category": "Secret Rotation",
+                    "detail": f"{old_secrets} secrets older than 90 days — consider rotation",
+                }
+            )
+
+    # Build summary
+    findings.sort(key=lambda f: {"critical": 0, "warning": 1, "info": 2}.get(f["severity"], 3))
+
+    lines = [f"Security Posture Summary ({len(findings)} findings):\n"]
+    for f in findings:
+        icon = {"critical": "!!!", "warning": "!!", "info": "i"}.get(f["severity"], "?")
+        lines.append(f"  [{icon}] [{f['severity'].upper()}] {f['category']}: {f['detail']}")
+
+    if not findings:
+        lines.append("  No security issues detected. Cluster appears well-configured.")
+
+    lines.append(f"\nStats: {json.dumps(stats)}")
+    return "\n".join(lines)
 
 
 ALL_SECURITY_TOOLS = [
