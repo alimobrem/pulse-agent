@@ -512,6 +512,9 @@ def get_security_summary() -> str:
         no_probes = 0
         default_sa = 0
         untrusted_images = 0
+        latest_tags = 0
+        writable_fs = 0
+        secrets_in_env = 0
 
         trusted_registries = {
             "registry.redhat.io",
@@ -548,11 +551,25 @@ def get_security_summary() -> str:
                 if not getattr(c, "liveness_probe", None) and not getattr(c, "readiness_probe", None):
                     no_probes += 1
 
-                # Image registry check
+                # Image registry + tag check
                 image = getattr(c, "image", "") or ""
                 registry = image.split("/")[0] if "/" in image else ""
                 if registry and "." in registry and not any(registry.endswith(tr) for tr in trusted_registries):
                     untrusted_images += 1
+                # :latest or no digest pinning
+                if ":latest" in image or ("@sha256:" not in image and ":" not in image.split("/")[-1]):
+                    latest_tags += 1
+
+                # Writable root filesystem
+                sc = getattr(c, "security_context", None)
+                if sc and not getattr(sc, "read_only_root_filesystem", False):
+                    writable_fs += 1
+
+                # Secrets as env vars
+                for env in getattr(c, "env", None) or []:
+                    env_from = getattr(env, "value_from", None)
+                    if env_from and getattr(env_from, "secret_key_ref", None):
+                        secrets_in_env += 1
 
         if privileged > 0:
             findings.append(
@@ -603,11 +620,39 @@ def get_security_summary() -> str:
                 }
             )
 
+        if latest_tags > 0:
+            findings.append(
+                {
+                    "severity": "warning",
+                    "category": "Image Tags",
+                    "detail": f"{latest_tags} containers use :latest or untagged images — no digest pinning",
+                }
+            )
+        if writable_fs > 0:
+            findings.append(
+                {
+                    "severity": "info",
+                    "category": "Filesystem Security",
+                    "detail": f"{writable_fs} containers have writable root filesystem",
+                }
+            )
+        if secrets_in_env > 0:
+            findings.append(
+                {
+                    "severity": "warning",
+                    "category": "Secret Exposure",
+                    "detail": f"{secrets_in_env} secrets mounted as environment variables — visible in kubectl describe",
+                }
+            )
+
         stats["privileged_containers"] = privileged
         stats["containers_no_security_context"] = no_sc
         stats["containers_no_limits"] = no_limits
         stats["containers_no_probes"] = no_probes
         stats["pods_default_sa"] = default_sa
+        stats["latest_tags"] = latest_tags
+        stats["writable_fs"] = writable_fs
+        stats["secrets_in_env"] = secrets_in_env
 
     # 2. Network policies
     ns_list = safe(lambda: core.list_namespace())
