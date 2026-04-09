@@ -686,18 +686,11 @@ async def _run_agent_ws(
         logger.debug("Failed to record turn", exc_info=True)
 
     # Record interaction for memory scoring (start_turn was called before agent ran)
-    if manager and hasattr(manager, "finish_turn"):
+    if manager and hasattr(manager, "finish_turn") and user_query:
         try:
-            user_msgs = [m for m in messages if m["role"] == "user"]
-            if user_msgs:
-                query = (
-                    user_msgs[-1]["content"]
-                    if isinstance(user_msgs[-1]["content"], str)
-                    else str(user_msgs[-1]["content"])
-                )
-                for t in session_tools:
-                    manager.record_tool_call(t, {})
-                manager.finish_turn(query, full_response)
+            for t in session_tools:
+                manager.record_tool_call(t, {})
+            manager.finish_turn(user_query, full_response)
         except Exception:
             pass
 
