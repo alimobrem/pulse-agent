@@ -1,9 +1,186 @@
 """Agent Orchestrator — classifies queries and routes to SRE or Security agent."""
 
 import logging
+import re
 from typing import Literal
 
 logger = logging.getLogger("pulse_agent.orchestrator")
+
+# ---------------------------------------------------------------------------
+# Typo correction — applied before intent classification and tool selection.
+# Maps common misspellings to the correct K8s/SRE/security term.
+# Only whole-word replacements to avoid mangling valid text.
+# ---------------------------------------------------------------------------
+_TYPO_MAP: dict[str, str] = {
+    # Kubernetes resources
+    "depoyment": "deployment",
+    "deploymnet": "deployment",
+    "deployemnt": "deployment",
+    "deplyoment": "deployment",
+    "deloyment": "deployment",
+    "deployement": "deployment",
+    "deploment": "deployment",
+    "depolyment": "deployment",
+    "deploymment": "deployment",
+    "namepsace": "namespace",
+    "namepspace": "namespace",
+    "namspace": "namespace",
+    "namsepace": "namespace",
+    "naemspace": "namespace",
+    "namesapce": "namespace",
+    "namespacce": "namespace",
+    "namespcae": "namespace",
+    "confimap": "configmap",
+    "configmap": "configmap",
+    "confgimap": "configmap",
+    "cofigmap": "configmap",
+    "serivce": "service",
+    "servce": "service",
+    "sevice": "service",
+    "srevice": "service",
+    "sercive": "service",
+    "servcie": "service",
+    "statefullset": "statefulset",
+    "statefuset": "statefulset",
+    "statfulset": "statefulset",
+    "daemonest": "daemonset",
+    "deamonset": "daemonset",
+    "dameonset": "daemonset",
+    "replicaest": "replicaset",
+    "relicaset": "replicaset",
+    "replicast": "replicaset",
+    "ingerss": "ingress",
+    "ingrss": "ingress",
+    "igress": "ingress",
+    "ingresss": "ingress",
+    "persitent": "persistent",
+    "persistant": "persistent",
+    "perisistent": "persistent",
+    # SRE terms
+    "crashlopp": "crashloop",
+    "crashlop": "crashloop",
+    "crahsloop": "crashloop",
+    "crashoping": "crashlooping",
+    "crashloping": "crashlooping",
+    "craslhooping": "crashlooping",
+    "promethues": "prometheus",
+    "promethesu": "prometheus",
+    "prometheous": "prometheus",
+    "pormetheus": "prometheus",
+    "promethus": "prometheus",
+    "kuberntes": "kubernetes",
+    "kuberentes": "kubernetes",
+    "kuberneets": "kubernetes",
+    "kubernetse": "kubernetes",
+    "kubneretes": "kubernetes",
+    "openshift": "openshift",
+    "openshfit": "openshift",
+    "openshitf": "openshift",
+    "oepnshift": "openshift",
+    "opesnhift": "openshift",
+    "orcehstrator": "orchestrator",
+    "ochestrator": "orchestrator",
+    "orchretsrator": "orchestrator",
+    "orchestartor": "orchestrator",
+    "rollbak": "rollback",
+    "rolback": "rollback",
+    "rollbcak": "rollback",
+    "scael": "scale",
+    "sacale": "scale",
+    "sclaing": "scaling",
+    "sacling": "scaling",
+    "scailng": "scaling",
+    "scheudler": "scheduler",
+    "schdeuler": "scheduler",
+    "schduler": "scheduler",
+    "metrcs": "metrics",
+    "metircs": "metrics",
+    "metics": "metrics",
+    "metirc": "metric",
+    "metrc": "metric",
+    "resurce": "resource",
+    "resoruce": "resource",
+    "resouce": "resource",
+    "resrouce": "resource",
+    "resouces": "resources",
+    "reosurces": "resources",
+    "resuorces": "resources",
+    "volmue": "volume",
+    "voume": "volume",
+    "volumne": "volume",
+    "certifiate": "certificate",
+    "certifcate": "certificate",
+    "certificat": "certificate",
+    "ceritficate": "certificate",
+    "endpont": "endpoint",
+    "enpoint": "endpoint",
+    "endpiont": "endpoint",
+    "containre": "container",
+    "contaienr": "container",
+    "conatiner": "container",
+    "continer": "container",
+    "contanier": "container",
+    # Security terms
+    "vulerability": "vulnerability",
+    "vulernability": "vulnerability",
+    "vulnerabilty": "vulnerability",
+    "vulnrability": "vulnerability",
+    "vulnerablity": "vulnerability",
+    "vulnerabiltiy": "vulnerability",
+    "vulnerabilites": "vulnerabilities",
+    "vulernabilities": "vulnerabilities",
+    "vulerabilities": "vulnerabilities",
+    "compliace": "compliance",
+    "complianec": "compliance",
+    "compliacne": "compliance",
+    "privilige": "privilege",
+    "privlege": "privilege",
+    "privelege": "privilege",
+    "previlege": "privilege",
+    "permision": "permission",
+    "permssion": "permission",
+    "permsision": "permission",
+    "netwrok": "network",
+    "netowrk": "network",
+    "newtork": "network",
+    "nework": "network",
+    # View/dashboard terms
+    "dahsboard": "dashboard",
+    "dashbaord": "dashboard",
+    "dashbord": "dashboard",
+    "dasbhoard": "dashboard",
+    "dashoard": "dashboard",
+    "dashborad": "dashboard",
+    "widegt": "widget",
+    "wiget": "widget",
+    "wdiget": "widget",
+}
+
+# Pre-compile the regex pattern — matches base typo + optional suffix
+_TYPO_PATTERN = re.compile(
+    r"\b(" + "|".join(re.escape(k) for k in sorted(_TYPO_MAP, key=len, reverse=True)) + r")(ies|es|s|ing|ed|er)?\b",
+    re.IGNORECASE,
+)
+
+
+def fix_typos(query: str) -> str:
+    """Fix common K8s/SRE typos in user query. Case-preserving for the first char.
+
+    Handles plural/suffixed forms automatically — if 'depoyment' is in the map,
+    'depoyments' will also be corrected to 'deployments'.
+    """
+
+    def _replace(m: re.Match) -> str:
+        base = m.group(1)
+        suffix = m.group(2) or ""
+        replacement = _TYPO_MAP[base.lower()]
+        result = replacement + suffix
+        if base[0].isupper():
+            return result[0].upper() + result[1:]
+        return result
+
+    return _TYPO_PATTERN.sub(_replace, query)
+
 
 AgentMode = Literal["sre", "security", "both", "view_designer"]
 

@@ -41,7 +41,7 @@ from .agent import (
     create_client,
     run_agent_streaming,
 )
-from .orchestrator import build_orchestrated_config, classify_intent
+from .orchestrator import build_orchestrated_config, classify_intent, fix_typos
 from .security_agent import (
     ALL_TOOLS as SEC_ALL_TOOLS,
 )
@@ -929,6 +929,9 @@ async def websocket_agent(websocket: WebSocket, mode: str):
             if not content:
                 continue
 
+            # Fix common typos before tool selection
+            content = fix_typos(content)
+
             # Fleet mode — prefix content with fleet context
             fleet_mode = data.get("fleet", False)
             if fleet_mode:
@@ -1117,6 +1120,9 @@ async def websocket_auto_agent(websocket: WebSocket):
             content = content[:8000]
             if not content:
                 continue
+
+            # Fix common typos before classification and tool selection
+            content = fix_typos(content)
 
             # Fleet mode — prefix content with fleet context
             fleet_mode = data.get("fleet", False)

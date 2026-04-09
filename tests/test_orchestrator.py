@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from sre_agent.orchestrator import build_orchestrated_config, classify_intent
+from sre_agent.orchestrator import build_orchestrated_config, classify_intent, fix_typos
 
 
 class TestClassifyIntent:
@@ -93,3 +93,62 @@ class TestBuildOrchestratedConfig:
     def test_both_config_has_write_tools(self):
         config = build_orchestrated_config("both")
         assert len(config["write_tools"]) > 0
+
+
+class TestFixTypos:
+    def test_deployment_typos(self):
+        assert fix_typos("list depoyments") == "list deployments"
+        assert fix_typos("show me deploymnet status") == "show me deployment status"
+        assert fix_typos("why is my deployemnt failing") == "why is my deployment failing"
+
+    def test_namespace_typos(self):
+        assert fix_typos("pods in namepsace production") == "pods in namespace production"
+        assert fix_typos("switch namspace") == "switch namespace"
+
+    def test_service_typos(self):
+        assert fix_typos("list serivces") == "list services"
+        assert fix_typos("describe sevice nginx") == "describe service nginx"
+
+    def test_security_typos(self):
+        assert fix_typos("check for vulerabilities") == "check for vulnerabilities"
+        assert fix_typos("scan for privilige escalation") == "scan for privilege escalation"
+        assert fix_typos("netwrok policy audit") == "network policy audit"
+
+    def test_sre_typos(self):
+        assert fix_typos("pods are crashloping") == "pods are crashlooping"
+        assert fix_typos("query promethues metrics") == "query prometheus metrics"
+        assert fix_typos("rollbak the deployment") == "rollback the deployment"
+        assert fix_typos("scael to 5 replicas") == "scale to 5 replicas"
+
+    def test_dashboard_typos(self):
+        assert fix_typos("create a dahsboard") == "create a dashboard"
+        assert fix_typos("add a widegt") == "add a widget"
+
+    def test_preserves_capitalization(self):
+        assert fix_typos("Depoyment is failing") == "Deployment is failing"
+
+    def test_preserves_correct_words(self):
+        assert fix_typos("list pods in namespace default") == "list pods in namespace default"
+        assert fix_typos("show deployments") == "show deployments"
+
+    def test_empty_string(self):
+        assert fix_typos("") == ""
+
+    def test_multiple_typos_in_one_query(self):
+        result = fix_typos("depoyment in namepsace has serivce issues")
+        assert result == "deployment in namespace has service issues"
+
+    def test_typos_improve_classification(self):
+        """Verify that fixing typos leads to correct intent classification."""
+        # Without fix: 'vulerability' might not match 'vulnerability' keyword
+        raw = "scan for vulerabilities and compliace issues"
+        fixed = fix_typos(raw)
+        mode, is_strong = classify_intent(fixed)
+        assert mode == "security"
+        assert is_strong is True
+
+    def test_dashboard_typo_routes_to_view_designer(self):
+        raw = "create a dahsboard for my cluster"
+        fixed = fix_typos(raw)
+        mode, _ = classify_intent(fixed)
+        assert mode == "view_designer"
