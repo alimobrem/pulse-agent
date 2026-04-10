@@ -210,7 +210,7 @@ def namespace_summary(namespace: str) -> str:
         "kind": "grid",
         "title": f"{namespace} Overview",
         "description": f"Key health indicators for the {namespace} namespace",
-        "columns": 2,
+        "columns": 4,
         "items": [resource_counts] + cards,
     }
     return (text, component)
