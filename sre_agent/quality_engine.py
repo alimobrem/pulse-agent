@@ -14,30 +14,10 @@ from dataclasses import dataclass, field
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
+# Import from component registry (single source of truth)
+from .component_registry import get_valid_kinds as _get_valid_kinds
 
-VALID_KINDS = frozenset(
-    {
-        "metric_card",
-        "chart",
-        "data_table",
-        "info_card_grid",
-        "status_list",
-        "badge_list",
-        "key_value",
-        "relationship_tree",
-        "log_viewer",
-        "yaml_viewer",
-        "node_map",
-        "tabs",
-        "grid",
-        "section",
-        "bar_list",
-        "progress_list",
-        "stat_card",
-        "timeline",
-        "resource_counts",
-    }
-)
+VALID_KINDS = _get_valid_kinds()
 
 METRIC_SOURCE_KINDS = frozenset({"metric_card", "info_card_grid", "grid"})
 
