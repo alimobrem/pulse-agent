@@ -2,6 +2,22 @@
 
 All notable changes to Pulse Agent are documented in this file.
 
+## v1.16.0 (2026-04-09)
+
+### Added
+- **Eval comparison infrastructure** — A/B baseline diffing with `--save-baseline`, `--compare-baseline`, `--fail-on-regression` CLI flags.
+- **Prompt token audit** — `--audit-prompt` shows token cost per prompt section.
+- **Section ablation framework** — test impact of removing prompt sections on eval scores.
+- **View designer eval suite** — 6 scenarios + 4 new replay fixtures (17 total).
+- **Eval history DB** — `eval_runs` table (migration 006) with trends API (`GET /eval/history`, `GET /eval/trend`).
+- **CI automation** — live judge runs on releases, daily cron, prompt change triggers.
+- **GitHub secrets** for Vertex AI (`VERTEX_PROJECT_ID`, `VERTEX_REGION`, `GCP_SA_KEY`).
+- **UI Evals tab** on Agent Settings — quality gate, suite scores, dimension bars, prompt audit viz, sparkline trends.
+- **ToolsView accessibility fixes** — aria-labels, keyboard nav, ToolCard extraction.
+- **View designer prompt improvement** — specific commands, cautious writes.
+- **bump-version.sh** auto-updates umbrella chart subchart.
+- **Replay harness** — thinking parameter support, config singleton fix, model defaults to `claude-sonnet-4-6`.
+
 ## v1.15.0 (2026-04-09)
 
 ### Added
