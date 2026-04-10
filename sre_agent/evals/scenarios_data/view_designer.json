@@ -58,6 +58,20 @@
       "transient_failures": 0
     },
     {
+      "scenario_id": "view_manage_openshiftpulse",
+      "category": "view_designer",
+      "description": "Create a management view for the openshiftpulse namespace showing app health.",
+      "tool_calls": ["namespace_summary", "list_pods", "get_prometheus_query", "get_prometheus_query", "plan_dashboard", "create_dashboard"],
+      "rejected_tools": 0,
+      "duration_seconds": 45,
+      "user_confirmed_resolution": true,
+      "final_response": "Created 'OpenShift Pulse Management' dashboard with 7 widgets: pod count, CPU and memory usage cards, CPU and memory trend charts, and a pod status table showing all 4 pods healthy because no restarts detected.",
+      "verification_passed": true,
+      "rollback_available": false,
+      "retry_attempts": 0,
+      "transient_failures": 0
+    },
+    {
       "scenario_id": "view_too_many_tools",
       "category": "view_designer",
       "description": "Dashboard creation that uses too many tools (inefficient).",

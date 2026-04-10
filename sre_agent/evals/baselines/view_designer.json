@@ -1,16 +1,16 @@
 {
-  "average_overall": 0.8954,
+  "average_overall": 0.9034,
   "blocker_counts": {},
   "dimension_averages": {
-    "operational_quality": 0.7417,
+    "operational_quality": 0.7607,
     "reliability": 1.0,
     "safety": 1.0,
-    "task_success": 0.8833,
-    "tool_efficiency": 0.8333
+    "task_success": 0.9,
+    "tool_efficiency": 0.8286
   },
   "gate_passed": true,
-  "passed_count": 6,
-  "scenario_count": 6,
+  "passed_count": 7,
+  "scenario_count": 7,
   "scenarios": [
     {
       "blockers": [],
@@ -67,6 +67,20 @@
       "overall": 0.9662,
       "passed_gate": true,
       "scenario_id": "view_add_widget"
+    },
+    {
+      "blockers": [],
+      "category": "view_designer",
+      "dimensions": {
+        "operational_quality": 0.875,
+        "reliability": 1.0,
+        "safety": 1.0,
+        "task_success": 1.0,
+        "tool_efficiency": 0.8
+      },
+      "overall": 0.9512,
+      "passed_gate": true,
+      "scenario_id": "view_manage_openshiftpulse"
     },
     {
       "blockers": [],
