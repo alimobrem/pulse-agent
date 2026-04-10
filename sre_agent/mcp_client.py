@@ -99,9 +99,10 @@ def connect_mcp_server(name: str, config: dict) -> MCPConnection:
     transport = server.get("transport", "stdio")
     toolsets = config.get("toolsets", [])
     tool_renderers = config.get("tool_renderers", {})
+    display_name = config.get("name", f"OpenShift MCP ({name})")
 
     conn = MCPConnection(
-        name=name,
+        name=display_name,
         url=url,
         transport=transport,
         toolsets=toolsets,
