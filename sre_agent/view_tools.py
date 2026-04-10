@@ -108,6 +108,19 @@ def namespace_summary(namespace: str) -> str:
             elif ready < desired:
                 degraded_deps += 1
 
+    # Additional resource counts
+    sts_result = safe(lambda: apps.list_namespaced_stateful_set(namespace, limit=500))
+    sts_count = 0 if isinstance(sts_result, ToolError) else len(sts_result.items)
+
+    ds_result = safe(lambda: apps.list_namespaced_daemon_set(namespace, limit=500))
+    ds_count = 0 if isinstance(ds_result, ToolError) else len(ds_result.items)
+
+    svc_result = safe(lambda: core.list_namespaced_service(namespace, limit=500))
+    svc_count = 0 if isinstance(svc_result, ToolError) else len(svc_result.items)
+
+    cm_result = safe(lambda: core.list_namespaced_config_map(namespace, limit=500))
+    cm_count = 0 if isinstance(cm_result, ToolError) else len(cm_result.items)
+
     # Warning events (last hour)
     events_result = safe(lambda: core.list_namespaced_event(namespace, field_selector="type=Warning"))
     warning_count = 0
@@ -121,8 +134,36 @@ def namespace_summary(namespace: str) -> str:
         f"{failed} failed, {crashloop} crashlooping\n"
         f"  Deployments: {total_deps} total — {healthy_deps} healthy, "
         f"{degraded_deps} degraded\n"
+        f"  StatefulSets: {sts_count} | DaemonSets: {ds_count} | "
+        f"Services: {svc_count} | ConfigMaps: {cm_count}\n"
         f"  Warning events: {warning_count}"
     )
+
+    # Build resource counts component (clickable summary cards)
+    resource_counts = {
+        "kind": "resource_counts",
+        "title": f"{namespace} Resources",
+        "namespace": namespace,
+        "items": [
+            {"resource": "pods", "count": total_pods, "gvr": "v1~pods", "status": "error" if failed > 0 else "healthy"},
+            {
+                "resource": "deployments",
+                "count": total_deps,
+                "gvr": "apps~v1~deployments",
+                "status": "warning" if degraded_deps > 0 else "healthy",
+            },
+            {"resource": "statefulsets", "count": sts_count, "gvr": "apps~v1~statefulsets"},
+            {"resource": "daemonsets", "count": ds_count, "gvr": "apps~v1~daemonsets"},
+            {"resource": "services", "count": svc_count, "gvr": "v1~services"},
+            {"resource": "configmaps", "count": cm_count, "gvr": "v1~configmaps"},
+            {
+                "resource": "events",
+                "count": warning_count,
+                "gvr": "v1~events",
+                "status": "warning" if warning_count > 0 else "healthy",
+            },
+        ],
+    }
 
     # Build metric cards with PromQL sparklines
     cards = [
@@ -165,8 +206,8 @@ def namespace_summary(namespace: str) -> str:
         "kind": "grid",
         "title": f"{namespace} Overview",
         "description": f"Key health indicators for the {namespace} namespace",
-        "columns": 4,
-        "items": cards,
+        "columns": 1,
+        "items": [resource_counts] + cards,
     }
     return (text, component)
 

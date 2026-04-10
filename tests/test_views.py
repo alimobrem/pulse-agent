@@ -517,6 +517,10 @@ class TestNamespaceSummary:
             items=[_make_pod(name="p1", phase="Running"), _make_pod(name="p2", phase="Failed")]
         )
         mock_k8s["apps"].list_namespaced_deployment.return_value = SimpleNamespace(items=[])
+        mock_k8s["apps"].list_namespaced_stateful_set.return_value = SimpleNamespace(items=[])
+        mock_k8s["apps"].list_namespaced_daemon_set.return_value = SimpleNamespace(items=[])
+        mock_k8s["core"].list_namespaced_service.return_value = SimpleNamespace(items=[])
+        mock_k8s["core"].list_namespaced_config_map.return_value = SimpleNamespace(items=[])
         mock_k8s["core"].list_namespaced_event.return_value = SimpleNamespace(items=[])
 
         from sre_agent.view_tools import namespace_summary
@@ -526,8 +530,10 @@ class TestNamespaceSummary:
         text, component = result
         assert "default" in text
         assert component["kind"] == "grid"
-        assert len(component["items"]) == 4
-        assert component["items"][0]["kind"] == "metric_card"
+        # First item is resource_counts, then 4 metric cards
+        assert component["items"][0]["kind"] == "resource_counts"
+        assert len(component["items"][0]["items"]) == 7  # pods, deps, sts, ds, svc, cm, events
+        assert component["items"][1]["kind"] == "metric_card"
 
 
 # Need SimpleNamespace for mock
