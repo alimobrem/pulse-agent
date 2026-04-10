@@ -22,7 +22,9 @@ Defines the REST and WebSocket protocol between the Pulse UI and Pulse Agent. Bo
 | `GET` | `/fix-history` | token | Paginated fix history with filters (`status`, `category`, `since`, `search`) |
 | `GET` | `/fix-history/{id}` | token | Single action detail with before/after state |
 | `POST` | `/fix-history/{id}/rollback` | token | Rollback a completed action (supported for `restart_deployment`; returns error for unsupported action types) |
-| `GET` | `/eval/status` | token | Cached quality gate snapshot (release, safety, integration, outcomes) |
+| `GET` | `/eval/status` | token | Cached quality gate snapshot (release, safety, integration, outcomes, view_designer) with `dimension_averages` and `prompt_audit` data |
+| `GET` | `/eval/history` | token | Paginated eval run history for trend charts (query params: `suite`, `days`, `limit`) |
+| `GET` | `/eval/trend` | token | Eval score trend summary with sparkline data (query params: `suite`, `days`) |
 | `GET` | `/briefing` | token | Cluster activity summary for last N hours (greeting, actions, investigations) |
 | `GET` | `/predictions` | token | Returns empty — predictions are WebSocket-only (`/ws/monitor`) |
 | `POST` | `/simulate` | token | Predict impact of a tool action without executing it |
@@ -196,6 +198,85 @@ Query parameters:
 Query parameters:
 - `from`: ISO 8601 timestamp (start of time range)
 - `to`: ISO 8601 timestamp (end of time range)
+
+### `GET /eval/status`
+
+Cached quality gate snapshot. Includes all suites (`release`, `safety`, `integration`, `outcomes`, `view_designer`), per-dimension averages, and prompt token audit data.
+
+```json
+{
+  "suites": {
+    "release": {"score": 0.82, "pass": true, "scenarios": 12},
+    "safety": {"score": 0.95, "pass": true, "scenarios": 3},
+    "view_designer": {"score": 0.78, "pass": true, "scenarios": 6}
+  },
+  "dimension_averages": {
+    "task_success": 0.85,
+    "safety": 0.96,
+    "tool_efficiency": 0.79,
+    "operational_quality": 0.81,
+    "reliability": 0.88
+  },
+  "prompt_audit": {
+    "total_tokens": 4200,
+    "sections": [
+      {"name": "system_prompt", "tokens": 2100, "pct": 50.0},
+      {"name": "runbooks", "tokens": 1200, "pct": 28.6}
+    ]
+  },
+  "timestamp": "2026-04-09T10:00:00Z"
+}
+```
+
+### `GET /eval/history`
+
+Paginated eval run history for trend charts.
+
+Query parameters:
+- `suite`: Filter by suite name (e.g., `release`, `safety`, `view_designer`)
+- `days`: Number of days to look back (default: `30`)
+- `limit`: Maximum number of results (default: `100`)
+
+Auth: Bearer token.
+
+```json
+{
+  "runs": [
+    {
+      "id": 42,
+      "suite": "release",
+      "score": 0.82,
+      "pass": true,
+      "scenarios": 12,
+      "dimension_scores": {"task_success": 0.85, "safety": 0.96},
+      "timestamp": "2026-04-09T10:00:00Z"
+    }
+  ],
+  "total": 150
+}
+```
+
+### `GET /eval/trend`
+
+Eval score trend summary with sparkline data.
+
+Query parameters:
+- `suite`: Suite name (default: `"release"`)
+- `days`: Number of days to look back (default: `30`)
+
+Auth: Bearer token.
+
+```json
+{
+  "suite": "release",
+  "current_score": 0.82,
+  "trend": "stable",
+  "sparkline": [0.80, 0.81, 0.79, 0.82, 0.82],
+  "min": 0.79,
+  "max": 0.82,
+  "runs_count": 5
+}
+```
 
 ---
 
