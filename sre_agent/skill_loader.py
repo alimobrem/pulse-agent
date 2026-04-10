@@ -302,6 +302,52 @@ def get_mode_categories() -> dict[str, list[str] | None]:
     return result
 
 
+def build_config_from_skill(skill: Skill) -> dict:
+    """Build agent config from a skill — same format as orchestrator.build_orchestrated_config().
+
+    Returns dict with: system_prompt, tool_defs, tool_map, write_tools.
+    Tools are selected from the full tool registry based on the skill's categories.
+    Multiple skills share the same tools and MCP connections.
+    """
+    from .harness import ALWAYS_INCLUDE, TOOL_CATEGORIES
+    from .tool_registry import TOOL_REGISTRY, WRITE_TOOL_NAMES
+
+    # Full registry includes ALL tools: SRE, security, view designer, MCP, etc.
+    # If registry is populated, use it. Otherwise fall back to legacy module-level maps.
+    if TOOL_REGISTRY:
+        all_tools = dict(TOOL_REGISTRY)
+    else:
+        # Fallback: merge tool maps from all agent modules
+        from .agent import TOOL_MAP as SRE_MAP
+        from .security_agent import TOOL_MAP as SEC_MAP
+        from .view_designer import TOOL_MAP as VD_MAP
+
+        all_tools = {**SRE_MAP, **SEC_MAP, **VD_MAP}
+
+    if not skill.categories:
+        # No categories = all tools (like view_designer)
+        tool_map = all_tools
+        tool_defs = [t.to_dict() for t in tool_map.values()]
+    else:
+        # Collect tools from the skill's categories + ALWAYS_INCLUDE
+        tool_names = set(ALWAYS_INCLUDE)
+        for cat_name in skill.categories:
+            cat = TOOL_CATEGORIES.get(cat_name, {})
+            tool_names.update(cat.get("tools", []))
+
+        tool_map = {n: t for n, t in all_tools.items() if n in tool_names}
+        tool_defs = [t.to_dict() for t in tool_map.values()]
+
+    write_tools = set(WRITE_TOOL_NAMES) if skill.write_tools else set()
+
+    return {
+        "system_prompt": skill.system_prompt,
+        "tool_defs": tool_defs,
+        "tool_map": tool_map,
+        "write_tools": write_tools,
+    }
+
+
 def load_skill_evals(skill_name: str) -> list[dict]:
     """Load eval scenarios from a skill's evals.yaml."""
     skill = get_skill(skill_name)
