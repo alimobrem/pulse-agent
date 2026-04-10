@@ -165,42 +165,38 @@ def namespace_summary(namespace: str) -> str:
         ],
     }
 
-    # Build metric cards with PromQL sparklines (clickable)
+    # Build metric cards — only trends that ADD info beyond the resource counts row
     cards = [
         {
             "kind": "metric_card",
-            "title": "Pods Running",
-            "value": str(running),
-            "status": "healthy" if failed + crashloop == 0 else "warning",
-            "description": f"of {total_pods} total",
-            "query": f"count(kube_pod_status_phase{{namespace=\"{namespace}\",phase='Running'}})",
-            "color": "#10b981",
-            "link": f"/r/v1~pods?ns={namespace}",
+            "title": "CPU Usage",
+            "query": f'sum(rate(container_cpu_usage_seconds_total{{namespace="{namespace}",container!=""}}[5m]))',
+            "color": "#3b82f6",
+            "unit": " cores",
         },
         {
             "kind": "metric_card",
-            "title": "Pod Restarts",
+            "title": "Memory Usage",
+            "query": f'sum(container_memory_working_set_bytes{{namespace="{namespace}",container!=""}}) / 1024 / 1024 / 1024',
+            "color": "#8b5cf6",
+            "unit": " Gi",
+        },
+        {
+            "kind": "metric_card",
+            "title": "Restart Rate",
             "value": str(crashloop),
             "status": "healthy" if crashloop == 0 else "error",
-            "description": f"{failed} failed",
+            "description": f"{failed} failed" if failed else "none",
             "query": f'sum(rate(kube_pod_container_status_restarts_total{{namespace="{namespace}"}}[5m]))',
             "color": "#ef4444" if crashloop > 0 else "#10b981",
             "link": f"/r/v1~pods?ns={namespace}",
         },
         {
             "kind": "metric_card",
-            "title": "Deployments",
-            "value": f"{healthy_deps}/{total_deps}",
-            "status": "healthy" if degraded_deps == 0 else "warning",
-            "description": "healthy",
-            "link": f"/r/apps~v1~deployments?ns={namespace}",
-        },
-        {
-            "kind": "metric_card",
-            "title": "Warnings",
+            "title": "Warning Events",
             "value": str(warning_count),
             "status": "healthy" if warning_count == 0 else "warning",
-            "description": "active events",
+            "description": "active",
             "query": f"count(kube_event_count{{namespace=\"{namespace}\",type='Warning'}}) or vector(0)",
             "color": "#f59e0b" if warning_count > 0 else "#10b981",
             "link": f"/r/v1~events?ns={namespace}",
