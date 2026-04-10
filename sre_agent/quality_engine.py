@@ -35,6 +35,7 @@ VALID_KINDS = frozenset(
         "progress_list",
         "stat_card",
         "timeline",
+        "resource_counts",
     }
 )
 
@@ -423,6 +424,17 @@ def _validate_component(comp: dict, result: QualityResult) -> None:
                     result.errors.append("timeline lane missing 'label'.")
                 if not lane.get("events"):
                     result.errors.append(f"timeline lane '{lane.get('label', '?')}' must have at least 1 event.")
+
+    elif kind == "resource_counts":
+        items = comp.get("items")
+        if not items:
+            result.errors.append("resource_counts must have 'items'.")
+        else:
+            for item in items:
+                if not item.get("resource"):
+                    result.errors.append("resource_counts item missing 'resource'.")
+                if "count" not in item:
+                    result.errors.append("resource_counts item missing 'count'.")
 
 
 def _check_generic_title(title: str, kind: str, result: QualityResult) -> None:

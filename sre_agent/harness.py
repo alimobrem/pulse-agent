@@ -770,6 +770,12 @@ Include `query` for live sparklines. Status: healthy, warning, error.""",
  "nodes": [{"name": "worker-1", "status": "ready", "roles": ["worker"], "podCount": 15,
             "cpuPct": 45.2, "memPct": 62.1}]}
 Use `visualize_nodes()` for pre-built node maps.""",
+    "resource_counts": """resource_counts -- Clickable resource summary cards with counts and icons
+{"kind": "resource_counts", "title": "production Resources", "namespace": "production",
+ "items": [{"resource": "pods", "count": 42, "gvr": "v1~pods", "status": "healthy"},
+           {"resource": "deployments", "count": 12, "gvr": "apps~v1~deployments"},
+           {"resource": "services", "count": 8, "gvr": "v1~services"}]}
+Each card links to its resource list page. Returned by namespace_summary().""",
 }
 
 # Map tools to the component kinds they produce
