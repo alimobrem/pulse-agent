@@ -328,6 +328,9 @@ async def update_mcp_toolsets(body: dict, _auth=Depends(verify_token)):
 
         deploy_name = mcp_deploy.metadata.name
 
+        # Save old args for rollback if new toolsets crash
+        old_args = list(mcp_deploy.spec.template.spec.containers[0].args or [])
+
         # Build new args with updated toolsets
         new_args = [
             "--port",
@@ -347,17 +350,64 @@ async def update_mcp_toolsets(body: dict, _auth=Depends(verify_token)):
             body={"spec": {"template": {"spec": {"containers": [{"name": "mcp-server", "args": new_args}]}}}},
         )
 
-        # Wait for rollout (poll for up to 30s)
-        for _ in range(15):
+        # Wait for rollout — detect crashloop and revert if needed
+        healthy = False
+        for attempt in range(20):
             time.sleep(2)
             dep = apps.read_namespaced_deployment(deploy_name, ns)
+
+            # Check for successful rollout
             if (
                 dep.status.ready_replicas
                 and dep.status.ready_replicas >= 1
                 and dep.status.updated_replicas
                 and dep.status.updated_replicas >= 1
             ):
+                healthy = True
                 break
+
+            # Check for crashloop after initial grace period
+            if attempt >= 5:
+                from ..k8s_client import get_core_client
+
+                core = get_core_client()
+                pods = core.list_namespaced_pod(
+                    namespace=ns,
+                    label_selector="app.kubernetes.io/component=mcp-server",
+                )
+                for pod in pods.items:
+                    for cs in pod.status.container_statuses or []:
+                        waiting = cs.state.waiting if cs.state else None
+                        if waiting and waiting.reason in ("CrashLoopBackOff", "Error", "RunContainerError"):
+                            # Revert to old args
+                            apps.patch_namespaced_deployment(
+                                name=deploy_name,
+                                namespace=ns,
+                                body={
+                                    "spec": {
+                                        "template": {"spec": {"containers": [{"name": "mcp-server", "args": old_args}]}}
+                                    }
+                                },
+                            )
+                            # Extract which toolsets were added
+                            old_toolset_str = ""
+                            for j, arg in enumerate(old_args):
+                                if arg == "--toolsets" and j + 1 < len(old_args):
+                                    old_toolset_str = old_args[j + 1]
+                            old_ts = set(old_toolset_str.split(",")) if old_toolset_str else set()
+                            new_ts = set(toolsets) - old_ts
+                            raise HTTPException(
+                                status_code=400,
+                                detail=f"MCP server crashed with toolsets {list(new_ts)}. "
+                                f"These likely require operators not installed on this cluster. "
+                                f"Reverted to: {sorted(old_ts)}",
+                            )
+
+        if not healthy:
+            raise HTTPException(
+                status_code=500,
+                detail="MCP server did not become ready within 40 seconds. Check pod logs.",
+            )
 
         # Reconnect MCP client to pick up new tools
         from ..mcp_client import disconnect_all

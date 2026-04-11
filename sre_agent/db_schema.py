@@ -173,7 +173,8 @@ CREATE TABLE IF NOT EXISTS tool_usage (
     duration_ms     INTEGER,
     result_bytes    INTEGER,
     requires_confirmation BOOLEAN DEFAULT FALSE,
-    was_confirmed   BOOLEAN
+    was_confirmed   BOOLEAN,
+    tool_source     TEXT DEFAULT 'native'
 );
 """
 
