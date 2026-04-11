@@ -3,10 +3,11 @@ name: security
 version: 1
 description: Security scanning, RBAC analysis, and compliance checks
 keywords:
-  - security, rbac, scc, vulnerability, compliance, audit
+  - security, secure, rbac, scc, vulnerability, compliance, audit
   - scan, privileged, network policy, secret, image, registry
   - pod security, role binding, cluster admin, overpermissive
   - cve, container security, hardening, posture
+  - permission, access control, tls, certificate, wildcard
 categories:
   - security
   - networking
