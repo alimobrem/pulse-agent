@@ -694,6 +694,7 @@ ALWAYS_INCLUDE = {
     "request_sre_investigation",
     "list_my_skills",
     "list_my_tools",
+    "list_ui_components",
 }
 
 

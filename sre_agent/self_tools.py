@@ -1,4 +1,7 @@
-"""Self-description tools — let the agent tell users what it can do."""
+"""Self-description tools — let the agent tell users what it can do.
+
+Tools for agent self-awareness: skills, tools, and UI components.
+"""
 
 from __future__ import annotations
 
@@ -53,5 +56,31 @@ def list_my_tools() -> str:
     if mcp:
         lines.append(f"\n**MCP ({len(mcp)}):**")
         lines.extend(mcp)
+
+    return "\n".join(lines)
+
+
+@beta_tool
+def list_ui_components() -> str:
+    """List all UI component types the agent can render in dashboards and chat responses.
+
+    Call when the user asks what visualizations, components, or widget types are available.
+    """
+    from .component_registry import COMPONENT_REGISTRY
+
+    lines = [f"I can render {len(COMPONENT_REGISTRY)} UI component types:\n"]
+
+    by_category: dict[str, list[tuple[str, str]]] = {}
+    for name, comp in COMPONENT_REGISTRY.items():
+        cat = comp.category
+        if cat not in by_category:
+            by_category[cat] = []
+        mutations = f" (editable: {', '.join(comp.supports_mutations)})" if comp.supports_mutations else ""
+        by_category[cat].append((name, f"{comp.description}{mutations}"))
+
+    for cat in sorted(by_category):
+        lines.append(f"\n**{cat.title()}:**")
+        for name, desc in sorted(by_category[cat]):
+            lines.append(f"- `{name}` — {desc}")
 
     return "\n".join(lines)
