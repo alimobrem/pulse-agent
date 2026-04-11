@@ -695,6 +695,8 @@ ALWAYS_INCLUDE = {
     "list_my_skills",
     "list_my_tools",
     "list_ui_components",
+    "list_promql_recipes",
+    "list_runbooks",
 }
 
 
