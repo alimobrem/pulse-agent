@@ -778,12 +778,57 @@ def build_config_from_skill(skill: Skill) -> dict:
     tool_defs = [t.to_dict() for t in tool_map.values()]
     write_tools = set(WRITE_TOOL_NAMES) if skill.write_tools else set()
 
+    # Build component hint from skill's context
+    component_hint = _build_component_hint(skill, list(tool_map.keys()))
+
     return {
         "system_prompt": skill.system_prompt,
         "tool_defs": tool_defs,
         "tool_map": tool_map,
         "write_tools": write_tools,
+        "component_hint": component_hint,
     }
+
+
+def _build_component_hint(skill: Skill, tool_names: list[str]) -> str:
+    """Build component rendering guidance tailored to a skill.
+
+    - view_designer/security: empty (view_designer has its own guide, security doesn't render)
+    - Other skills: relevant component schemas based on offered tools
+    - Skills with components.yaml: include custom component definitions
+    """
+    if skill.name in ("view_designer", "security"):
+        return ""
+
+    from .harness import _TOOL_COMPONENTS, COMPONENT_SCHEMAS
+
+    # Select schemas relevant to the skill's tools
+    relevant: set[str] = {"data_table"}  # always include
+    for tool in tool_names:
+        if tool in _TOOL_COMPONENTS:
+            relevant.update(_TOOL_COMPONENTS[tool])
+
+    schemas = [COMPONENT_SCHEMAS[k] for k in sorted(relevant) if k in COMPONENT_SCHEMAS]
+
+    hint = "\n## Component Catalog\n\n" + "\n\n".join(schemas)
+
+    # Append custom components from skill's components.yaml
+    components_file = skill.path / "components.yaml"
+    if components_file.exists():
+        try:
+            import yaml
+
+            data = yaml.safe_load(components_file.read_text(encoding="utf-8"))
+            custom = data.get("components", {})
+            if custom:
+                hint += "\n\n## Custom Components\n"
+                for name, spec in custom.items():
+                    desc = spec.get("description", "")
+                    hint += f"\n{name} — {desc}"
+        except Exception:
+            pass
+
+    return hint
 
 
 def load_skill_evals(skill_name: str) -> list[dict]:
