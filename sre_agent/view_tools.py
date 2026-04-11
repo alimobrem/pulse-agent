@@ -41,20 +41,17 @@ def get_current_user() -> str:
 
 
 @beta_tool
-def create_dashboard(title: str, description: str = "", template: str = "") -> str:
-    """Create a custom dashboard view. ALWAYS call critique_view(view_id) immediately after this to check quality.
+def create_dashboard(title: str, description: str = "") -> str:
+    """Create a custom dashboard view. Quality is auto-validated on save — no need to call critique_view.
 
-    Layout is computed automatically based on component types — no template needed.
+    Layout is computed automatically based on component types.
 
     Args:
         title: Name for the dashboard (e.g. "SRE Overview", "Node Health").
         description: Brief description of what the dashboard shows.
-        template: Deprecated — layout is now automatic. Ignored if provided.
     """
     view_id = f"cv-{uuid.uuid4().hex[:12]}"
     kwargs = {"view_id": view_id, "title": title, "description": description}
-    if template:
-        kwargs["template"] = template
     return _signal(
         "view_spec",
         f"Created view '{title}' with ID {view_id}. "
