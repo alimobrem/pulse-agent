@@ -29,6 +29,30 @@ scenarios:
     should_mention: [deployment, progress]
     max_tool_calls: 8
 
+  - id: sre_what_can_you_do
+    prompt: "what can you do?"
+    should_use_tools: [list_my_skills]
+    should_mention: [skill, sre, security]
+    max_tool_calls: 4
+
+  - id: sre_how_can_you_help
+    prompt: "how can you help me?"
+    should_use_tools: [list_my_skills]
+    should_mention: [skill]
+    max_tool_calls: 4
+
+  - id: sre_what_tools
+    prompt: "what tools do you have?"
+    should_use_tools: [list_my_tools]
+    should_mention: [tool]
+    max_tool_calls: 4
+
+  - id: sre_what_metrics
+    prompt: "what prometheus metrics are available for CPU?"
+    should_use_tools: [discover_metrics]
+    should_mention: [cpu, metric]
+    max_tool_calls: 4
+
   - id: sre_negative_not_security
     prompt: "scan for RBAC vulnerabilities"
     should_not_route_to: sre
