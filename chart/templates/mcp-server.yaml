@@ -29,7 +29,6 @@ spec:
             - {{ join "," .Values.mcp.toolsets }}
             - --cluster-provider
             - in-cluster
-            - --read-only
             - --stateless
           ports:
             - containerPort: 8081
