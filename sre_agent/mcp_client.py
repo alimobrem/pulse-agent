@@ -33,6 +33,8 @@ class MCPConnection:
     connected: bool = False
     tools: list[str] = field(default_factory=list)
     tool_schemas: dict[str, dict] = field(default_factory=dict)  # name → {description, inputSchema}
+    prompts: list[str] = field(default_factory=list)
+    prompt_schemas: dict[str, dict] = field(default_factory=dict)  # name → {description, arguments}
     process: Any = None  # subprocess for stdio transport
     error: str = ""
 
@@ -240,10 +242,46 @@ def _connect_sse(conn: MCPConnection) -> MCPConnection:
 
         conn.tools = [t["name"] for t in tool_defs]
         conn.tool_schemas = {t["name"]: t for t in tool_defs}
+
+        # Discover prompts (MCP prompts/list)
+        try:
+            prompts_request = {
+                "jsonrpc": "2.0",
+                "id": next(_request_id_counter),
+                "method": "prompts/list",
+                "params": {},
+            }
+            prompts_resp, session_id = _mcp_post(base_url, prompts_request, session_id)
+            prompts_raw = prompts_resp.get("result", {}).get("prompts", [])
+            for p in prompts_raw:
+                name = p.get("name", "")
+                if name:
+                    conn.prompts.append(name)
+                    # Convert prompt arguments to tool-style inputSchema
+                    props = {}
+                    required = []
+                    for arg in p.get("arguments", []):
+                        arg_name = arg.get("name", "")
+                        if arg_name:
+                            props[arg_name] = {
+                                "type": "string",
+                                "description": arg.get("description", ""),
+                            }
+                            if arg.get("required"):
+                                required.append(arg_name)
+                    conn.prompt_schemas[name] = {
+                        "name": name,
+                        "description": p.get("description", f"MCP prompt: {name}"),
+                        "inputSchema": {"type": "object", "properties": props, "required": required},
+                    }
+            logger.info("MCP SSE '%s' discovered %d prompts: %s", conn.name, len(conn.prompts), conn.prompts)
+        except Exception as e:
+            logger.debug("Prompt discovery failed for '%s': %s", conn.name, e)
+
         conn.connected = True
         conn._sse_base_url = base_url
         conn._sse_session_id = session_id
-        logger.info("MCP SSE '%s' connected: %d tools", conn.name, len(conn.tools))
+        logger.info("MCP SSE '%s' connected: %d tools, %d prompts", conn.name, len(conn.tools), len(conn.prompts))
 
     except urllib.error.URLError as e:
         conn.error = f"Cannot connect to MCP server at {base_url}: {e.reason}"
@@ -378,6 +416,39 @@ def _call_mcp_tool_sse(conn: MCPConnection, tool_name: str, arguments: dict) -> 
         return f"Error calling MCP tool '{tool_name}' via SSE: {e}"
 
 
+def call_mcp_prompt(conn: MCPConnection, prompt_name: str, arguments: dict) -> str:
+    """Call an MCP prompt and return the text result."""
+    if not conn.connected:
+        return f"Error: MCP server '{conn.name}' is not connected"
+
+    base_url = getattr(conn, "_sse_base_url", conn.url.rstrip("/"))
+    session_id = getattr(conn, "_sse_session_id", "")
+    try:
+        request = {
+            "jsonrpc": "2.0",
+            "id": next(_request_id_counter),
+            "method": "prompts/get",
+            "params": {"name": prompt_name, "arguments": arguments},
+        }
+        response, _ = _mcp_post(base_url, request, session_id)
+
+        if "error" in response:
+            return f"Error: {response['error'].get('message', 'Unknown error')}"
+
+        result = response.get("result", {})
+        messages = result.get("messages", [])
+        texts = []
+        for msg in messages:
+            content = msg.get("content", {})
+            if isinstance(content, dict) and content.get("type") == "text":
+                texts.append(content.get("text", ""))
+            elif isinstance(content, str):
+                texts.append(content)
+        return "\n\n".join(texts) if texts else json.dumps(result)
+    except Exception as e:
+        return f"Error calling MCP prompt '{prompt_name}': {e}"
+
+
 def register_mcp_tools(conn: MCPConnection) -> int:
     """Register MCP tools in the Pulse tool registry with UI rendering.
 
@@ -409,7 +480,28 @@ def register_mcp_tools(conn: MCPConnection) -> int:
         register_tool(tool)
         count += 1
 
-    logger.info("Registered %d MCP tools from '%s'", count, conn.name)
+    # Register MCP prompts as tools (prompts are callable workflows)
+    for prompt_name in conn.prompts:
+
+        def _make_prompt_fn(pn, cn):
+            def prompt_fn(**kwargs):
+                raw_output = call_mcp_prompt(cn, pn, kwargs)
+                return (raw_output, None)
+
+            prompt_fn.__name__ = pn
+            prompt_fn.__doc__ = f"MCP prompt: {pn} (from {cn.name})"
+            return prompt_fn
+
+        fn = _make_prompt_fn(prompt_name, conn)
+        schema_def = conn.prompt_schemas.get(prompt_name, {})
+        description = schema_def.get("description", f"MCP prompt from {conn.name}")
+        input_schema = schema_def.get("inputSchema", {"type": "object", "properties": {}, "required": []})
+        tool = MCPTool(prompt_name, fn, description, input_schema=input_schema)
+        register_tool(tool)
+        conn.tools.append(prompt_name)
+        count += 1
+
+    logger.info("Registered %d MCP tools+prompts from '%s'", count, conn.name)
     return count
 
 
@@ -454,6 +546,7 @@ def list_mcp_connections() -> list[dict]:
             "transport": c.transport,
             "connected": c.connected,
             "tools": c.tools,
+            "prompts": c.prompts,
             "toolsets": c.toolsets,
             "error": c.error,
         }
