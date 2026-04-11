@@ -700,6 +700,7 @@ ALWAYS_INCLUDE = {
     "explain_resource",
     "list_api_resources",
     "list_deprecated_apis",
+    "create_skill",
 }
 
 

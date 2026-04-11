@@ -27,6 +27,7 @@ from .k8s_tools import WRITE_TOOLS
 from .predict_tools import PREDICT_TOOLS
 from .runbooks import ALERT_TRIAGE_CONTEXT, RUNBOOKS  # noqa: F401 — RUNBOOKS re-exported for backward compat
 from .self_tools import (
+    create_skill,
     explain_resource,
     list_api_resources,
     list_deprecated_apis,
@@ -62,6 +63,7 @@ ALL_TOOLS = (
         explain_resource,
         list_api_resources,
         list_deprecated_apis,
+        create_skill,
     ]
 )
 
