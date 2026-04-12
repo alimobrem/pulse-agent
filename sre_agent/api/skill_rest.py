@@ -170,6 +170,85 @@ async def update_skill(name: str, body: dict, _auth=Depends(verify_token)):
     }
 
 
+_BUILTIN_SKILLS = {"sre", "security", "view_designer"}
+
+
+@router.delete("/admin/skills/{name}")
+async def delete_skill_endpoint(name: str, _auth=Depends(verify_token)):
+    """Delete a user-created skill. Built-in skills cannot be deleted."""
+    from ..skill_loader import get_skill as _get
+    from ..skill_loader import reload_skills as _reload
+
+    skill = _get(name)
+    if not skill:
+        raise HTTPException(status_code=404, detail=f"Skill '{name}' not found")
+
+    if name in _BUILTIN_SKILLS:
+        raise HTTPException(status_code=403, detail=f"Cannot delete built-in skill '{name}'")
+
+    skill_dir = skill.path
+    if skill_dir.exists():
+        shutil.rmtree(skill_dir)
+
+    _reload()
+    return {"name": name, "deleted": True}
+
+
+@router.post("/admin/skills/{name}/clone")
+async def clone_skill(name: str, body: dict, _auth=Depends(verify_token)):
+    """Clone an existing skill as a template for a new one."""
+    from ..skill_loader import _SKILLS_DIR
+    from ..skill_loader import get_skill as _get
+    from ..skill_loader import reload_skills as _reload
+
+    source = _get(name)
+    if not source:
+        raise HTTPException(status_code=404, detail=f"Skill '{name}' not found")
+
+    new_name = body.get("new_name", "")
+    if not new_name:
+        raise HTTPException(status_code=400, detail="new_name is required")
+
+    new_description = body.get("description", source.description)
+
+    # Read source skill.md
+    source_file = source.path / "skill.md"
+    if not source_file.exists():
+        raise HTTPException(status_code=404, detail="Source skill.md not found")
+
+    content = source_file.read_text(encoding="utf-8")
+
+    # Replace name and description in frontmatter
+    import re
+
+    content = re.sub(r"^name:\s*.*$", f"name: {new_name}", content, count=1, flags=re.MULTILINE)
+    content = re.sub(r"^description:\s*.*$", f"description: {new_description}", content, count=1, flags=re.MULTILINE)
+    content = re.sub(r"^version:\s*\d+", "version: 1", content, count=1, flags=re.MULTILINE)
+
+    # Write to new directory
+    new_dir = _SKILLS_DIR / new_name.replace("_", "-")
+    if new_dir.exists():
+        raise HTTPException(status_code=409, detail=f"Skill '{new_name}' already exists")
+
+    new_dir.mkdir(parents=True, exist_ok=True)
+    (new_dir / "skill.md").write_text(content, encoding="utf-8")
+
+    # Copy evals.yaml if exists
+    source_evals = source.path / "evals.yaml"
+    if source_evals.exists():
+        shutil.copy2(source_evals, new_dir / "evals.yaml")
+
+    _reload()
+    new_skill = _get(new_name)
+
+    return {
+        "name": new_name,
+        "cloned_from": name,
+        "version": new_skill.version if new_skill else 1,
+        "created": True,
+    }
+
+
 @router.get("/admin/skills/{name}/versions")
 async def list_skill_versions(name: str, _auth=Depends(verify_token)):
     """List all archived versions of a skill."""
