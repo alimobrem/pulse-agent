@@ -168,13 +168,41 @@ def get_prompt_stats(days: int = 30) -> dict:
         cache_hits = cache_row["cache_hits"] if cache_row else 0
         cache_hit_rate = cache_hits / cache_total if cache_total > 0 else 0.0
 
+        # Section averages — aggregate across all prompts
+        section_avg: dict[str, float] = {}
+        try:
+            section_rows = db.fetchall(
+                "SELECT sections FROM prompt_log "
+                "WHERE timestamp > NOW() - INTERVAL '1 day' * %s "
+                "AND sections IS NOT NULL",
+                (days,),
+            )
+            section_counts: dict[str, list[int]] = {}
+            for row in section_rows or []:
+                secs = row["sections"]
+                if isinstance(secs, str):
+                    secs = json.loads(secs)
+                if isinstance(secs, dict):
+                    for k, v in secs.items():
+                        section_counts.setdefault(k, []).append(v)
+            section_avg = {k: sum(v) / len(v) for k, v in section_counts.items() if v}
+        except Exception:
+            pass
+
+        # Skill names for the versions picker
+        skill_names = [row["skill_name"] for row in by_skill_rows] if by_skill_rows else []
+
         return {
             "total_prompts": overall["total"] if overall else 0,
             "avg_tokens": int(overall["avg_tokens"]) if overall else 0,
             "avg_static_chars": int(overall["avg_static"]) if overall else 0,
             "avg_dynamic_chars": int(overall["avg_dynamic"]) if overall else 0,
+            "static_chars": int(overall["avg_static"]) if overall else 0,
+            "dynamic_chars": int(overall["avg_dynamic"]) if overall else 0,
             "by_skill": [dict(row) for row in by_skill_rows],
             "cache_hit_rate": round(cache_hit_rate, 3),
+            "section_avg": section_avg,
+            "skill_names": skill_names,
             "days": days,
         }
     except Exception:

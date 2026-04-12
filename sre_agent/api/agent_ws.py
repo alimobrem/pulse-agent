@@ -100,9 +100,11 @@ async def _run_agent_ws(
     """Run an agent turn and stream results over WebSocket."""
     from ..view_tools import set_current_user
 
+    global _turn_start
     set_current_user(current_user)
     client = create_client()
     ws_id = session_id
+    _turn_start = time.monotonic()
 
     # Capture the running loop BEFORE entering the thread
     loop = asyncio.get_running_loop()
@@ -417,7 +419,22 @@ async def _run_agent_ws(
         except Exception:
             pass
 
+    # Store turn metadata for the caller (ws_endpoints.py) to use in skill analytics
+    _last_turn_meta.update(
+        {
+            "tools_called": list(session_tools),
+            "tool_count": len(session_tools),
+            "duration_ms": int((time.monotonic() - _turn_start) * 1000) if _turn_start else 0,
+            **turn_token_usage,
+        }
+    )
+
     return full_response
+
+
+# Module-level storage for turn metadata (consumed by ws_endpoints after each turn)
+_last_turn_meta: dict = {}
+_turn_start: float = 0
 
 
 def _cleanup_stale_pending():

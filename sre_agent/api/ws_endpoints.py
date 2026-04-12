@@ -519,8 +519,9 @@ async def websocket_auto_agent(websocket: WebSocket):
                 except Exception:
                     pass  # Client disconnected -- expected during long queries
 
-                # Record skill invocation for analytics
+                # Record skill invocation for analytics (with tool/token data)
                 try:
+                    from ..api.agent_ws import _last_turn_meta
                     from ..skill_analytics import record_skill_invocation
                     from ..skill_loader import get_skill as _get_skill_for_analytics
 
@@ -531,6 +532,10 @@ async def websocket_auto_agent(websocket: WebSocket):
                         skill_name=last_mode,
                         skill_version=_sk.version if _sk else 0,
                         query_summary=content[:200],
+                        tools_called=_last_turn_meta.get("tools_called"),
+                        duration_ms=_last_turn_meta.get("duration_ms", 0),
+                        input_tokens=_last_turn_meta.get("input_tokens", 0),
+                        output_tokens=_last_turn_meta.get("output_tokens", 0),
                     )
                 except Exception:
                     logger.debug("Failed to record skill invocation", exc_info=True)
