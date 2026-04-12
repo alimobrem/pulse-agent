@@ -29,6 +29,7 @@ scenarios:
     should_mention: [deployment, progress]
     max_tool_calls: 8
 
+  # Self-description: agent MUST call tools, not answer from memory
   - id: sre_what_can_you_do
     prompt: "what can you do?"
     should_use_tools: [list_my_skills]
@@ -51,6 +52,42 @@ scenarios:
     prompt: "what prometheus metrics are available for CPU?"
     should_use_tools: [discover_metrics]
     should_mention: [cpu, metric]
+    max_tool_calls: 4
+
+  - id: sre_what_components
+    prompt: "what UI components can you render?"
+    should_use_tools: [list_ui_components]
+    should_mention: [data_table]
+    max_tool_calls: 4
+
+  - id: sre_what_runbooks
+    prompt: "what runbooks do you have?"
+    should_use_tools: [list_runbooks]
+    should_mention: [crashloop]
+    max_tool_calls: 4
+
+  - id: sre_what_promql_recipes
+    prompt: "show me your PromQL recipes"
+    should_use_tools: [list_promql_recipes]
+    should_mention: [recipe]
+    max_tool_calls: 4
+
+  - id: sre_create_skill
+    prompt: "create a skill for database troubleshooting"
+    should_use_tools: [create_skill]
+    should_not_use_tools: [list_pods, get_events]
+    should_mention: [skill, created]
+    max_tool_calls: 4
+
+  - id: sre_help_short
+    prompt: "help"
+    should_use_tools: [list_my_skills]
+    max_tool_calls: 4
+
+  - id: sre_capabilities_phrasing
+    prompt: "tell me about your capabilities"
+    should_use_tools: [list_my_skills]
+    should_mention: [skill]
     max_tool_calls: 4
 
   - id: sre_explain_deployment
