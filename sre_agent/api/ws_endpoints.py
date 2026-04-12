@@ -353,7 +353,7 @@ async def websocket_auto_agent(websocket: WebSocket):
                 )
 
             # --- Auto-classify intent with sticky mode ---
-            # Try skill-based routing first (supports custom skills like capacity_planner)
+            # Try skill-based routing first (supports custom skills)
             # Fall back to legacy classify_intent for backward compat
             try:
                 from ..skill_loader import classify_query
@@ -384,7 +384,7 @@ async def websocket_auto_agent(websocket: WebSocket):
             if last_mode == "view_designer" and intent != "view_designer":
                 # Break out of view_designer for:
                 # 1. Unambiguous SRE/Security keywords
-                # 2. Custom skill matches (database_troubleshooter, capacity_planner, etc.)
+                # 2. Custom skill matches (database_troubleshooter, etc.)
                 has_hard_sre = any(kw in q_lower for kw in _HARD_SWITCH_SRE)
                 has_hard_sec = any(kw in q_lower for kw in _HARD_SWITCH_SEC)
                 is_custom_skill = intent not in ("sre", "security", "view_designer", "both")

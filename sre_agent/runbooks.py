@@ -121,8 +121,15 @@ _RUNBOOK_KEYWORDS: dict[str, list[str]] = {
 }
 
 
-def select_runbooks(query: str, max_runbooks: int | None = None) -> str:
-    """Select relevant runbooks based on query keywords. Returns formatted text."""
+def select_runbooks(query: str, max_runbooks: int | None = None, max_chars: int = 2000) -> str:
+    """Select relevant runbooks based on query keywords. Returns formatted text.
+
+    Args:
+        query: User query to match against runbook keywords.
+        max_runbooks: Maximum number of runbooks to include.
+        max_chars: Maximum total characters for runbook content (default 2000).
+            After selecting runbooks, truncates if total exceeds this limit.
+    """
     import os
 
     if max_runbooks is None:
@@ -146,7 +153,16 @@ def select_runbooks(query: str, max_runbooks: int | None = None) -> str:
         # No match — include the 2 most common (crashloop, deployment_stuck)
         selected = [RUNBOOK_CHUNKS["crashloop"], RUNBOOK_CHUNKS["deployment_stuck"]]
 
-    return "## Relevant Runbooks\n\n" + "\n\n".join(selected)
+    # Truncate if total exceeds max_chars
+    result_parts: list[str] = []
+    total = 0
+    for chunk in selected:
+        if total + len(chunk) > max_chars and result_parts:
+            break
+        result_parts.append(chunk)
+        total += len(chunk)
+
+    return "## Relevant Runbooks\n\n" + "\n\n".join(result_parts)
 
 
 # Full concatenation for backward compatibility

@@ -77,6 +77,10 @@ async def lifespan(app: FastAPI):
                         logger.warning("MCP failed for skill '%s': %s", skill.name, conn.error)
                 except Exception as e:
                     logger.warning("MCP init failed for skill '%s': %s", skill.name, e)
+        # Re-validate skills now that TOOL_REGISTRY is populated
+        from ..skill_loader import revalidate_skills
+
+        revalidate_skills()
     except Exception as e:
         logger.warning("Skill loading failed: %s", e)
 

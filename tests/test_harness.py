@@ -247,10 +247,10 @@ class TestCategoryCoverage:
             timeline_tools,  # noqa: F401
             view_tools,  # noqa: F401
         )
-        from sre_agent.skill_loader import ALWAYS_INCLUDE, TOOL_CATEGORIES
+        from sre_agent.skill_loader import _SELF_DESCRIBE_TOOLS, ALWAYS_INCLUDE, TOOL_CATEGORIES
         from sre_agent.tool_registry import TOOL_REGISTRY
 
-        all_categorized = set(ALWAYS_INCLUDE)
+        all_categorized = set(ALWAYS_INCLUDE) | set(_SELF_DESCRIBE_TOOLS)
         for config in TOOL_CATEGORIES.values():
             all_categorized.update(config["tools"])
 

@@ -216,17 +216,41 @@ def _build_keyword_index(skills: dict[str, Skill]) -> list[tuple[str, str, int]]
 
 
 def _validate_skill(skill: Skill) -> None:
-    """Check if required tools exist. Mark skill as degraded if not."""
+    """Check if required tools exist. Mark skill as degraded if not.
+
+    Skips validation if TOOL_REGISTRY hasn't been populated yet (empty at
+    import time because tool modules haven't been imported).  Validation
+    will run later via ``revalidate_skills()`` or on first actual use in
+    ``build_config_from_skill`` / ``classify_query``.
+    """
     if not skill.requires_tools:
         return
 
     from .tool_registry import TOOL_REGISTRY
+
+    # Skip validation if registry hasn't been populated yet
+    # (will be validated on first actual use via build_config_from_skill)
+    if not TOOL_REGISTRY:
+        return
 
     missing = [t for t in skill.requires_tools if t not in TOOL_REGISTRY]
     if missing:
         skill.degraded = True
         skill.degraded_reason = f"Missing required tools: {', '.join(missing)}"
         logger.warning("Skill '%s' is degraded: %s", skill.name, skill.degraded_reason)
+
+
+def revalidate_skills() -> None:
+    """Re-run validation on all loaded skills.
+
+    Call this after all tool modules have been imported and TOOL_REGISTRY
+    is fully populated (e.g., from app.py startup).
+    """
+    for skill in _skills.values():
+        # Reset degraded state before re-validating
+        skill.degraded = False
+        skill.degraded_reason = ""
+        _validate_skill(skill)
 
 
 def load_skills(skills_dir: Path | None = None) -> dict[str, Skill]:
@@ -693,17 +717,20 @@ TOOL_CATEGORIES = {
 # user needs.
 ALWAYS_INCLUDE = {
     "list_resources",
-    "get_cluster_version",
-    "record_audit_entry",
-    "suggest_remediation",
-    "namespace_summary",
-    "cluster_metrics",
-    "visualize_nodes",
     "list_pods",
     "get_events",
     "get_firing_alerts",
+    "get_cluster_version",
+    "namespace_summary",
+    "cluster_metrics",
+    "visualize_nodes",
+    "record_audit_entry",
+    "suggest_remediation",
     "request_sre_investigation",
     "list_my_skills",
+}
+
+_SELF_DESCRIBE_TOOLS = {
     "list_my_tools",
     "list_ui_components",
     "list_promql_recipes",
@@ -715,6 +742,23 @@ ALWAYS_INCLUDE = {
     "edit_skill",
     "delete_skill",
     "create_skill_from_template",
+}
+
+_SELF_DESCRIBE_KEYWORDS = {
+    "what can",
+    "help",
+    "tools",
+    "explain",
+    "create skill",
+    "edit skill",
+    "delete skill",
+    "recipes",
+    "runbooks",
+    "components",
+    "api resources",
+    "deprecated",
+    "what do you",
+    "capabilities",
 }
 
 
@@ -807,6 +851,10 @@ def select_tools(query: str, all_tools: list, all_tool_map: dict, mode: str = "s
     for cat_name in categories:
         cat = TOOL_CATEGORIES.get(cat_name, {})
         mode_tool_names.update(cat.get("tools", []))
+
+    # Include self-describe tools when query asks about capabilities
+    if any(kw in query.lower() for kw in _SELF_DESCRIBE_KEYWORDS):
+        mode_tool_names.update(_SELF_DESCRIBE_TOOLS)
 
     # Always include MCP tools — they're general-purpose and extend native capabilities
     try:
