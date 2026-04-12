@@ -6,6 +6,8 @@ PromQL recipes, runbooks, and Kubernetes API introspection.
 
 from __future__ import annotations
 
+from datetime import UTC
+
 from anthropic import beta_tool
 
 from .k8s_client import safe
@@ -379,6 +381,235 @@ def create_skill(
             f"- Categories: {', '.join(cat_list)}\n"
             f"- Priority: {priority}\n"
             f"- Write tools: {write_tools}\n\n"
+            f"The skill is active now. Test it by asking a question with one of the keywords."
+        )
+
+    return f"Skill file written to {skill_file} but failed to load. Check the logs."
+
+
+@beta_tool
+def edit_skill(name: str, content: str) -> str:
+    """Edit an existing skill's skill.md content.
+
+    Archives the current version before overwriting, validates YAML frontmatter,
+    checks for forbidden patterns, and hot-reloads all skills.
+
+    IMPORTANT: Always show the user the proposed changes before calling this.
+
+    Args:
+        name: Name of the skill to edit (e.g., 'sre', 'security', 'postgres_troubleshooter').
+        content: Full new skill.md content including YAML frontmatter (--- delimiters).
+    """
+    import shutil
+    from datetime import datetime
+
+    from .skill_loader import get_skill, reload_skills
+
+    skill = get_skill(name)
+    if not skill:
+        return f"Error: skill '{name}' not found. Use list_my_skills to see available skills."
+
+    # Validate YAML frontmatter
+    if "---" not in content:
+        return "Error: content must include YAML frontmatter (--- delimiters)"
+
+    parts = content.split("---", 2)
+    if len(parts) < 3:
+        return "Error: content must have opening and closing --- frontmatter delimiters"
+
+    # Safety: check for forbidden patterns
+    content_lower = content.lower()
+    for pattern in _FORBIDDEN_PATTERNS:
+        if pattern in content_lower:
+            return f"Error: content contains forbidden pattern '{pattern}'. Skills cannot override system behavior."
+
+    # Warn (but don't block) if security header is missing
+    security_warning = ""
+    if "## security" not in content_lower:
+        security_warning = (
+            "\n\nWarning: no '## Security' section found. Consider adding one to protect against prompt injection."
+        )
+
+    skill_file = skill.path / "skill.md"
+    if not skill_file.exists():
+        return f"Error: skill.md not found on disk at {skill.path}"
+
+    old_version = skill.version
+
+    # Archive current version
+    versions_dir = skill.path / ".versions"
+    versions_dir.mkdir(exist_ok=True)
+    ts = datetime.now(tz=UTC).strftime("%Y%m%d%H%M%S")
+    archive_name = f"skill_v{old_version}_{ts}.md"
+    shutil.copy2(skill_file, versions_dir / archive_name)
+
+    # Write new content
+    skill_file.write_text(content, encoding="utf-8")
+
+    # Hot-reload
+    skills = reload_skills()
+    updated = skills.get(name)
+
+    if updated:
+        new_version = updated.version
+        return (
+            f"Skill '{name}' updated successfully.\n"
+            f"- Version: v{old_version} → v{new_version}\n"
+            f"- Archived previous version as {archive_name}\n"
+            f"- Keywords: {', '.join(updated.keywords)}\n"
+            f"- Categories: {', '.join(updated.categories)}{security_warning}"
+        )
+
+    return f"Skill file written but failed to reload. Previous version archived as {archive_name}. Check the logs."
+
+
+_BUILTIN_SKILLS = {"sre", "security", "view_designer"}
+
+
+@beta_tool
+def delete_skill(name: str) -> str:
+    """Delete a user-created skill package.
+
+    Removes the skill directory from disk and hot-reloads. Built-in skills
+    (sre, security, view_designer) cannot be deleted.
+
+    IMPORTANT: Always confirm with the user before calling this — deletion is permanent.
+
+    Args:
+        name: Name of the skill to delete.
+    """
+    import shutil
+
+    from .skill_loader import get_skill, reload_skills
+
+    skill = get_skill(name)
+    if not skill:
+        return f"Error: skill '{name}' not found. Use list_my_skills to see available skills."
+
+    if name in _BUILTIN_SKILLS:
+        return f"Error: '{name}' is a built-in skill and cannot be deleted. Only user-created skills can be removed."
+
+    skill_dir = skill.path
+    if not skill_dir.exists():
+        return f"Error: skill directory not found at {skill_dir}"
+
+    # Remove the skill directory
+    shutil.rmtree(skill_dir)
+
+    # Hot-reload
+    skills = reload_skills()
+
+    if name not in skills:
+        return f"Skill '{name}' has been deleted and removed from the active skill registry."
+
+    return f"Skill directory removed but '{name}' still appears in registry. This may indicate a duplicate definition."
+
+
+@beta_tool
+def create_skill_from_template(
+    name: str,
+    template: str,
+    description: str,
+    keywords: str,
+) -> str:
+    """Create a new skill using an existing skill as a template.
+
+    Copies the template skill's prompt body, categories, and handoff rules,
+    but replaces the name, description, and keywords. Great for creating
+    variants of existing skills quickly.
+
+    IMPORTANT: Always discuss the skill design with the user before calling this.
+
+    Args:
+        name: New skill name (lowercase, underscores, e.g., 'redis_troubleshooter').
+        template: Name of the existing skill to use as template (e.g., 'sre').
+        description: One-line description of what the new skill does.
+        keywords: Comma-separated routing keywords (e.g., 'redis, cache, elasticache').
+    """
+    import re
+
+    import yaml
+
+    from .skill_loader import _SKILLS_DIR, get_skill, reload_skills
+
+    # Validate name
+    if not re.match(r"^[a-z][a-z0-9_]*$", name):
+        return f"Error: name must be lowercase letters, numbers, underscores (got '{name}')"
+
+    if len(name) < 3 or len(name) > 40:
+        return "Error: name must be 3-40 characters"
+
+    # Check new skill doesn't already exist
+    skill_dir = _SKILLS_DIR / name.replace("_", "-")
+    if skill_dir.exists():
+        return f"Error: skill '{name}' already exists at {skill_dir}. Use edit_skill to modify it."
+
+    # Validate template exists
+    template_skill = get_skill(template)
+    if not template_skill:
+        return f"Error: template skill '{template}' not found. Use list_my_skills to see available skills."
+
+    # Read template skill.md
+    template_file = template_skill.path / "skill.md"
+    if not template_file.exists():
+        return f"Error: template skill.md not found at {template_file}"
+
+    template_text = template_file.read_text(encoding="utf-8")
+
+    # Parse template frontmatter
+    parts = template_text.split("---", 2)
+    if len(parts) < 3:
+        return "Error: template skill has invalid frontmatter"
+
+    try:
+        meta = yaml.safe_load(parts[1])
+    except yaml.YAMLError as e:
+        return f"Error: failed to parse template frontmatter: {e}"
+
+    if not isinstance(meta, dict):
+        return "Error: template frontmatter is not a valid YAML dict"
+
+    # Validate keywords
+    kw_list = [k.strip() for k in keywords.split(",") if k.strip()]
+    if len(kw_list) < 2:
+        return "Error: need at least 2 keywords for routing"
+
+    # Replace name, description, keywords in frontmatter; keep everything else
+    meta["name"] = name
+    meta["description"] = description
+    meta["keywords"] = [", ".join(kw_list)]
+    meta["version"] = 1
+
+    # Keep template's prompt body, categories, handoff rules
+    body = parts[2].strip()
+
+    # Safety: check body for forbidden patterns
+    body_lower = body.lower()
+    for pattern in _FORBIDDEN_PATTERNS:
+        if pattern in body_lower:
+            return f"Error: template body contains forbidden pattern '{pattern}'."
+
+    # Build new skill.md
+    frontmatter = yaml.dump(meta, default_flow_style=False, sort_keys=False).strip()
+    content = f"---\n{frontmatter}\n---\n\n{body}\n"
+
+    # Write to disk
+    skill_dir.mkdir(parents=True, exist_ok=True)
+    skill_file = skill_dir / "skill.md"
+    skill_file.write_text(content, encoding="utf-8")
+
+    # Hot-reload
+    skills = reload_skills()
+
+    if name in skills:
+        new_skill = skills[name]
+        return (
+            f"Skill '{name}' created from template '{template}'.\n"
+            f"- Description: {description}\n"
+            f"- Keywords: {', '.join(kw_list)}\n"
+            f"- Categories: {', '.join(new_skill.categories)}\n"
+            f"- Priority: {new_skill.priority}\n"
+            f"- Write tools: {new_skill.write_tools}\n\n"
             f"The skill is active now. Test it by asking a question with one of the keywords."
         )
 

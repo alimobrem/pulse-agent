@@ -701,6 +701,9 @@ ALWAYS_INCLUDE = {
     "list_api_resources",
     "list_deprecated_apis",
     "create_skill",
+    "edit_skill",
+    "delete_skill",
+    "create_skill_from_template",
 }
 
 
