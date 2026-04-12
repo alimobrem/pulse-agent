@@ -419,17 +419,15 @@ async def _run_agent_ws(
         except Exception:
             pass
 
-    # Store turn metadata for the caller (ws_endpoints.py) to use in skill analytics
-    _last_turn_meta.update(
-        {
-            "tools_called": list(session_tools),
-            "tool_count": len(session_tools),
-            "duration_ms": int((time.monotonic() - _turn_start) * 1000) if _turn_start else 0,
-            **turn_token_usage,
-        }
-    )
+    # Return response + metadata tuple for the caller
+    turn_meta = {
+        "tools_called": list(session_tools),
+        "tool_count": len(session_tools),
+        "duration_ms": int((time.monotonic() - _turn_start) * 1000) if _turn_start else 0,
+        **turn_token_usage,
+    }
 
-    return full_response
+    return full_response, turn_meta
 
 
 # Module-level storage for turn metadata (consumed by ws_endpoints after each turn)

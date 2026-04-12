@@ -176,7 +176,7 @@ async def websocket_agent(websocket: WebSocket, mode: str):
                     pass
 
             try:
-                full_response = await _run_agent_ws(
+                _result = await _run_agent_ws(
                     websocket,
                     messages,
                     effective_system,
@@ -189,6 +189,7 @@ async def websocket_agent(websocket: WebSocket, mode: str):
                     turn_number=turn_counter,
                     user_query=content,
                 )
+                full_response = _result[0] if isinstance(_result, tuple) else _result
                 messages.append({"role": "assistant", "content": full_response})
 
                 # Persist messages to chat history (single commit)
@@ -472,7 +473,7 @@ async def websocket_auto_agent(websocket: WebSocket):
                     effective_system += "\n\n" + shared_context
 
             try:
-                full_response = await _run_agent_ws(
+                result = await _run_agent_ws(
                     websocket,
                     messages,
                     effective_system,
@@ -485,6 +486,11 @@ async def websocket_auto_agent(websocket: WebSocket):
                     turn_number=turn_counter,
                     user_query=content,
                 )
+                # Unpack response + metadata tuple
+                if isinstance(result, tuple):
+                    full_response, turn_meta = result
+                else:
+                    full_response, turn_meta = result, {}
                 messages.append({"role": "assistant", "content": full_response})
 
                 # Persist messages to chat history (single commit)
@@ -521,7 +527,6 @@ async def websocket_auto_agent(websocket: WebSocket):
 
                 # Record skill invocation for analytics (with tool/token data)
                 try:
-                    from ..api.agent_ws import _last_turn_meta
                     from ..skill_analytics import record_skill_invocation
                     from ..skill_loader import get_skill as _get_skill_for_analytics
 
@@ -532,10 +537,10 @@ async def websocket_auto_agent(websocket: WebSocket):
                         skill_name=last_mode,
                         skill_version=_sk.version if _sk else 0,
                         query_summary=content[:200],
-                        tools_called=_last_turn_meta.get("tools_called"),
-                        duration_ms=_last_turn_meta.get("duration_ms", 0),
-                        input_tokens=_last_turn_meta.get("input_tokens", 0),
-                        output_tokens=_last_turn_meta.get("output_tokens", 0),
+                        tools_called=turn_meta.get("tools_called"),
+                        duration_ms=turn_meta.get("duration_ms", 0),
+                        input_tokens=turn_meta.get("input_tokens", 0),
+                        output_tokens=turn_meta.get("output_tokens", 0),
                     )
                 except Exception:
                     logger.debug("Failed to record skill invocation", exc_info=True)
