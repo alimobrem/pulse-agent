@@ -1,6 +1,6 @@
 # Pulse Agent Architecture
 
-Comprehensive architecture reference for Pulse Agent v1.16.x, Protocol v2.
+Comprehensive architecture reference for Pulse Agent v2.0.0, Protocol v2.
 
 **Last updated:** 2026-04-10
 
@@ -77,9 +77,9 @@ React/TypeScript frontend (OpenShift Pulse) providing the user interface.
 |--------|-------|
 | Tools | 111 (75 native + 36 MCP) across 9 modules + MCP servers |
 | Scanners | 16 (11 core + 5 audit) |
-| Tests | 1,449 |
+| Tests | 1,454 |
 | PromQL Recipes | 73 across 16 categories |
-| Eval Prompts | 84 |
+| Eval Prompts | 98 |
 | Protocol Version | 2 |
 
 ---
@@ -1657,4 +1657,4 @@ Key decisions made during development and the reasoning behind them.
 
 ---
 
-*111 tools (75 native + 36 MCP) -- 16 scanners -- 10 runbooks -- 73 PromQL recipes -- 84 eval prompts -- 1,449 tests -- Protocol v2*
+*111 tools (75 native + 36 MCP) -- 16 scanners -- 10 runbooks -- 73 PromQL recipes -- 98 eval prompts -- 1,454 tests -- Protocol v2*

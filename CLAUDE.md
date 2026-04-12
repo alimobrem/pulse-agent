@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-Pulse Agent — AI-powered OpenShift/Kubernetes SRE and Security agent built on Claude. Connects to live clusters via the K8s API and uses Claude Opus for diagnostics, incident triage, and automated remediation. v1.16.0, Protocol v2, 111 tools (75 native + 36 MCP), 17 scanners, 1449 tests, 73 PromQL recipes, 93 eval prompts. Modular package architecture: k8s_tools/ (11 modules), monitor/ (10 modules), api/ (12 modules) — no file over 910 lines. Auto-routing orchestrator with typo auto-correction (~130 K8s misspellings). Centralized Pydantic config (no raw os.environ). Generative views: tools return component specs for rich UI rendering, user-scoped custom dashboards with share/clone. Tool usage tracking: full audit log with chain intelligence.
+Pulse Agent — AI-powered OpenShift/Kubernetes SRE and Security agent built on Claude. Connects to live clusters via the K8s API and uses Claude Opus for diagnostics, incident triage, and automated remediation. v2.0.0, Protocol v2, 111 tools (75 native + 36 MCP), 6 skills (4 built-in + 2 user-created), 17 scanners, 1454 tests, 73 PromQL recipes, 98 eval prompts. Modular package architecture: k8s_tools/ (11 modules), monitor/ (10 modules), api/ (12 modules) — no file over 910 lines. Auto-routing orchestrator with typo auto-correction (~130 K8s misspellings). Centralized Pydantic config (no raw os.environ). Generative views: tools return component specs for rich UI rendering, user-scoped custom dashboards with share/clone. Tool usage tracking: full audit log with chain intelligence.
 
 **UI Repository:** `/Users/amobrem/ali/OpenshiftPulse` — React/TypeScript frontend (Zustand stores, incident views, admin dashboard).
 
@@ -38,7 +38,7 @@ python -m sre_agent.main security     # Security scanner
 pulse-agent-api                       # FastAPI on port 8080
 
 # Tests
-python3 -m pytest tests/ -v           # all tests (~1449 tests)
+python3 -m pytest tests/ -v           # all tests (~1454 tests)
 python3 -m pytest tests/test_k8s_tools.py -v  # single file
 make verify                                    # lint + type-check + test
 
@@ -184,9 +184,11 @@ Rules: validate inputs with `_validate_k8s_name()`/`_validate_k8s_namespace()`, 
 - `evals/compare.py` — A/B comparison of eval suite results (baseline vs current, regression detection)
 - `evals/ablation.py` — prompt section ablation framework (tests impact of removing prompt sections on scores)
 - `evals/history.py` — eval history DB (eval_runs table, trend queries, migration 006)
-- `skill_loader.py` — skill package loader, tool selection, query routing, MCP inclusion (consolidates harness tool selection)
+- `skill_loader.py` — skill package loader, tool selection, query routing, MCP inclusion (consolidates harness tool selection); ALWAYS_INCLUDE trimmed to 12, self-describe tools conditional
 - `mcp_client.py` — MCP server connections (SSE transport), tool/prompt discovery, registration
-- `self_tools.py` — 11 self-description + 4 skill management + 3 K8s API introspection tools
+- `self_tools.py` — 12 self-description + 4 skill management + 3 K8s API introspection tools
+- `prompt_log.py` — prompt logging (hash, sections, tokens, version tracking) for observability and debugging
+- `component_registry.py` — data-driven component hints from registry (replaces hardcoded hints in harness)
 
 **Frontend:** `/toolbox` consolidates tools, skills, MCP, components, usage, analytics into single page.
 

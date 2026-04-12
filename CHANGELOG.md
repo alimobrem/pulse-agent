@@ -2,6 +2,62 @@
 
 All notable changes to Pulse Agent are documented in this file.
 
+## v2.0.0 (2026-04-12)
+
+### Extensible Skill System
+- Skill packages: drop-in .md files with routing, tools, evals, hot reload
+- 6 skills: SRE, Security, View Designer, Capacity Planner + user-created
+- Create/edit/delete/clone skills through chat or Toolbox UI
+- Skill name routing (2x weight), keyword scoring, LLM fallback (haiku)
+- User-created skills persist on PVC across restarts
+
+### MCP Integration
+- OpenShift MCP server (11 toolsets, 36 tools)
+- SSE transport, prompt discovery, 3-tier rendering
+- Toolset toggle from UI with crashloop detection
+- Table parser for kubectl-style output
+
+### Agent Intelligence
+- Intent analysis prefix (think-before-acting)
+- Dynamic prompt builder (centralized assembly)
+- Skill-aware component hints (data-driven from registry)
+- Edit-distance typo correction (catches novel misspellings)
+- Synonym-based eval scoring
+- Lazy skill validation (no false degradation at startup)
+- ALWAYS_INCLUDE trimmed 23→12 (self-describe tools conditional)
+- Runbook injection capped at 2000 chars
+
+### Transparency & Observability
+- Skill attribution footer on every chat response (skill, tools, duration, tokens)
+- Prompt logging (hash, sections, tokens, version tracking)
+- Hallucination detection (unknown tools, empty results)
+- Confidence scoring in routing decisions
+- Capability change toast notifications
+- Welcome message with dynamic tool/skill counts
+
+### Toolbox UI (/toolbox)
+- Consolidated /tools + /extensions into 6-tab page
+- Source badges (native/mcp) throughout
+- Follow-up suggestion pills (context-aware)
+- Prompt Audit section in Analytics
+- Skill detail drawer with editor, versions, diff viewer
+- MCP toolset toggles with checkboxes
+- Clone + Delete buttons for skills
+- Arrow key tab navigation, proper ARIA
+
+### Self-Description Tools (12)
+- list_my_skills, list_my_tools, list_ui_components
+- list_promql_recipes, list_runbooks
+- explain_resource, list_api_resources, list_deprecated_apis
+- create_skill, edit_skill, delete_skill, create_skill_from_template
+
+### Testing
+- 1454 backend tests, 1934 frontend tests
+- 9 multi-turn replay fixtures
+- 15 security eval scenarios (3x increase)
+- Prompt quality test suite
+- 0.981 deterministic eval score, 19/21 judge pass
+
 ## v1.16.0 (2026-04-09)
 
 ### Added

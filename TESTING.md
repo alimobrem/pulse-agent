@@ -38,7 +38,7 @@ Testing philosophy: deterministic tests run on every commit at zero cost. LLM-ju
               |  Per-skill evals.yaml scenarios    |      Tool selection per skill domain.
               +-----------------------------------+
             +---------------------------------------+
-            |          Unit Tests (1449)             |   <- every PR and push
+            |          Unit Tests (1454)             |   <- every PR and push
             |  Tools, scanners, API, config, memory  |      Fast, deterministic, mocked K8s.
             +---------------------------------------+
 ```
@@ -50,7 +50,7 @@ All commands run from the project root (`/Users/amobrem/ali/pulse-agent`).
 ### Unit Tests
 
 ```bash
-python3 -m pytest tests/ -v                          # all 1449 tests
+python3 -m pytest tests/ -v                          # all 1454 tests
 python3 -m pytest tests/test_k8s_tools.py -v         # single file
 python3 -m pytest tests/ -k "test_crashloop" -v      # by name pattern
 python3 -m pytest tests/ -x                           # stop on first failure
@@ -103,7 +103,7 @@ python -m sre_agent.evals.weekly_digest_cli --current-days 7 --baseline-days 7 \
 
 ### Coverage
 
-1449 pytest tests across 40+ test files in `tests/`. Major coverage areas:
+1454 pytest tests across 40+ test files in `tests/`. Major coverage areas:
 
 | Area | Test files | What they cover |
 |------|-----------|-----------------|
@@ -691,7 +691,7 @@ The LLM judge requires a valid API key. In CI, it needs `VERTEX_PROJECT_ID`, `VE
 
 All eval prompts mapped to expected tool calls. Used for evaluating agent tool selection quality.
 
-**Total: 93 prompts** (70 fixture-based + 23 skill-bundled)
+**Total: 98 prompts** (75 fixture-based + 23 skill-bundled)
 
 ### SRE (64 prompts)
 

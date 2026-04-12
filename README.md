@@ -1,10 +1,10 @@
 # Pulse Agent
 
 <p>
-  <a href="https://github.com/alimobrem/pulse-agent/releases/tag/v1.16.0"><img src="https://img.shields.io/badge/release-v1.16.0-2563eb?style=for-the-badge" alt="Version"></a>
+  <a href="https://github.com/alimobrem/pulse-agent/releases/tag/v2.0.0"><img src="https://img.shields.io/badge/release-v2.0.0-2563eb?style=for-the-badge" alt="Version"></a>
   <img src="https://img.shields.io/badge/tools-111_(75+36_MCP)-10b981?style=for-the-badge" alt="Tools">
   <img src="https://img.shields.io/badge/scanners-17-10b981?style=for-the-badge" alt="Scanners">
-  <img src="https://img.shields.io/badge/tests-1449-10b981?style=for-the-badge" alt="Tests">
+  <img src="https://img.shields.io/badge/tests-1454-10b981?style=for-the-badge" alt="Tests">
   <img src="https://img.shields.io/badge/PromQL%20recipes-73-10b981?style=for-the-badge" alt="PromQL Recipes">
   <img src="https://img.shields.io/badge/license-MIT-6366f1?style=for-the-badge" alt="License">
 </p>
@@ -516,6 +516,7 @@ Supported: `data_table`, `info_card_grid`, `badge_list`, `status_list`, `key_val
 
 | Pulse Agent | OpenShift Pulse UI | Protocol |
 |------------|-------------------|----------|
+| v2.0.0 | v5.16.2+ | 2 |
 | v1.16.0 | v5.16.2+ | 2 |
 | v1.15.0 | v5.16.2+ | 2 |
 | v1.13.0 | v5.16.2+ | 2 |
@@ -716,8 +717,8 @@ git push && git push --tags   # GitHub Actions builds and pushes automatically
 
 **Manual build:**
 ```bash
-podman build --platform linux/amd64 -f Dockerfile.full -t quay.io/amobrem/pulse-agent:v1.16.0 .
-podman push quay.io/amobrem/pulse-agent:v1.16.0
+podman build --platform linux/amd64 -f Dockerfile.full -t quay.io/amobrem/pulse-agent:v2.0.0 .
+podman push quay.io/amobrem/pulse-agent:v2.0.0
 ```
 
 **Required GitHub Secrets:**
@@ -735,7 +736,7 @@ python -m pytest tests/ -v
 
 See [TESTING.md](TESTING.md) for test conventions, fixtures, and coverage targets.
 
-1,449 tests covering all tools, all 16 scanner functions, agent loop safety mechanisms, error classification, error tracking, config validation, unit parsing, orchestrator, context bus, handoff tools, component hint coverage, showcase eval scenarios, PromQL recipes, view validation, layout engine, intelligence loop, token tracking, and the memory system. All tests run without a cluster or API key (fully mocked).
+1,454 tests covering all tools, all 16 scanner functions, agent loop safety mechanisms, error classification, error tracking, config validation, unit parsing, orchestrator, context bus, handoff tools, component hint coverage, showcase eval scenarios, PromQL recipes, view validation, layout engine, intelligence loop, token tracking, and the memory system. All tests run without a cluster or API key (fully mocked).
 
 ## Evaluation Framework
 
@@ -775,7 +776,7 @@ Current eval dimensions:
 
 ### Tool Eval Prompts
 
-93 eval prompts mapped to expected tool calls, covering all registered tools. Used for evaluating agent tool selection quality and ensuring every tool is reachable.
+98 eval prompts mapped to expected tool calls, covering all registered tools. Used for evaluating agent tool selection quality and ensuring every tool is reachable.
 
 See **[TESTING.md](TESTING.md)** for the full testing strategy and eval prompt appendix.
 
@@ -804,7 +805,7 @@ Suites:
 ---
 
 <p align="center">
-  <strong>111 tools (75 native + 36 MCP)</strong> &bull; <strong>17 scanners</strong> &bull; <strong>10 runbooks</strong> &bull; <strong>73 PromQL recipes</strong> &bull; <strong>93 eval prompts</strong> &bull; <strong>1,449 tests</strong> &bull; <strong>Protocol v2</strong>
+  <strong>111 tools (75 native + 36 MCP)</strong> &bull; <strong>17 scanners</strong> &bull; <strong>10 runbooks</strong> &bull; <strong>73 PromQL recipes</strong> &bull; <strong>98 eval prompts</strong> &bull; <strong>1,454 tests</strong> &bull; <strong>Protocol v2</strong>
 </p>
 
 <p align="center">
