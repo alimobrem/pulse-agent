@@ -2,9 +2,9 @@
 
 <p>
   <a href="https://github.com/alimobrem/pulse-agent/releases/tag/v1.16.0"><img src="https://img.shields.io/badge/release-v1.16.0-2563eb?style=for-the-badge" alt="Version"></a>
-  <img src="https://img.shields.io/badge/tools-106_(75+31_MCP)-10b981?style=for-the-badge" alt="Tools">
+  <img src="https://img.shields.io/badge/tools-111_(75+36_MCP)-10b981?style=for-the-badge" alt="Tools">
   <img src="https://img.shields.io/badge/scanners-17-10b981?style=for-the-badge" alt="Scanners">
-  <img src="https://img.shields.io/badge/tests-1433-10b981?style=for-the-badge" alt="Tests">
+  <img src="https://img.shields.io/badge/tests-1449-10b981?style=for-the-badge" alt="Tests">
   <img src="https://img.shields.io/badge/PromQL%20recipes-73-10b981?style=for-the-badge" alt="PromQL Recipes">
   <img src="https://img.shields.io/badge/license-MIT-6366f1?style=for-the-badge" alt="License">
 </p>
@@ -137,10 +137,18 @@ Pulse Agent connects directly to your cluster's Kubernetes API and uses Claude O
 
 ### Skills & Extensibility
 - **Drop-in Skill Packages** -- Each skill is a self-contained directory with `skill.md` (prompt), `evals.yaml` (test cases), and optional `mcp.yaml` (MCP server config). Skills are loaded at startup by `skill_loader.py`, which owns tool selection and query routing
-- **MCP Server Integration** -- Connect external MCP servers via SSE transport. The OpenShift MCP server provides 31 tools across 11 toolsets, registered alongside native tools. `mcp_client.py` handles connection lifecycle, tool/prompt discovery, and registration
+- **MCP Server Integration** -- Connect external MCP servers via SSE transport. The OpenShift MCP server provides 36 tools across 11 toolsets, registered alongside native tools. `mcp_client.py` handles connection lifecycle, tool/prompt discovery, and registration
 - **Hot Reload** -- Skill packages and MCP server configs can be added without restarting the agent
 - **Toolbox UI** -- The frontend `/toolbox` page consolidates tools, skills, MCP servers, components, usage analytics, and chain patterns into a single view
 - **Developer Guide** -- See [docs/SKILL_DEVELOPER_GUIDE.md](docs/SKILL_DEVELOPER_GUIDE.md) for creating new skill packages
+
+### OpenShift MCP Server
+- **What it is** -- [OpenShift MCP server](https://github.com/openshift/openshift-mcp-server) deployed as a sidecar pod alongside the Pulse Agent, providing 36 MCP tools for cluster interaction via the Model Context Protocol
+- **11 Toolsets** -- core, config, helm, observability, openshift, ossm, netedge, tekton, kiali, kubevirt, kcp. Each toolset can be toggled independently from the Toolbox UI
+- **SSE Transport** -- MCP server communicates via Server-Sent Events for production reliability (restart tolerance, health checks)
+- **Auto-Discovery** -- MCP tools are discovered at startup and registered alongside native `@beta_tool` functions in the tool registry
+- **3-Tier Rendering** -- Native tools return rich component specs (Tier 1), MCP tools with transform produce component specs via the transformation engine (Tier 2), and raw MCP output renders inline in chat (Tier 3)
+- **Toggle from UI** -- Individual toolsets can be enabled/disabled from the `/toolbox` page without restarting the agent
 
 ### Self-Improving Agent
 - **Incident Memory** — Stores every interaction with query, tool sequence, resolution, and outcome in the database
@@ -413,7 +421,7 @@ Built-in optimizations for getting the most out of Claude (`PULSE_AGENT_HARNESS=
 
 | Feature | What It Does | Impact |
 |---------|-------------|--------|
-| **Dynamic Tool Selection** | Categorizes 106 tools into 8 groups, loads only relevant ones per query (via `skill_loader.py`) | 106->15-25 tools, faster + cheaper |
+| **Dynamic Tool Selection** | Categorizes 111 tools into 8 groups, loads only relevant ones per query (via `skill_loader.py`) | 111->15-25 tools, faster + cheaper |
 | **Prompt Caching** | Marks system prompt + runbooks with `cache_control: ephemeral` | ~90% cost reduction on context |
 | **Cluster Context Injection** | Pre-fetches node count, namespaces, OCP version, failing pods, firing alerts | Saves 2-3 tool calls per query |
 | **Component Rendering Hints** | Guides Claude to focus on analysis, not data formatting | Cleaner responses |
@@ -542,6 +550,10 @@ podman login quay.io  # or your registry
 ```
 
 This builds both images locally with Podman, pushes to your registry, and deploys via Helm. Agent deploys first (auto-generates WS token), then UI reads and uses that token.
+
+### MCP Server
+
+The OpenShift MCP server is deployed automatically as a sidecar when `mcp.enabled=true` (default). The MCP server image is built from the [openshift/openshift-mcp-server](https://github.com/openshift/openshift-mcp-server) fork and hosted at `quay.io/amobrem/pulse-agent:mcp-server`. CI (`build-push.yml`) builds the MCP image alongside the agent image on release tags.
 
 ### Agent-Only Deploy
 
@@ -689,7 +701,7 @@ chart/                   # Helm chart
 
 | Workflow | Trigger | What it does |
 |----------|---------|-------------|
-| `build-push.yml` | `v*` tag push, manual dispatch | Lint, tests, then builds `Dockerfile.full` and pushes to `quay.io/amobrem/pulse-agent` with tag + `latest` |
+| `build-push.yml` | `v*` tag push, manual dispatch | Lint, tests, then builds agent (`Dockerfile.full`) and MCP server images, pushes both to `quay.io/amobrem/pulse-agent` with tag + `latest` |
 | `evals.yml` | PR, push to main, daily 6am UTC, manual | Lint, format check, unit tests, version sync check, Helm lint, docs consistency, release eval gate, replay evals, safety/integration suites, outcome regression, weekly digest |
 
 ### Image Registry
@@ -723,7 +735,7 @@ python -m pytest tests/ -v
 
 See [TESTING.md](TESTING.md) for test conventions, fixtures, and coverage targets.
 
-1,433 tests covering all tools, all 16 scanner functions, agent loop safety mechanisms, error classification, error tracking, config validation, unit parsing, orchestrator, context bus, handoff tools, component hint coverage, showcase eval scenarios, PromQL recipes, view validation, layout engine, intelligence loop, token tracking, and the memory system. All tests run without a cluster or API key (fully mocked).
+1,449 tests covering all tools, all 16 scanner functions, agent loop safety mechanisms, error classification, error tracking, config validation, unit parsing, orchestrator, context bus, handoff tools, component hint coverage, showcase eval scenarios, PromQL recipes, view validation, layout engine, intelligence loop, token tracking, and the memory system. All tests run without a cluster or API key (fully mocked).
 
 ## Evaluation Framework
 
@@ -792,7 +804,7 @@ Suites:
 ---
 
 <p align="center">
-  <strong>106 tools (75 native + 31 MCP)</strong> &bull; <strong>17 scanners</strong> &bull; <strong>10 runbooks</strong> &bull; <strong>73 PromQL recipes</strong> &bull; <strong>93 eval prompts</strong> &bull; <strong>1,433 tests</strong> &bull; <strong>Protocol v2</strong>
+  <strong>111 tools (75 native + 36 MCP)</strong> &bull; <strong>17 scanners</strong> &bull; <strong>10 runbooks</strong> &bull; <strong>73 PromQL recipes</strong> &bull; <strong>93 eval prompts</strong> &bull; <strong>1,449 tests</strong> &bull; <strong>Protocol v2</strong>
 </p>
 
 <p align="center">

@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-Pulse Agent — AI-powered OpenShift/Kubernetes SRE and Security agent built on Claude. Connects to live clusters via the K8s API and uses Claude Opus for diagnostics, incident triage, and automated remediation. v1.16.0, Protocol v2, 106 tools (75 native + 31 MCP), 17 scanners, 1433 tests, 73 PromQL recipes, 93 eval prompts. Modular package architecture: k8s_tools/ (11 modules), monitor/ (10 modules), api/ (12 modules) — no file over 910 lines. Auto-routing orchestrator with typo auto-correction (~130 K8s misspellings). Centralized Pydantic config (no raw os.environ). Generative views: tools return component specs for rich UI rendering, user-scoped custom dashboards with share/clone. Tool usage tracking: full audit log with chain intelligence.
+Pulse Agent — AI-powered OpenShift/Kubernetes SRE and Security agent built on Claude. Connects to live clusters via the K8s API and uses Claude Opus for diagnostics, incident triage, and automated remediation. v1.16.0, Protocol v2, 111 tools (75 native + 36 MCP), 17 scanners, 1449 tests, 73 PromQL recipes, 93 eval prompts. Modular package architecture: k8s_tools/ (11 modules), monitor/ (10 modules), api/ (12 modules) — no file over 910 lines. Auto-routing orchestrator with typo auto-correction (~130 K8s misspellings). Centralized Pydantic config (no raw os.environ). Generative views: tools return component specs for rich UI rendering, user-scoped custom dashboards with share/clone. Tool usage tracking: full audit log with chain intelligence.
 
 **UI Repository:** `/Users/amobrem/ali/OpenshiftPulse` — React/TypeScript frontend (Zustand stores, incident views, admin dashboard).
 
@@ -38,7 +38,7 @@ python -m sre_agent.main security     # Security scanner
 pulse-agent-api                       # FastAPI on port 8080
 
 # Tests
-python3 -m pytest tests/ -v           # all tests (~1433 tests)
+python3 -m pytest tests/ -v           # all tests (~1449 tests)
 python3 -m pytest tests/test_k8s_tools.py -v  # single file
 make verify                                    # lint + type-check + test
 
@@ -145,6 +145,16 @@ Rules: validate inputs with `_validate_k8s_name()`/`_validate_k8s_namespace()`, 
 - Prompt injection defense in system prompt
 - Input validation: replicas 0-100, log lines 1-1000, grace period 1-300s
 
+### MCP Server (`chart/templates/mcp-server.yaml`)
+- OpenShift MCP server (github.com/openshift/openshift-mcp-server) deployed as sidecar pod
+- Image: `quay.io/amobrem/pulse-agent:mcp-server` (built from openshift fork)
+- SSE transport, auto-discovery, 3-tier rendering
+- 11 toolsets: core, config, helm, observability, openshift, ossm, netedge, tekton, kiali, kubevirt, kcp
+- 36 MCP tools registered alongside native tools
+- Health probes (readiness + liveness on `/healthz`)
+- Toggle toolsets from the Toolbox UI
+- CI (`build-push.yml`) builds MCP image on release tags
+
 ### Helm Chart (`chart/`)
 - `values.yaml` — requires `vertexAI.projectId` or `anthropicApiKey.existingSecret`
 - WS token and PG password auto-generated with `lookup()` to preserve existing values on upgrade
@@ -176,6 +186,7 @@ Rules: validate inputs with `_validate_k8s_name()`/`_validate_k8s_namespace()`, 
 - `evals/history.py` — eval history DB (eval_runs table, trend queries, migration 006)
 - `skill_loader.py` — skill package loader, tool selection, query routing, MCP inclusion (consolidates harness tool selection)
 - `mcp_client.py` — MCP server connections (SSE transport), tool/prompt discovery, registration
+- `self_tools.py` — 11 self-description + 4 skill management + 3 K8s API introspection tools
 
 **Frontend:** `/toolbox` consolidates tools, skills, MCP, components, usage, analytics into single page.
 

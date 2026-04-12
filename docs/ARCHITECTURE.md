@@ -75,9 +75,9 @@ React/TypeScript frontend (OpenShift Pulse) providing the user interface.
 
 | Metric | Value |
 |--------|-------|
-| Tools | 106 (75 native + 31 MCP) across 9 modules + MCP servers |
+| Tools | 111 (75 native + 36 MCP) across 9 modules + MCP servers |
 | Scanners | 16 (11 core + 5 audit) |
-| Tests | 1,433 |
+| Tests | 1,449 |
 | PromQL Recipes | 73 across 16 categories |
 | Eval Prompts | 84 |
 | Protocol Version | 2 |
@@ -1567,7 +1567,9 @@ Key decisions made during development and the reasoning behind them.
 
 **Decision:** Connect external MCP servers via `mcp_client.py` using SSE transport. MCP tools are registered alongside native `@beta_tool` functions in the tool registry.
 
-**Why:** The OpenShift MCP server provides 31 tools across 11 toolsets that complement native tools. Rather than reimplementing these capabilities, MCP integration lets us consume community-maintained servers. SSE transport was chosen over stdio for production reliability (restart tolerance, health checks).
+**Why:** The OpenShift MCP server provides 36 tools across 11 toolsets (core, config, helm, observability, openshift, ossm, netedge, tekton, kiali, kubevirt, kcp) that complement native tools. Rather than reimplementing these capabilities, MCP integration lets us consume community-maintained servers. SSE transport was chosen over stdio for production reliability (restart tolerance, health checks).
+
+**Deployment:** The MCP server is deployed as a sidecar pod. Image: `quay.io/amobrem/pulse-agent:mcp-server` (built from the openshift/openshift-mcp-server fork). Health probes added (readiness + liveness on `/healthz`). CI (`build-push.yml`) builds the MCP image alongside the agent image on release tags.
 
 **3-tier rendering model:**
 - **Tier 1 (native tools):** Return `(text, component_spec)` tuples for rich UI rendering
@@ -1655,4 +1657,4 @@ Key decisions made during development and the reasoning behind them.
 
 ---
 
-*106 tools (75 native + 31 MCP) -- 16 scanners -- 10 runbooks -- 73 PromQL recipes -- 84 eval prompts -- 1,433 tests -- Protocol v2*
+*111 tools (75 native + 36 MCP) -- 16 scanners -- 10 runbooks -- 73 PromQL recipes -- 84 eval prompts -- 1,449 tests -- Protocol v2*
