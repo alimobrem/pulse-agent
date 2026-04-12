@@ -169,15 +169,143 @@ _TYPO_PATTERN = re.compile(
     re.IGNORECASE,
 )
 
+# Canonical K8s/SRE vocabulary for edit-distance matching
+_VOCABULARY: set[str] = set(_TYPO_MAP.values()) | {
+    "deployment",
+    "namespace",
+    "configmap",
+    "service",
+    "statefulset",
+    "daemonset",
+    "replicaset",
+    "ingress",
+    "persistent",
+    "crashloop",
+    "crashlooping",
+    "prometheus",
+    "kubernetes",
+    "openshift",
+    "orchestrator",
+    "rollback",
+    "scaling",
+    "scheduler",
+    "metrics",
+    "metric",
+    "resource",
+    "resources",
+    "volume",
+    "certificate",
+    "endpoint",
+    "container",
+    "vulnerability",
+    "vulnerabilities",
+    "compliance",
+    "privilege",
+    "permission",
+    "network",
+    "dashboard",
+    "widget",
+    "pod",
+    "node",
+    "helm",
+    "argo",
+    "gitops",
+    "alert",
+    "monitor",
+    "storage",
+    "replica",
+    "replicas",
+    "scale",
+    "image",
+    "cluster",
+    "operator",
+    "route",
+    "secret",
+    "quota",
+}
+
+# Suffix pattern for stripping before edit-distance check
+_SUFFIX_PATTERN = re.compile(r"(ies|es|s|ing|ed|er)$", re.IGNORECASE)
+
+
+def _edit_distance(a: str, b: str) -> int:
+    """Compute Levenshtein edit distance between two strings."""
+    if len(a) < len(b):
+        return _edit_distance(b, a)
+    if len(b) == 0:
+        return len(a)
+
+    prev = list(range(len(b) + 1))
+    for i, ca in enumerate(a):
+        curr = [i + 1]
+        for j, cb in enumerate(b):
+            cost = 0 if ca == cb else 1
+            curr.append(min(curr[j] + 1, prev[j + 1] + 1, prev[j] + cost))
+        prev = curr
+    return prev[len(b)]
+
+
+def _fuzzy_match(word: str, max_distance: int = 2) -> str | None:
+    """Find the closest vocabulary word within max_distance edits.
+
+    Only considers words of similar length (±max_distance chars) to avoid
+    matching short words to long ones. Returns None if no close match.
+    """
+    word_lower = word.lower()
+    if word_lower in _VOCABULARY:
+        return None  # Already correct
+
+    # Check if the word is a vocab word + common suffix (e.g., "services" = "service" + "s")
+    for suffix in ("s", "es", "ies", "ing", "ed", "er"):
+        if word_lower.endswith(suffix):
+            stem = word_lower[: -len(suffix)]
+            if stem in _VOCABULARY:
+                return None  # Already correct: known word + suffix
+
+    # Strip suffix for matching, then reattach
+    suffix_match = _SUFFIX_PATTERN.search(word_lower)
+    base = _SUFFIX_PATTERN.sub("", word_lower) if suffix_match else word_lower
+
+    best_match = None
+    best_dist = max_distance + 1
+
+    # Try matching the full word first (handles "kubernets" → "kubernetes")
+    for vocab in _VOCABULARY:
+        if abs(len(word_lower) - len(vocab)) > max_distance:
+            continue
+        if len(word_lower) < 6:
+            continue
+        dist = _edit_distance(word_lower, vocab)
+        if dist <= max_distance and dist < best_dist:
+            best_dist = dist
+            best_match = vocab
+
+    # If no full-word match, try base (suffix stripped) — handles "contaner" → "container"
+    if not best_match and base != word_lower:
+        for vocab in _VOCABULARY:
+            if abs(len(base) - len(vocab)) > max_distance:
+                continue
+            if len(base) < 6:
+                continue
+            dist = _edit_distance(base, vocab)
+            if dist <= max_distance and dist < best_dist:
+                best_dist = dist
+                best_match = vocab
+
+    return best_match
+
 
 def fix_typos(query: str) -> str:
-    """Fix common K8s/SRE typos in user query. Case-preserving for the first char.
+    """Fix K8s/SRE typos in user query using two strategies:
 
-    Handles plural/suffixed forms automatically — if 'depoyment' is in the map,
-    'depoyments' will also be corrected to 'deployments'.
+    1. Fast path: exact match against _TYPO_MAP (130+ known misspellings)
+    2. Fallback: edit-distance matching against vocabulary (catches novel typos)
+
+    Case-preserving for the first char. Handles plural/suffix forms.
     """
 
-    def _replace(m: re.Match) -> str:
+    # Strategy 1: known typo map (fast, exact)
+    def _replace_known(m: re.Match) -> str:
         base = m.group(1)
         suffix = m.group(2) or ""
         replacement = _TYPO_MAP[base.lower()]
@@ -186,7 +314,24 @@ def fix_typos(query: str) -> str:
             return result[0].upper() + result[1:]
         return result
 
-    return _TYPO_PATTERN.sub(_replace, query)
+    result = _TYPO_PATTERN.sub(_replace_known, query)
+
+    # Strategy 2: edit-distance fallback (catches novel typos)
+    words = result.split()
+    changed = False
+    for i, word in enumerate(words):
+        # Skip short words, URLs, flags
+        if len(word) < 5 or word.startswith("-") or "/" in word or ":" in word:
+            continue
+        match = _fuzzy_match(word)
+        if match:
+            corrected = match
+            if word[0].isupper():
+                corrected = corrected[0].upper() + corrected[1:]
+            words[i] = corrected
+            changed = True
+
+    return " ".join(words) if changed else result
 
 
 AgentMode = Literal["sre", "security", "both", "view_designer"]
