@@ -617,7 +617,7 @@ def get_component_hint(mode: str = "sre", tool_names: list[str] | None = None) -
         return ""
 
     if tool_names:
-        schemas = _select_relevant_schemas(tool_names)
+        hint_text = _select_relevant_schemas_from_registry(tool_names)
     else:
-        schemas = list(COMPONENT_SCHEMAS.values())
-    return "\n## Component Catalog\n\n" + "\n\n".join(schemas)
+        hint_text = _select_relevant_schemas_from_registry([])
+    return "\n## Component Catalog\n\n" + hint_text if hint_text else ""

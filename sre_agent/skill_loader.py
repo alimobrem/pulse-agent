@@ -1014,7 +1014,8 @@ def _build_component_hint(skill: Skill, tool_names: list[str]) -> str:
     if skill.name in ("view_designer", "security"):
         return ""
 
-    from .harness import _TOOL_COMPONENTS, COMPONENT_SCHEMAS
+    from .component_registry import get_prompt_hints
+    from .harness import _TOOL_COMPONENTS
 
     # Select schemas relevant to the skill's tools
     relevant: set[str] = {"data_table"}  # always include
@@ -1022,9 +1023,8 @@ def _build_component_hint(skill: Skill, tool_names: list[str]) -> str:
         if tool in _TOOL_COMPONENTS:
             relevant.update(_TOOL_COMPONENTS[tool])
 
-    schemas = [COMPONENT_SCHEMAS[k] for k in sorted(relevant) if k in COMPONENT_SCHEMAS]
-
-    hint = "\n## Component Catalog\n\n" + "\n\n".join(schemas)
+    hint_text = get_prompt_hints(kinds=sorted(relevant))
+    hint = "\n## Component Catalog\n\n" + hint_text if hint_text else ""
 
     # Append custom components from skill's components.yaml
     components_file = skill.path / "components.yaml"
