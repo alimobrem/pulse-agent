@@ -279,3 +279,62 @@ def _expand_cooccurrence(db, tools: list[str], limit: int = 5) -> list[str]:
         return [r["tool_b"] for r in rows]
     except Exception:
         return []
+
+
+def llm_pick_tools(
+    *,
+    query: str,
+    tool_names: list[str],
+    top_k: int = 10,
+) -> list[str]:
+    """Use Haiku to pick the most relevant tools for a query.
+
+    Sends only tool names (~200 tokens), not full schemas.
+    Returns validated tool names (filtered against tool_names).
+    """
+    try:
+        from .agent import create_client
+
+        client = create_client()
+        tool_list = ", ".join(tool_names)
+
+        response = client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=200,
+            messages=[{"role": "user", "content": query}],
+            system=(
+                f"You are a tool selector. Given a user query about Kubernetes/OpenShift, "
+                f"pick the {top_k} most relevant tools from this list:\n{tool_list}\n\n"
+                f"Reply with ONLY comma-separated tool names, nothing else."
+            ),
+        )
+
+        raw = response.content[0].text.strip()
+        valid_set = set(tool_names)
+        picked = [t.strip() for t in raw.split(",") if t.strip() in valid_set]
+        return picked[:top_k]
+
+    except Exception:
+        logger.debug("LLM tool picker failed", exc_info=True)
+        return []
+
+
+def decay_scores(*, factor: float = 0.95, prune_days: int = 30) -> None:
+    """Apply daily decay to prediction scores and prune stale entries.
+
+    Call from a daily cron or at startup.
+    """
+    try:
+        db = _get_db()
+        db.execute(
+            "UPDATE tool_predictions SET score = score * %s",
+            (factor,),
+        )
+        db.execute(
+            "DELETE FROM tool_predictions WHERE last_seen < NOW() - INTERVAL '%s days'",
+            (prune_days,),
+        )
+        db.commit()
+        logger.info("Decayed prediction scores by %.2f, pruned entries older than %d days", factor, prune_days)
+    except Exception:
+        logger.debug("Failed to decay prediction scores", exc_info=True)

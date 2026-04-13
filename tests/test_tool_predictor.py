@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, patch
 
 from sre_agent.db import Database
 from sre_agent.db_migrations import run_migrations
-from sre_agent.tool_predictor import PredictionResult, learn, predict_tools
+from sre_agent.tool_predictor import PredictionResult, decay_scores, learn, predict_tools
 
 _TEST_DB_URL = os.environ.get(
     "PULSE_AGENT_TEST_DATABASE_URL",
@@ -189,3 +189,22 @@ class TestPredictTools:
         result = predict_tools("describe the pod", top_k=10)
         assert "describe_pod" in result.tools
         assert "get_pod_logs" in result.tools
+
+
+class TestDecay:
+    @patch("sre_agent.tool_predictor._get_db")
+    def test_decay_multiplies_scores(self, mock_get_db):
+        db = MagicMock()
+        mock_get_db.return_value = db
+
+        decay_scores(factor=0.95, prune_days=30)
+
+        calls = [str(c) for c in db.execute.call_args_list]
+        assert any("score" in c and "0.95" in c for c in calls)
+        assert any("DELETE" in c for c in calls)
+        assert db.commit.called
+
+    @patch("sre_agent.tool_predictor._get_db")
+    def test_no_crash_on_failure(self, mock_get_db):
+        mock_get_db.side_effect = Exception("DB down")
+        decay_scores()
