@@ -93,8 +93,8 @@ class TestFixHistorySummary:
                 "rollback_rate": 0.1,
                 "avg_resolution_ms": 245000,
                 "by_category": [
-                    {"category": "crashloop", "count": 10, "success_count": 9},
-                    {"category": "workloads", "count": 6, "success_count": 5},
+                    {"category": "crashloop", "count": 10, "success_count": 9, "auto_fixed": 7, "confirmation_required": 3},
+                    {"category": "workloads", "count": 6, "success_count": 5, "auto_fixed": 3, "confirmation_required": 3},
                 ],
                 "trend": {"current_week": 12, "previous_week": 8, "delta": 4},
             }
@@ -178,7 +178,9 @@ def get_fix_history_summary(days: int = 7) -> dict:
     # By category
     by_cat = database.fetchall(
         f"SELECT category, COUNT(*) AS count, "
-        f"  COUNT(*) FILTER (WHERE status = 'completed') AS success_count "
+        f"  COUNT(*) FILTER (WHERE status = 'completed') AS success_count, "
+        f"  COUNT(*) FILTER (WHERE was_confirmed = false AND status = 'completed') AS auto_fixed, "
+        f"  COUNT(*) FILTER (WHERE was_confirmed = true) AS confirmation_required "
         f"FROM actions WHERE timestamp > EXTRACT(EPOCH FROM {cutoff_sql}) * 1000 "
         f"GROUP BY category ORDER BY count DESC"
     )
