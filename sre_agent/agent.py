@@ -42,7 +42,6 @@ from .self_tools import (
     list_runbooks,
     list_ui_components,
 )
-from .skill_loader import select_tools
 from .timeline_tools import TIMELINE_TOOLS
 from .view_tools import (
     cluster_metrics,
@@ -448,12 +447,18 @@ def run_agent_streaming(
     if use_harness and messages:
         last_user = next((m["content"] for m in reversed(messages) if m["role"] == "user"), "")
         if isinstance(last_user, str) and last_user:
-            filtered_defs, filtered_map, _offered = select_tools(
-                last_user, list(tool_map.values()), tool_map, mode=mode
+            # Adaptive selection: TF-IDF → LLM → category fallback
+            from .skill_loader import MODE_CATEGORIES
+            from .tool_predictor import select_tools_adaptive
+
+            fallback_cats = MODE_CATEGORIES.get(mode)
+            filtered_defs, filtered_map, _offered = select_tools_adaptive(
+                last_user,
+                all_tool_map=tool_map,
+                fallback_categories=fallback_cats,
             )
-            if len(filtered_defs) < len(tool_defs):
-                tool_defs = filtered_defs
-                tool_map = {**filtered_map}  # Don't mutate the original
+            tool_defs = filtered_defs
+            tool_map = {**filtered_map}  # Don't mutate the original
 
     # --- Harness: Cached system prompt with cluster context ---
     if use_harness:

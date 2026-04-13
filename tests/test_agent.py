@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 from sre_agent.agent import (
     MAX_ITERATIONS,
@@ -274,6 +274,7 @@ class TestWriteToolSet:
         assert WRITE_TOOLS & read_tools == set()
 
 
+@patch.dict("os.environ", {"PULSE_AGENT_HARNESS": "0"})
 class TestOnToolResult:
     def _make_stream_context(self, responses):
         client = MagicMock()
