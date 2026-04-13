@@ -234,7 +234,11 @@ def scan_recent_deployments() -> list[dict]:
                         available = dep.status.available_replicas or 0
                         unavailable = dep.status.unavailable_replicas or 0
 
-                        if unavailable > 0:
+                        if unavailable > 0 and available == desired:
+                            # Only report when all desired replicas are available but
+                            # extra pods are unavailable during rollout (surge).
+                            # Skip when available < desired — the workloads scanner
+                            # already catches that as "Deployment degraded".
                             # Look up related warning events from batch-fetched data
                             obj_key = f"{ns}/{dep.metadata.name}"
                             dep_events = warning_events_by_obj.get(obj_key, [])

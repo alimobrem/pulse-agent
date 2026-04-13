@@ -149,8 +149,8 @@ class TestScanRecentDeployments:
                 ),
             ),
             status=SimpleNamespace(
-                available_replicas=1,
-                unavailable_replicas=2,
+                available_replicas=3,
+                unavailable_replicas=1,
                 conditions=[
                     SimpleNamespace(
                         type="Progressing",
