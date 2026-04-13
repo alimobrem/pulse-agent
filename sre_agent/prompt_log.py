@@ -217,9 +217,10 @@ def get_prompt_stats(days: int = 30) -> dict:
 
 
 def get_prompt_versions(skill_name: str, days: int = 30) -> list[dict]:
-    """Track prompt_hash changes over time.
+    """Track prompt_hash changes over time with enriched metadata.
 
-    Returns list of dicts with prompt_hash, count, first_seen, last_seen.
+    Returns list of dicts with human-readable version info: token costs,
+    size metrics, section breakdown, and active duration.
     """
     try:
         from .db import get_database
@@ -227,8 +228,17 @@ def get_prompt_versions(skill_name: str, days: int = 30) -> list[dict]:
         db = get_database()
 
         rows = db.fetchall(
-            "SELECT prompt_hash, COUNT(*) AS count, "
-            "MIN(timestamp) AS first_seen, MAX(timestamp) AS last_seen "
+            "SELECT prompt_hash, "
+            "COUNT(*) AS count, "
+            "MIN(timestamp) AS first_seen, "
+            "MAX(timestamp) AS last_seen, "
+            "MAX(skill_version) AS skill_version, "
+            "COALESCE(ROUND(AVG(total_tokens)), 0) AS avg_tokens, "
+            "COALESCE(ROUND(AVG(input_tokens)), 0) AS avg_input_tokens, "
+            "COALESCE(ROUND(AVG(output_tokens)), 0) AS avg_output_tokens, "
+            "COALESCE(ROUND(AVG(cache_read_tokens)), 0) AS avg_cache_read, "
+            "MAX(static_chars) AS static_chars, "
+            "COALESCE(ROUND(AVG(dynamic_chars)), 0) AS avg_dynamic_chars "
             "FROM prompt_log "
             "WHERE skill_name = %s "
             "AND timestamp > NOW() - INTERVAL '1 day' * %s "
@@ -237,15 +247,55 @@ def get_prompt_versions(skill_name: str, days: int = 30) -> list[dict]:
             (skill_name, days),
         )
 
-        return [
-            {
+        # Get section breakdown for each hash (use most recent entry per hash)
+        section_rows = db.fetchall(
+            "SELECT DISTINCT ON (prompt_hash) prompt_hash, sections "
+            "FROM prompt_log "
+            "WHERE skill_name = %s "
+            "AND timestamp > NOW() - INTERVAL '1 day' * %s "
+            "AND sections IS NOT NULL "
+            "ORDER BY prompt_hash, timestamp DESC",
+            (skill_name, days),
+        )
+        sections_by_hash: dict[str, dict] = {}
+        for sr in section_rows or []:
+            secs = sr["sections"]
+            if isinstance(secs, str):
+                secs = json.loads(secs)
+            if isinstance(secs, dict):
+                sections_by_hash[sr["prompt_hash"]] = secs
+
+        results = []
+        for i, row in enumerate(rows):
+            first = row["first_seen"]
+            last = row["last_seen"]
+            duration_days = (last - first).days if first and last else 0
+
+            entry: dict = {
                 "prompt_hash": row["prompt_hash"],
+                "label": f"v{len(rows) - i}",
                 "count": row["count"],
-                "first_seen": row["first_seen"].isoformat() if row["first_seen"] else None,
-                "last_seen": row["last_seen"].isoformat() if row["last_seen"] else None,
+                "first_seen": first.isoformat() if first else None,
+                "last_seen": last.isoformat() if last else None,
+                "duration_days": duration_days,
+                "skill_version": row["skill_version"],
+                "avg_tokens": int(row["avg_tokens"]),
+                "avg_input_tokens": int(row["avg_input_tokens"]),
+                "avg_output_tokens": int(row["avg_output_tokens"]),
+                "avg_cache_read": int(row["avg_cache_read"]),
+                "static_chars": int(row["static_chars"]) if row["static_chars"] else 0,
+                "avg_dynamic_chars": int(row["avg_dynamic_chars"]),
+                "is_current": i == 0,
             }
-            for row in rows
-        ]
+
+            secs = sections_by_hash.get(row["prompt_hash"])
+            if secs:
+                entry["sections"] = secs
+                entry["total_static_chars"] = sum(secs.values())
+
+            results.append(entry)
+
+        return results
     except Exception:
         logger.debug("Failed to get prompt versions", exc_info=True)
         return []

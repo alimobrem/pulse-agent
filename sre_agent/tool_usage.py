@@ -493,6 +493,14 @@ def get_usage_stats(
     except Exception:
         logger.debug("Failed to compute token averages", exc_info=True)
 
+    if not overall:
+        overall = {
+            "total_calls": 0,
+            "unique_tools_used": 0,
+            "error_rate": 0,
+            "avg_duration_ms": 0,
+            "avg_result_bytes": 0,
+        }
     stats = {
         "total_calls": overall["total_calls"],
         "unique_tools_used": overall["unique_tools_used"],
@@ -527,7 +535,7 @@ def get_agents_metadata() -> list[dict]:
         if mode == "both":
             continue
 
-        config = build_orchestrated_config(mode)
+        config = build_orchestrated_config(mode)  # type: ignore[arg-type]
 
         agents.append(
             {
