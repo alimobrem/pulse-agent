@@ -148,7 +148,7 @@ def get_fix_history_summary(days: int = 7) -> dict:
 
         # Get all actions within the time window using SQL interval
         actions = database.fetchall(
-            "SELECT status, category, duration_ms FROM actions "
+            "SELECT status, category, duration_ms, verification_status FROM actions "
             "WHERE timestamp >= EXTRACT(EPOCH FROM NOW() - INTERVAL '1 day' * ?)::BIGINT * 1000",
             (days,),
         )
@@ -188,6 +188,20 @@ def get_fix_history_summary(days: int = 7) -> dict:
 
         by_category = sorted(categories.values(), key=lambda x: x["count"], reverse=True)
 
+        # Verification breakdown
+        resolved = sum(1 for a in actions if a.get("verification_status") == "verified")
+        still_failing = sum(1 for a in actions if a.get("verification_status") == "still_failing")
+        improved = sum(1 for a in actions if a.get("verification_status") == "improved")
+        pending_verification = total_actions - resolved - still_failing - improved
+
+        verification = {
+            "resolved": resolved,
+            "still_failing": still_failing,
+            "improved": improved,
+            "pending": pending_verification,
+            "resolution_rate": round(resolved / total_actions, 2) if total_actions > 0 else 0.0,
+        }
+
         # Calculate trend (current week vs previous week) using SQL intervals
         current_week_count_row = database.fetchone(
             "SELECT COUNT(*) as cnt FROM actions "
@@ -218,6 +232,7 @@ def get_fix_history_summary(days: int = 7) -> dict:
             "avg_resolution_ms": avg_resolution_ms,
             "by_category": by_category,
             "trend": trend,
+            "verification": verification,
         }
     except Exception as e:
         logger.debug("Failed to get fix history summary: %s", e)
@@ -231,6 +246,13 @@ def get_fix_history_summary(days: int = 7) -> dict:
             "avg_resolution_ms": 0,
             "by_category": [],
             "trend": {"current_week": 0, "previous_week": 0, "delta": 0},
+            "verification": {
+                "resolved": 0,
+                "still_failing": 0,
+                "improved": 0,
+                "pending": 0,
+                "resolution_rate": 0.0,
+            },
         }
 
 
@@ -264,6 +286,58 @@ async def rest_fix_history_summary(
 ):
     """Aggregated fix history statistics for the last N days. Requires token auth."""
     return get_fix_history_summary(days)
+
+
+@router.get("/fix-history/resolutions")
+async def rest_fix_history_resolutions(
+    days: int = 7,
+    limit: int = 50,
+    _auth=Depends(verify_token),
+):
+    """Recent resolution outcomes — what was fixed, how, and whether it worked."""
+    try:
+        from .. import db
+
+        database = db.get_database()
+        rows = database.fetchall(
+            "SELECT id, finding_id, category, tool, status, reasoning, "
+            "verification_status, verification_evidence, verification_timestamp, "
+            "timestamp, duration_ms "
+            "FROM actions "
+            "WHERE timestamp >= EXTRACT(EPOCH FROM NOW() - INTERVAL '1 day' * ?)::BIGINT * 1000 "
+            "AND verification_status IS NOT NULL "
+            "ORDER BY timestamp DESC "
+            "LIMIT ?",
+            (days, limit),
+        )
+
+        resolutions = []
+        for r in rows:
+            time_to_verify_ms = None
+            if r.get("verification_timestamp") and r.get("timestamp"):
+                time_to_verify_ms = int(r["verification_timestamp"]) - int(r["timestamp"])
+
+            resolutions.append(
+                {
+                    "id": r["id"],
+                    "findingId": r.get("finding_id", ""),
+                    "category": r.get("category", ""),
+                    "tool": r.get("tool", ""),
+                    "status": r.get("status", ""),
+                    "reasoning": r.get("reasoning", ""),
+                    "outcome": r.get("verification_status", ""),
+                    "evidence": r.get("verification_evidence", ""),
+                    "timestamp": r.get("timestamp"),
+                    "verifiedAt": r.get("verification_timestamp"),
+                    "durationMs": r.get("duration_ms"),
+                    "timeToVerifyMs": time_to_verify_ms,
+                }
+            )
+
+        return {"resolutions": resolutions, "total": len(resolutions)}
+    except Exception as e:
+        logger.debug("Failed to get resolutions: %s", e)
+        return {"resolutions": [], "total": 0}
 
 
 @router.get("/fix-history/{action_id}")
