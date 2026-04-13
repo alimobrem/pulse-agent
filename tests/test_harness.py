@@ -6,8 +6,8 @@ from types import SimpleNamespace
 from typing import ClassVar
 from unittest.mock import patch
 
+from sre_agent.component_registry import COMPONENT_REGISTRY
 from sre_agent.harness import (
-    COMPONENT_SCHEMAS,
     build_cached_system_prompt,
     get_cluster_context,
     get_component_hint,
@@ -303,16 +303,17 @@ class TestComponentHint:
         "node_map",
     ]
 
-    def test_schemas_dict_has_all_component_kinds(self):
-        """Every component kind must have a schema in COMPONENT_SCHEMAS."""
+    def test_registry_has_all_component_kinds(self):
+        """Every required component kind must be in the component registry."""
         for kind in self.REQUIRED_COMPONENT_KINDS:
-            assert kind in COMPONENT_SCHEMAS, f"Component kind '{kind}' missing from COMPONENT_SCHEMAS"
+            assert kind in COMPONENT_REGISTRY, f"Component kind '{kind}' missing from COMPONENT_REGISTRY"
 
-    def test_schemas_have_json_example(self):
-        """Each schema entry should contain a JSON kind example."""
+    def test_registry_has_examples(self):
+        """Each registry entry should contain an example with the correct kind."""
         for kind in self.REQUIRED_COMPONENT_KINDS:
-            assert f'"kind": "{kind}"' in COMPONENT_SCHEMAS[kind], (
-                f"Component kind '{kind}' has no JSON schema example in COMPONENT_SCHEMAS"
+            comp = COMPONENT_REGISTRY[kind]
+            assert comp.example.get("kind") == kind, (
+                f"Component '{kind}' has no example with matching kind in COMPONENT_REGISTRY"
             )
 
     def test_optimized_hint_has_schemas_only(self):

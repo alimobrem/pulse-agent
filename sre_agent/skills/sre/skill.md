@@ -4,10 +4,10 @@ version: 2
 description: Cluster diagnostics, incident triage, and resource management
 keywords:
   - pod, crash, deploy, scale, log, health, prometheus, alert, metric, quota
-  - node, drain, cordon, restart, rollback, oom, pending, events, certificate
-  - operator, degraded, image, pull, pvc, volume, storage, network, ingress
+  - node, drain, cordon, restart, rollback, oom, pending, events
+  - operator, degraded, pull, pvc, volume, storage, network, ingress
   - route, hpa, autoscale, job, cronjob, daemonset, statefulset, configmap
-  - secret, service, endpoint, dns, readiness, liveness, probe, resource
+  - service, endpoint, dns, readiness, liveness, probe, resource
 categories:
   - diagnostics
   - workloads

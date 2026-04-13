@@ -10,7 +10,9 @@ import uvicorn
 
 def _cleanup_socket():
     """Remove any leftover Unix socket file to prevent zombie locks on restart."""
-    socket_path = os.environ.get("PULSE_AGENT_SOCKET", "")
+    from .config import get_settings
+
+    socket_path = get_settings().socket
     if socket_path and os.path.exists(socket_path):
         try:
             os.unlink(socket_path)
@@ -45,9 +47,12 @@ def main():
     # Clean up any stale socket from a previous crash
     _cleanup_socket()
 
-    host = os.environ.get("PULSE_AGENT_HOST", "0.0.0.0")
-    port = int(os.environ.get("PULSE_AGENT_PORT", "8080"))
-    socket_path = os.environ.get("PULSE_AGENT_SOCKET", "")
+    from .config import get_settings
+
+    settings = get_settings()
+    host = settings.host
+    port = settings.port
+    socket_path = settings.socket
 
     # Write PID for process management
     with open("/tmp/pulse_agent.pid", "w") as f:

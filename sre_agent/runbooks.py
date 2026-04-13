@@ -130,11 +130,11 @@ def select_runbooks(query: str, max_runbooks: int | None = None, max_chars: int 
         max_chars: Maximum total characters for runbook content (default 2000).
             After selecting runbooks, truncates if total exceeds this limit.
     """
-    import os
-
     if max_runbooks is None:
         # Check experiment override: single_runbook uses 1, default is 3
-        experiment = os.environ.get("PULSE_PROMPT_EXPERIMENT", "")
+        from .config import get_settings
+
+        experiment = get_settings().prompt_experiment
         # Default: 1 runbook (optimized 2026-04-09, +2.2 judge pts vs 3)
         # Legacy: 3 runbooks
         max_runbooks = 3 if experiment == "legacy" else 1

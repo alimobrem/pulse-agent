@@ -321,7 +321,7 @@ def create_skill(
     """
     import re
 
-    from .skill_loader import _USER_SKILLS_DIR, _VALID_CATEGORIES, reload_skills
+    from .skill_loader import _VALID_CATEGORIES, _get_user_skills_dir, reload_skills
 
     # Validate name
     if not re.match(r"^[a-z][a-z0-9_]*$", name):
@@ -331,7 +331,7 @@ def create_skill(
         return "Error: name must be 3-40 characters"
 
     # Check for existing skill
-    skill_dir = _USER_SKILLS_DIR / name.replace("_", "-")
+    skill_dir = _get_user_skills_dir() / name.replace("_", "-")
     if skill_dir.exists():
         return f"Error: skill '{name}' already exists at {skill_dir}. Use edit_skill to modify it."
 
@@ -569,7 +569,7 @@ def create_skill_from_template(
 
     import yaml
 
-    from .skill_loader import _USER_SKILLS_DIR, get_skill, reload_skills
+    from .skill_loader import _get_user_skills_dir, get_skill, reload_skills
 
     # Validate name
     if not re.match(r"^[a-z][a-z0-9_]*$", name):
@@ -579,7 +579,7 @@ def create_skill_from_template(
         return "Error: name must be 3-40 characters"
 
     # Check new skill doesn't already exist
-    skill_dir = _USER_SKILLS_DIR / name.replace("_", "-")
+    skill_dir = _get_user_skills_dir() / name.replace("_", "-")
     if skill_dir.exists():
         return f"Error: skill '{name}' already exists at {skill_dir}. Use edit_skill to modify it."
 

@@ -50,12 +50,12 @@ class TestAssemblePrompt:
         assert "data_table" in static
 
     def test_no_component_hint_for_security(self):
-        skill = _make_skill(name="security")
+        skill = _make_skill(name="security", skip_component_hints=True)
         static, _ = assemble_prompt(skill, "test", "security", [])
         assert "Component Catalog" not in static
 
     def test_no_component_hint_for_view_designer(self):
-        skill = _make_skill(name="view_designer")
+        skill = _make_skill(name="view_designer", skip_component_hints=True)
         static, _ = assemble_prompt(skill, "test", "view_designer", [])
         assert "Component Catalog" not in static
 

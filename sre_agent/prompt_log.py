@@ -78,8 +78,8 @@ def record_prompt(
 
         db = get_database()
 
-        static + dynamic
-        prompt_hash = hashlib.sha256(static.encode("utf-8")).hexdigest()[:16]
+        combined = static + dynamic
+        prompt_hash = hashlib.sha256(combined.encode("utf-8")).hexdigest()[:16]
         sections = _measure_sections(static)
 
         usage = token_usage or {}
@@ -197,8 +197,6 @@ def get_prompt_stats(days: int = 30) -> dict:
             "avg_tokens": int(overall["avg_tokens"]) if overall else 0,
             "avg_static_chars": int(overall["avg_static"]) if overall else 0,
             "avg_dynamic_chars": int(overall["avg_dynamic"]) if overall else 0,
-            "static_chars": int(overall["avg_static"]) if overall else 0,
-            "dynamic_chars": int(overall["avg_dynamic"]) if overall else 0,
             "by_skill": [dict(row) for row in by_skill_rows],
             "cache_hit_rate": round(cache_hit_rate, 3),
             "section_avg": section_avg,

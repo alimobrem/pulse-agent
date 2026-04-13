@@ -52,17 +52,6 @@ def get_components_by_category(category: str) -> list[ComponentKind]:
     return [c for c in COMPONENT_REGISTRY.values() if c.category == category]
 
 
-def generate_prompt_hints(categories: list[str] | None = None) -> str:
-    """Generate LLM prompt hints from the registry (replaces COMPONENT_SCHEMAS)."""
-    lines = []
-    for kind in COMPONENT_REGISTRY.values():
-        if categories and kind.category not in categories:
-            continue
-        if kind.prompt_hint:
-            lines.append(kind.prompt_hint)
-    return "\n\n".join(lines) if lines else ""
-
-
 def get_prompt_hints(kinds: list[str] | None = None) -> str:
     """Generate component hint text from registry (replaces hardcoded COMPONENT_SCHEMAS).
 

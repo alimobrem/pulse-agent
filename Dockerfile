@@ -5,7 +5,7 @@ WORKDIR /opt/app-root/src
 
 COPY pyproject.toml .
 COPY sre_agent/ sre_agent/
-RUN pip install --no-cache-dir ".[postgres]"
+RUN pip install --no-cache-dir .
 
 USER 1001
 EXPOSE 8080

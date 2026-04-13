@@ -5,9 +5,9 @@ from __future__ import annotations
 from sre_agent.component_registry import (
     COMPONENT_REGISTRY,
     ComponentKind,
-    generate_prompt_hints,
     get_component,
     get_components_by_category,
+    get_prompt_hints,
     get_valid_kinds,
     register_component,
 )
@@ -99,18 +99,18 @@ class TestRegistry:
 
 class TestPromptHints:
     def test_generates_hints(self):
-        hints = generate_prompt_hints()
+        hints = get_prompt_hints()
         assert len(hints) > 0
         assert "data_table" in hints
         assert "metric_card" in hints
 
-    def test_filter_by_category(self):
-        hints = generate_prompt_hints(categories=["metrics"])
+    def test_filter_by_kinds(self):
+        hints = get_prompt_hints(kinds=["metric_card"])
         assert "metric_card" in hints
         assert "data_table" not in hints
 
-    def test_empty_category(self):
-        hints = generate_prompt_hints(categories=["nonexistent"])
+    def test_empty_kinds(self):
+        hints = get_prompt_hints(kinds=["nonexistent_xyz"])
         assert hints == ""
 
 

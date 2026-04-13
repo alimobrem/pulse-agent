@@ -9,7 +9,7 @@ import re
 import time
 import uuid
 
-from fastapi import HTTPException, WebSocket
+from fastapi import HTTPException, WebSocket, WebSocketDisconnect
 
 from ..config import get_settings
 from ..monitor import MonitorSession, get_fix_history
@@ -424,7 +424,6 @@ async def websocket_auto_agent(websocket: WebSocket):
 
             # Gather context inputs for prompt builder
             style_hint = _apply_style_hint(data)
-            fleet_mode = data.get("fleet", False)
 
             from ..context_bus import ContextEntry, get_context_bus
 
@@ -456,21 +455,24 @@ async def websocket_auto_agent(websocket: WebSocket):
                     effective_system = build_cached_system_prompt(static, dynamic)
                 else:
                     # Fallback: manual assembly for legacy modes
-                    effective_system = system_prompt + style_hint
-                    if shared_context:
-                        effective_system += "\n\n" + shared_context
+                    from ..harness import build_cached_system_prompt
+
+                    _static = system_prompt + style_hint
+                    _dynamic = shared_context or ""
                     if intent in ("sre", "both"):
                         try:
                             from ..runbooks import select_runbooks
 
-                            effective_system += "\n\n" + select_runbooks(content)
+                            _dynamic += "\n\n" + select_runbooks(content)
                         except Exception:
                             pass
+                    effective_system = build_cached_system_prompt(_static, _dynamic)
             except Exception:
                 # Safe fallback
-                effective_system = system_prompt + style_hint
-                if shared_context:
-                    effective_system += "\n\n" + shared_context
+                from ..harness import build_cached_system_prompt
+
+                _static = system_prompt + style_hint
+                effective_system = build_cached_system_prompt(_static, shared_context or "")
 
             try:
                 result = await _run_agent_ws(
@@ -733,7 +735,3 @@ async def websocket_monitor(websocket: WebSocket):
         except asyncio.CancelledError:
             pass
         _ws_alive.pop(ws_id, None)
-
-
-# Import WebSocketDisconnect at module level for the except clause
-from fastapi import WebSocketDisconnect

@@ -91,11 +91,16 @@ class MemoryManager:
                 extract_runbook(self.store, incident_id)
         return incident_id
 
-    def augment_prompt(self, base_prompt: str, user_query: str) -> str:
+    def augment_prompt(self, base_prompt: str | list[dict], user_query: str) -> str | list[dict]:
         memory_context = build_memory_context(self.store, user_query)
-        if memory_context:
-            return base_prompt + memory_context
-        return base_prompt
+        if not memory_context:
+            return base_prompt
+        # Handle cache block format (list of content dicts from build_cached_system_prompt)
+        if isinstance(base_prompt, list):
+            blocks = list(base_prompt)
+            blocks.append({"type": "text", "text": memory_context})
+            return blocks
+        return base_prompt + memory_context
 
     def get_extra_tools(self) -> list:
         return MEMORY_TOOLS

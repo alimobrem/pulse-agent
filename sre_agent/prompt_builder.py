@@ -28,6 +28,11 @@ logger = logging.getLogger("pulse_agent.prompt_builder")
 _last_assembled: dict = {}
 
 
+def get_last_assembled() -> dict:
+    """Return a snapshot of the latest prompt assembly data for logging."""
+    return dict(_last_assembled)
+
+
 # ---------------------------------------------------------------------------
 # Intent Analysis Prefix — injected into every prompt (~100 tokens)
 # Makes the agent classify the query before acting, leading to better

@@ -20,8 +20,13 @@ import yaml
 logger = logging.getLogger("pulse_agent.skill_loader")
 
 _SKILLS_DIR = Path(__file__).parent / "skills"
+
+
 # User-created skills go to a writable directory (PVC-backed in containers)
-_USER_SKILLS_DIR = Path("/tmp/pulse_agent/skills")
+def _get_user_skills_dir() -> Path:
+    from .config import get_settings
+
+    return Path(get_settings().user_skills_dir)
 
 
 @dataclass
@@ -41,6 +46,7 @@ class Skill:
     configurable: list[dict] = field(default_factory=list)
     eval_scenarios: list[dict] = field(default_factory=list)
     path: Path = field(default=Path("."))
+    skip_component_hints: bool = False
     degraded: bool = False
     degraded_reason: str = ""
 
@@ -127,6 +133,7 @@ def _parse_skill_md(path: Path) -> Skill | None:
         requires_tools=meta.get("requires_tools", []),
         handoff_to=meta.get("handoff_to", {}),
         configurable=meta.get("configurable", []),
+        skip_component_hints=meta.get("skip_component_hints", False),
         path=path.parent,
     )
 
@@ -260,7 +267,7 @@ def load_skills(skills_dir: Path | None = None) -> dict[str, Skill]:
     loaded: dict[str, Skill] = {}
 
     # Scan both built-in and user-created skill directories
-    dirs_to_scan = [skills_dir or _SKILLS_DIR, _USER_SKILLS_DIR]
+    dirs_to_scan = [skills_dir or _SKILLS_DIR, _get_user_skills_dir()]
 
     for directory in dirs_to_scan:
         if not directory.exists():
@@ -463,7 +470,7 @@ def classify_query(query: str) -> Skill:
 def _llm_classify(query: str) -> Skill | None:
     """Use a lightweight LLM call to classify ambiguous queries.
 
-    Caches results (LRU, 100 entries, 5min TTL) to avoid repeat API calls.
+    Caches results (FIFO, 100 entries, 5min TTL) to avoid repeat API calls.
     Returns None on any error (caller falls back to keyword/default).
     """
     import hashlib
@@ -1011,7 +1018,7 @@ def _build_component_hint(skill: Skill, tool_names: list[str]) -> str:
     - Other skills: relevant component schemas based on offered tools
     - Skills with components.yaml: include custom component definitions
     """
-    if skill.name in ("view_designer", "security"):
+    if skill.skip_component_hints:
         return ""
 
     from .component_registry import get_prompt_hints

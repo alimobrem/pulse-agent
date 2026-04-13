@@ -13,6 +13,7 @@ categories:
   - networking
 write_tools: false
 priority: 10
+skip_component_hints: true
 requires_tools:
   - get_security_summary
   - scan_pod_security

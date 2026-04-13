@@ -47,6 +47,12 @@ class PulseAgentSettings(BaseSettings):
     # WebSocket
     ws_token: str = ""
 
+    # Skills
+    user_skills_dir: str = "/tmp/pulse_agent/skills"
+
+    # Prompt experiment (e.g., "legacy" for A/B testing)
+    prompt_experiment: str = ""
+
     # Dev
     dev_user: str = ""
 
@@ -56,6 +62,11 @@ class PulseAgentSettings(BaseSettings):
 
     # Tool timeout
     tool_timeout: int = 30
+
+    # Server
+    host: str = "0.0.0.0"
+    port: int = 8080
+    socket: str = ""
 
     # Webhook
     webhook_url: str = ""

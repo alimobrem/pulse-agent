@@ -125,11 +125,10 @@ async def _run_agent_ws(
     """Run an agent turn and stream results over WebSocket."""
     from ..view_tools import set_current_user
 
-    global _turn_start
     set_current_user(current_user)
     client = create_client()
     ws_id = session_id
-    _turn_start = time.monotonic()
+    _turn_starts[ws_id] = time.monotonic()
 
     # Capture the running loop BEFORE entering the thread
     loop = asyncio.get_running_loop()
@@ -418,19 +417,16 @@ async def _run_agent_ws(
 
     # Record prompt log (what system prompt was sent, with token costs)
     try:
-        from ..prompt_builder import _last_assembled
+        from ..prompt_builder import get_last_assembled
         from ..prompt_log import record_prompt
 
-        if _last_assembled:
+        assembled = get_last_assembled()
+        if assembled:
             record_prompt(
                 session_id=ws_id,
                 turn_number=turn_number,
                 token_usage=turn_token_usage,
-                **{
-                    k: v
-                    for k, v in _last_assembled.items()
-                    if k in ("static", "dynamic", "skill_name", "skill_version")
-                },
+                **{k: v for k, v in assembled.items() if k in ("static", "dynamic", "skill_name", "skill_version")},
             )
     except Exception:
         logger.debug("Failed to record prompt log", exc_info=True)
@@ -448,7 +444,7 @@ async def _run_agent_ws(
     turn_meta = {
         "tools_called": list(session_tools),
         "tool_count": len(session_tools),
-        "duration_ms": int((time.monotonic() - _turn_start) * 1000) if _turn_start else 0,
+        "duration_ms": int((time.monotonic() - _turn_starts.pop(ws_id, time.monotonic())) * 1000),
         **turn_token_usage,
     }
 
@@ -457,7 +453,8 @@ async def _run_agent_ws(
 
 # Module-level storage for turn metadata (consumed by ws_endpoints after each turn)
 _last_turn_meta: dict = {}
-_turn_start: float = 0
+# Per-session turn start times (keyed by session_id to avoid cross-session clobbering)
+_turn_starts: dict[str, float] = {}
 
 
 def _cleanup_stale_pending():

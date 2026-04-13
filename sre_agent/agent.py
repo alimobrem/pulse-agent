@@ -215,10 +215,10 @@ Check get_firing_alerts first.
 
 
 def _build_system_prompt() -> str:
-    """Build system prompt. Default is optimized; set PULSE_PROMPT_EXPERIMENT for variants."""
-    import os
+    """Build system prompt. Default is optimized; set PULSE_AGENT_PROMPT_EXPERIMENT for variants."""
+    from .config import get_settings
 
-    experiment = os.environ.get("PULSE_PROMPT_EXPERIMENT", "")
+    experiment = get_settings().prompt_experiment
 
     if experiment == "legacy":
         return _LEGACY_PROMPT + ALERT_TRIAGE_CONTEXT

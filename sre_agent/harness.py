@@ -381,88 +381,6 @@ def get_cluster_context(max_age: float = 60, mode: str = "sre") -> str:
 # ---------------------------------------------------------------------------
 
 
-COMPONENT_SCHEMAS: dict[str, str] = {
-    "data_table": """data_table -- Sortable, filterable, paginated tables
-{"kind": "data_table", "title": "Pods", "description": "Running pods in namespace",
- "columns": [{"id": "name", "header": "Name", "type": "resource_name"},
-              {"id": "status", "header": "Status", "type": "status"},
-              {"id": "age", "header": "Age", "type": "age"}],
- "rows": [{"name": "nginx-abc", "status": "Running", "age": "2d", "_gvr": "v1~pods", "namespace": "default"}],
- "resourceType": "pods", "gvr": "v1~pods"}
-Column types: resource_name, namespace, node, status, age, cpu, memory, replicas, progress, sparkline, timestamp, labels, boolean, severity, link, text.""",
-    "info_card_grid": """info_card_grid -- Summary metric cards in a row
-{"kind": "info_card_grid", "title": "Cluster Health",
- "cards": [{"label": "Nodes Ready", "value": "5/5", "sub": "all healthy"},
-           {"label": "Pods Running", "value": "142", "sub": "3 pending"}]}""",
-    "chart": """chart -- Interactive time-series (line, bar, area, stacked_area, stacked_bar, pie, donut, scatter, radar, treemap)
-{"kind": "chart", "chartType": "line", "title": "CPU Usage", "description": "Last hour",
- "series": [{"label": "nginx", "data": [[1700000000, 0.5], [1700003600, 0.7]]}],
- "yAxisLabel": "cores", "query": "rate(container_cpu...)", "timeRange": "1h"}""",
-    "status_list": """status_list -- Colored status indicators
-{"kind": "status_list", "title": "Node Conditions",
- "items": [{"name": "Ready", "status": "healthy", "detail": "KubeletReady"},
-           {"name": "MemoryPressure", "status": "warning", "detail": "threshold exceeded"}]}
-Statuses: healthy, warning, error, pending, unknown.""",
-    "badge_list": """badge_list -- Colored badges/tags in a row
-{"kind": "badge_list",
- "badges": [{"text": "production", "variant": "info"},
-            {"text": "critical", "variant": "error"},
-            {"text": "healthy", "variant": "success"}]}
-Variants: success, warning, error, info, default.""",
-    "key_value": """key_value -- Key-value pairs display
-{"kind": "key_value", "title": "Deployment Details",
- "pairs": [{"key": "Replicas", "value": "3/3 ready"},
-           {"key": "Strategy", "value": "RollingUpdate"},
-           {"key": "Image", "value": "nginx:1.25"}]}""",
-    "relationship_tree": """relationship_tree -- Visual resource hierarchy
-{"kind": "relationship_tree", "title": "Resource Tree",
- "rootId": "dep-1",
- "nodes": [{"id": "dep-1", "label": "Deployment/nginx", "kind": "Deployment",
-            "name": "nginx", "status": "healthy", "children": ["rs-1"]},
-           {"id": "rs-1", "label": "ReplicaSet/nginx-abc", "kind": "ReplicaSet",
-            "name": "nginx-abc", "status": "healthy", "children": ["pod-1"]},
-           {"id": "pod-1", "label": "Pod/nginx-abc-xyz", "kind": "Pod",
-            "name": "nginx-abc-xyz", "status": "healthy"}]}""",
-    "tabs": """tabs -- Tabbed layout grouping components
-{"kind": "tabs",
- "tabs": [{"label": "Overview", "components": [<info_card_grid>, <status_list>]},
-          {"label": "Metrics", "components": [<chart>, <chart>]},
-          {"label": "Events", "components": [<data_table>]}]}""",
-    "grid": """grid -- Side-by-side layout (2+ columns)
-{"kind": "grid", "columns": 2,
- "items": [<chart_spec>, <chart_spec>, <status_list>, <key_value>]}""",
-    "section": """section -- Collapsible titled section
-{"kind": "section", "title": "Advanced Details", "collapsible": true,
- "defaultOpen": false, "components": [<key_value>, <data_table>]}""",
-    "log_viewer": """log_viewer -- Searchable, filterable log output
-{"kind": "log_viewer", "title": "Pod Logs: nginx-abc",
- "source": "nginx-abc/nginx",
- "lines": [{"timestamp": "2026-04-02T10:00:01Z", "level": "info", "message": "Server started on :8080"},
-            {"timestamp": "2026-04-02T10:00:05Z", "level": "error", "message": "Connection refused to upstream"},
-            {"timestamp": "2026-04-02T10:00:06Z", "level": "warn", "message": "Retrying in 5s"}]}
-Levels: info, warn, error, debug. Include timestamps for sortable output.""",
-    "yaml_viewer": """yaml_viewer -- Formatted YAML/JSON with copy button
-{"kind": "yaml_viewer", "title": "Deployment Manifest", "language": "yaml",
- "content": "apiVersion: apps/v1\\nkind: Deployment\\nmetadata:\\n  name: nginx\\nspec:\\n  replicas: 3"}""",
-    "metric_card": """metric_card -- Single metric with live sparkline chart
-{"kind": "metric_card", "title": "CPU Usage", "value": "72", "unit": "%",
- "query": "100 - avg(rate(node_cpu_seconds_total{mode='idle'}[5m])) * 100",
- "color": "#3b82f6", "thresholds": {"warning": 70, "critical": 90},
- "status": "warning", "description": "Above 70% threshold"}
-Include `query` for live sparklines. Status: healthy, warning, error.""",
-    "node_map": """node_map -- Visual cluster node topology
-{"kind": "node_map", "title": "Cluster Nodes", "description": "3/3 nodes ready, 42 pods running",
- "nodes": [{"name": "worker-1", "status": "ready", "roles": ["worker"], "podCount": 15,
-            "cpuPct": 45.2, "memPct": 62.1}]}
-Use `visualize_nodes()` for pre-built node maps.""",
-    "resource_counts": """resource_counts -- Clickable resource summary cards with counts and icons
-{"kind": "resource_counts", "title": "production Resources", "namespace": "production",
- "items": [{"resource": "pods", "count": 42, "gvr": "v1~pods", "status": "healthy"},
-           {"resource": "deployments", "count": 12, "gvr": "apps~v1~deployments"},
-           {"resource": "services", "count": 8, "gvr": "v1~services"}]}
-Each card links to its resource list page. Returned by namespace_summary().""",
-}
-
 # Map tools to the component kinds they produce
 _TOOL_COMPONENTS: dict[str, list[str]] = {
     "get_prometheus_query": ["chart"],
@@ -492,20 +410,6 @@ _TOOL_COMPONENTS: dict[str, list[str]] = {
     "create_dashboard": ["tabs", "grid", "section"],
     "plan_dashboard": ["tabs", "grid", "section"],
 }
-
-
-def _select_relevant_schemas(tool_names: list[str]) -> list[str]:
-    """Select component schemas relevant to the selected tools."""
-    relevant: set[str] = set()
-
-    for tool in tool_names:
-        if tool in _TOOL_COMPONENTS:
-            relevant.update(_TOOL_COMPONENTS[tool])
-
-    # Always include data_table (most common)
-    relevant.add("data_table")
-
-    return [COMPONENT_SCHEMAS[k] for k in sorted(relevant) if k in COMPONENT_SCHEMAS]
 
 
 def _select_relevant_schemas_from_registry(tool_names: list[str]) -> str:
@@ -593,10 +497,7 @@ def get_component_hint(mode: str = "sre", tool_names: list[str] | None = None) -
     Delegates to skill-aware _build_component_hint when a skill is loaded for the mode.
     Falls back to tool-based schema selection for legacy modes.
     """
-    if mode in ("view_designer", "security"):
-        return ""
-
-    # Try skill-aware component hint first
+    # Try skill-aware component hint first (skill controls skip_component_hints)
     try:
         from .skill_loader import get_skill
 
