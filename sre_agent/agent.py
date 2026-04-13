@@ -444,7 +444,9 @@ def run_agent_streaming(
         )
 
     # --- Harness: Dynamic tool selection ---
-    if use_harness and messages:
+    # Skip adaptive selection for view_designer and "both" modes — they need
+    # the full tool set (plan_dashboard, create_dashboard, etc.)
+    if use_harness and messages and mode not in ("view_designer", "both"):
         last_user = next((m["content"] for m in reversed(messages) if m["role"] == "user"), "")
         if isinstance(last_user, str) and last_user:
             # Adaptive selection: TF-IDF → LLM → category fallback
