@@ -131,7 +131,14 @@ def _migrate_011_routing_decisions(db: Database) -> None:
     """)
 
 
-def _migrate_012_tool_predictions(db: Database) -> None:
+def _migrate_012_bigint_timestamps(db: Database) -> None:
+    """Fix INTEGER timestamp columns that overflow with millisecond epoch values."""
+    db.executescript("""
+        ALTER TABLE investigations ALTER COLUMN timestamp TYPE BIGINT;
+    """)
+
+
+def _migrate_013_tool_predictions(db: Database) -> None:
     """Add tool_predictions and tool_cooccurrence tables for adaptive tool selection."""
     from .db_schema import TOOL_COOCCURRENCE_SCHEMA, TOOL_PREDICTIONS_SCHEMA
 
@@ -150,5 +157,6 @@ MIGRATIONS = [
     (9, "tool_source", _migrate_009_tool_source),
     (10, "prompt_log", _migrate_010_prompt_log),
     (11, "routing_decisions", _migrate_011_routing_decisions),
-    (12, "tool_predictions", _migrate_012_tool_predictions),
+    (12, "bigint_timestamps", _migrate_012_bigint_timestamps),
+    (13, "tool_predictions", _migrate_013_tool_predictions),
 ]
