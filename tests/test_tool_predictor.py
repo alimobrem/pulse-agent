@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, patch
 
 from sre_agent.db import Database
 from sre_agent.db_migrations import run_migrations
-from sre_agent.tool_predictor import learn
+from sre_agent.tool_predictor import PredictionResult, learn, predict_tools
 
 _TEST_DB_URL = os.environ.get(
     "PULSE_AGENT_TEST_DATABASE_URL",
@@ -133,3 +133,59 @@ class TestLearn:
         mock_get_db.return_value = db
         learn(query="test", tools_called=[], tools_offered=["list_pods"])
         assert not db.commit.called
+
+
+class TestPredictTools:
+    @patch("sre_agent.tool_predictor._get_db")
+    def test_returns_prediction_result(self, mock_get_db):
+        db = MagicMock()
+        db.fetchall.return_value = [
+            {"tool_name": "list_pods", "total_score": 10.0, "total_hits": 15},
+            {"tool_name": "describe_pod", "total_score": 8.0, "total_hits": 12},
+            {"tool_name": "get_pod_logs", "total_score": 6.0, "total_hits": 11},
+        ]
+        mock_get_db.return_value = db
+
+        result = predict_tools("show me pods", top_k=10)
+        assert isinstance(result, PredictionResult)
+        assert result.confidence == "high"
+        assert "list_pods" in result.tools
+
+    @patch("sre_agent.tool_predictor._get_db")
+    def test_low_confidence_when_no_data(self, mock_get_db):
+        db = MagicMock()
+        db.fetchall.return_value = []
+        mock_get_db.return_value = db
+
+        result = predict_tools("show me pods", top_k=10)
+        assert result.confidence == "low"
+        assert result.tools == []
+
+    @patch("sre_agent.tool_predictor._get_db")
+    def test_low_confidence_when_sparse_hits(self, mock_get_db):
+        db = MagicMock()
+        db.fetchall.return_value = [
+            {"tool_name": "list_pods", "total_score": 2.0, "total_hits": 2},
+        ]
+        mock_get_db.return_value = db
+
+        result = predict_tools("show me pods", top_k=10)
+        assert result.confidence == "low"
+
+    @patch("sre_agent.tool_predictor._get_db")
+    def test_cooccurrence_expansion(self, mock_get_db):
+        db = MagicMock()
+        db.fetchall.side_effect = [
+            [
+                {"tool_name": "describe_pod", "total_score": 20.0, "total_hits": 15},
+            ],
+            [
+                {"tool_b": "get_pod_logs", "frequency": 50},
+                {"tool_b": "get_events", "frequency": 30},
+            ],
+        ]
+        mock_get_db.return_value = db
+
+        result = predict_tools("describe the pod", top_k=10)
+        assert "describe_pod" in result.tools
+        assert "get_pod_logs" in result.tools

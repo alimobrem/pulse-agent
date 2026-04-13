@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import logging
 import re
+from dataclasses import dataclass, field
 from itertools import combinations
 
 logger = logging.getLogger("pulse_agent.tool_predictor")
@@ -199,3 +200,82 @@ def learn(
         db.commit()
     except Exception:
         logger.debug("Failed to record tool predictions", exc_info=True)
+
+
+_CONFIDENCE_THRESHOLD = 10  # min total hit_count to trust TF-IDF
+
+
+@dataclass
+class PredictionResult:
+    """Result of tool prediction."""
+
+    tools: list[str] = field(default_factory=list)
+    confidence: str = "low"  # "high" or "low"
+    source: str = "none"  # "tfidf", "llm", "category", "none"
+
+
+def predict_tools(query: str, *, top_k: int = 10) -> PredictionResult:
+    """Predict which tools are most relevant for a query using TF-IDF scoring.
+
+    Returns a PredictionResult with the predicted tool names and confidence level.
+    """
+    tokens = extract_tokens(query)
+    if not tokens:
+        return PredictionResult()
+
+    try:
+        db = _get_db()
+    except Exception:
+        return PredictionResult()
+
+    placeholders = ", ".join(["%s"] * len(tokens))
+
+    try:
+        rows = db.fetchall(
+            f"SELECT tool_name, "
+            f"SUM(score - miss_count * 0.3) AS total_score, "
+            f"SUM(hit_count) AS total_hits "
+            f"FROM tool_predictions "
+            f"WHERE token IN ({placeholders}) "
+            f"GROUP BY tool_name "
+            f"HAVING SUM(score - miss_count * 0.3) > 0 "
+            f"ORDER BY total_score DESC "
+            f"LIMIT %s",
+            (*tokens, top_k),
+        )
+    except Exception:
+        logger.debug("TF-IDF lookup failed", exc_info=True)
+        return PredictionResult()
+
+    if not rows:
+        return PredictionResult()
+
+    max_hits = max(r["total_hits"] for r in rows)
+    if max_hits < _CONFIDENCE_THRESHOLD:
+        return PredictionResult(confidence="low")
+
+    predicted = [r["tool_name"] for r in rows]
+
+    # Co-occurrence expansion
+    expanded = _expand_cooccurrence(db, predicted, top_k)
+    final = predicted + [t for t in expanded if t not in predicted]
+
+    return PredictionResult(tools=final[: top_k + 5], confidence="high", source="tfidf")
+
+
+def _expand_cooccurrence(db, tools: list[str], limit: int = 5) -> list[str]:
+    """Find tools that frequently co-occur with the predicted set."""
+    if not tools:
+        return []
+
+    placeholders = ", ".join(["%s"] * len(tools))
+    try:
+        rows = db.fetchall(
+            f"SELECT tool_b, frequency FROM tool_cooccurrence "
+            f"WHERE tool_a IN ({placeholders}) AND tool_b NOT IN ({placeholders}) "
+            f"ORDER BY frequency DESC LIMIT %s",
+            (*tools, *tools, limit),
+        )
+        return [r["tool_b"] for r in rows]
+    except Exception:
+        return []
