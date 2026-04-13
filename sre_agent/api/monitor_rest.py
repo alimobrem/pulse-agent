@@ -20,6 +20,236 @@ logger = logging.getLogger("pulse_agent.api")
 router = APIRouter()
 
 
+# ── Scanner Categories ─────────────────────────────────────────────────────
+
+_SCANNER_CATEGORIES = {
+    "pod_health": ["crashloop", "pending", "oom", "image_pull"],
+    "node_pressure": ["nodes"],
+    "workload_health": ["workloads", "daemonsets", "hpa"],
+    "security_audit": ["audit_rbac", "audit_auth", "audit_config"],
+    "certificate_expiry": ["cert_expiry"],
+    "alerts": ["alerts"],
+    "deployment_audit": ["audit_deployment", "audit_events"],
+    "operator_health": ["operators"],
+}
+
+
+def get_scanner_coverage(days: int = 7) -> dict:
+    """Get scanner coverage statistics.
+
+    Args:
+        days: Number of days to look back for finding stats (1-90).
+
+    Returns:
+        Dictionary with coverage metrics:
+        - active_scanners: count of enabled scanners
+        - total_scanners: total available scanners
+        - coverage_pct: percentage of categories covered (0.0-1.0)
+        - categories: list of {name, covered, scanners}
+        - per_scanner: list of {name, enabled, finding_count, actionable_count, noise_pct}
+    """
+    from ..monitor import _get_all_scanners
+
+    # Get all scanners
+    all_scanners = _get_all_scanners()
+    scanner_ids = {scanner_id for scanner_id, _ in all_scanners}
+    total_scanners = len(all_scanners)
+
+    # All scanners are currently always enabled (no toggle mechanism yet)
+    active_scanners = total_scanners
+
+    # Compute category coverage
+    categories = []
+    covered_count = 0
+    total_categories = len(_SCANNER_CATEGORIES)
+
+    for category_name, scanner_list in _SCANNER_CATEGORIES.items():
+        # A category is covered if at least one of its scanners is enabled
+        covered = any(s in scanner_ids for s in scanner_list)
+        if covered:
+            covered_count += 1
+
+        # Get the list of enabled scanners for this category
+        enabled_scanners = [s for s in scanner_list if s in scanner_ids]
+
+        categories.append(
+            {
+                "name": category_name,
+                "covered": covered,
+                "scanners": enabled_scanners,
+            }
+        )
+
+    coverage_pct = covered_count / total_categories if total_categories > 0 else 0.0
+
+    # Try to get per-scanner finding stats from the database
+    per_scanner = []
+    try:
+        from .. import db
+
+        database = db.get_database()
+
+        # Get current timestamp
+        now_ts_row = database.fetchone("SELECT EXTRACT(EPOCH FROM NOW())::BIGINT * 1000 AS ts")
+        now_ts = now_ts_row["ts"] if now_ts_row else 0
+        cutoff_ts = int(now_ts - (days * 24 * 3600 * 1000))
+
+        # Get finding counts per scanner category
+        # Note: findings table uses 'category' field which maps to scanner IDs
+        for scanner_id, _ in all_scanners:
+            # Get total findings for this scanner
+            finding_row = database.fetchone(
+                "SELECT COUNT(*) as cnt FROM findings WHERE category = ? AND timestamp >= ?",
+                (scanner_id, cutoff_ts),
+            )
+            finding_count = finding_row["cnt"] if finding_row else 0
+
+            # Get actionable findings (severity = critical or warning)
+            actionable_row = database.fetchone(
+                "SELECT COUNT(*) as cnt FROM findings "
+                "WHERE category = ? AND timestamp >= ? AND severity IN ('critical', 'warning')",
+                (scanner_id, cutoff_ts),
+            )
+            actionable_count = actionable_row["cnt"] if actionable_row else 0
+
+            # Calculate noise percentage
+            noise_pct = 0.0
+            if finding_count > 0:
+                noise_count = finding_count - actionable_count
+                noise_pct = round(noise_count / finding_count, 2)
+
+            per_scanner.append(
+                {
+                    "name": scanner_id,
+                    "enabled": True,  # All scanners currently enabled
+                    "finding_count": finding_count,
+                    "actionable_count": actionable_count,
+                    "noise_pct": noise_pct,
+                }
+            )
+    except Exception as e:
+        logger.debug("Failed to get per-scanner stats: %s", e)
+        # Return basic stats without DB data
+        for scanner_id, _ in all_scanners:
+            per_scanner.append(
+                {
+                    "name": scanner_id,
+                    "enabled": True,
+                    "finding_count": 0,
+                    "actionable_count": 0,
+                    "noise_pct": 0.0,
+                }
+            )
+
+    return {
+        "active_scanners": active_scanners,
+        "total_scanners": total_scanners,
+        "coverage_pct": round(coverage_pct, 2),
+        "categories": categories,
+        "per_scanner": per_scanner,
+    }
+
+
+def get_fix_history_summary(days: int = 7) -> dict:
+    """Aggregate fix history statistics for the last N days."""
+    from .. import db
+
+    try:
+        database = db.get_database()
+        # Get current timestamp once
+        now_ts_row = database.fetchone("SELECT EXTRACT(EPOCH FROM NOW())::BIGINT * 1000 AS ts")
+        now_ts = now_ts_row["ts"] if now_ts_row else 0
+
+        # Calculate timestamp cutoff (days * 24 hours * 3600 seconds * 1000 ms)
+        cutoff_ts = int(now_ts - (days * 24 * 3600 * 1000))
+
+        # Get all actions within the time window
+        actions = database.fetchall(
+            "SELECT status, category, duration_ms FROM actions WHERE timestamp >= ?", (cutoff_ts,)
+        )
+
+        total_actions = len(actions)
+        completed = sum(1 for a in actions if a["status"] == "completed")
+        failed = sum(1 for a in actions if a["status"] == "failed")
+        rolled_back = sum(1 for a in actions if a["status"] == "rolled_back")
+
+        # Calculate rates
+        success_rate = completed / total_actions if total_actions > 0 else 0.0
+        rollback_rate = rolled_back / total_actions if total_actions > 0 else 0.0
+
+        # Calculate average resolution time
+        durations = [a["duration_ms"] for a in actions if a["duration_ms"] and a["status"] == "completed"]
+        avg_resolution_ms = int(sum(durations) / len(durations)) if durations else 0
+
+        # Aggregate by category
+        categories = {}
+        for action in actions:
+            cat = action["category"] or "unknown"
+            if cat not in categories:
+                categories[cat] = {
+                    "category": cat,
+                    "count": 0,
+                    "success_count": 0,
+                    "auto_fixed": 0,
+                    "confirmation_required": 0,
+                }
+            categories[cat]["count"] += 1
+            if action["status"] == "completed":
+                categories[cat]["success_count"] += 1
+                # All completed actions in monitor are auto-fixed (trust level 3+)
+                categories[cat]["auto_fixed"] += 1
+            # Confirmation required is tracked separately in the monitor system
+            # For now, we consider all actions as requiring no confirmation since they're auto-fixed
+
+        by_category = sorted(categories.values(), key=lambda x: x["count"], reverse=True)
+
+        # Calculate trend (current week vs previous week)
+        week_cutoff = int(now_ts - (7 * 24 * 3600 * 1000))
+        prev_week_cutoff = int(now_ts - (14 * 24 * 3600 * 1000))
+
+        current_week_count_row = database.fetchone(
+            "SELECT COUNT(*) as cnt FROM actions WHERE timestamp >= ?", (week_cutoff,)
+        )
+        current_week_count = current_week_count_row["cnt"] if current_week_count_row else 0
+
+        previous_week_count_row = database.fetchone(
+            "SELECT COUNT(*) as cnt FROM actions WHERE timestamp >= ? AND timestamp < ?",
+            (prev_week_cutoff, week_cutoff),
+        )
+        previous_week_count = previous_week_count_row["cnt"] if previous_week_count_row else 0
+
+        trend = {
+            "current_week": current_week_count,
+            "previous_week": previous_week_count,
+            "delta": current_week_count - previous_week_count,
+        }
+
+        return {
+            "total_actions": total_actions,
+            "completed": completed,
+            "failed": failed,
+            "rolled_back": rolled_back,
+            "success_rate": round(success_rate, 2),
+            "rollback_rate": round(rollback_rate, 2),
+            "avg_resolution_ms": avg_resolution_ms,
+            "by_category": by_category,
+            "trend": trend,
+        }
+    except Exception as e:
+        logger.debug("Failed to get fix history summary: %s", e)
+        return {
+            "total_actions": 0,
+            "completed": 0,
+            "failed": 0,
+            "rolled_back": 0,
+            "success_rate": 0.0,
+            "rollback_rate": 0.0,
+            "avg_resolution_ms": 0,
+            "by_category": [],
+            "trend": {"current_week": 0, "previous_week": 0, "delta": 0},
+        }
+
+
 @router.get("/fix-history")
 async def rest_fix_history(
     page: int = Query(1, ge=1),
@@ -41,6 +271,15 @@ async def rest_fix_history(
     if search:
         filters["search"] = search
     return get_fix_history(page=page, page_size=page_size, filters=filters or None)
+
+
+@router.get("/fix-history/summary")
+async def rest_fix_history_summary(
+    days: int = Query(7, ge=1, le=90),
+    _auth=Depends(verify_token),
+):
+    """Aggregated fix history statistics for the last N days. Requires token auth."""
+    return get_fix_history_summary(days)
 
 
 @router.get("/fix-history/{action_id}")
@@ -157,3 +396,12 @@ async def resume_autofix(_auth=Depends(verify_token)):
     set_autofix_paused(False)
     logger.info("Auto-fix RESUMED via /monitor/resume")
     return {"autofix_paused": False}
+
+
+@router.get("/monitor/coverage")
+async def scanner_coverage(
+    days: int = Query(7, ge=1, le=90),
+    _auth=Depends(verify_token),
+):
+    """Scanner coverage statistics showing which failure modes are monitored. Requires token auth."""
+    return get_scanner_coverage(days)
