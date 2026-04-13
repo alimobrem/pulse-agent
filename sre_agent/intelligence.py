@@ -25,6 +25,7 @@ _SECTION_REGISTRY = {
     "intelligence_routing_accuracy": "_compute_routing_accuracy",
     "intelligence_feedback_analysis": "_compute_feedback_analysis",
     "intelligence_token_trending": "_compute_token_trending",
+    "intelligence_fix_outcomes": "_compute_fix_outcomes",
 }
 
 
@@ -83,6 +84,10 @@ def get_intelligence_context(mode: str = "sre", max_age_days: int = 7) -> str:
             tt = _compute_token_trending(max_age_days)
             if tt:
                 sections.append(tt)
+        if "intelligence_fix_outcomes" not in excluded:
+            fo = _compute_fix_outcomes(max_age_days)
+            if fo:
+                sections.append(fo)
 
         if not sections:
             result = ""
@@ -583,6 +588,44 @@ def _compute_token_trending(days: int) -> str:
         return "\n".join(lines)
     except Exception:
         logger.debug("Failed to compute token trending", exc_info=True)
+        return ""
+
+
+def _compute_fix_outcomes(days: int) -> str:
+    """Compute fix strategy effectiveness from verification outcomes."""
+    try:
+        from .db import get_database
+
+        db = get_database()
+        rows = db.fetchall(
+            "SELECT tool, category, "
+            "COUNT(*) AS total, "
+            "SUM(CASE WHEN verification_status = 'verified' THEN 1 ELSE 0 END) AS resolved "
+            "FROM actions "
+            "WHERE timestamp >= EXTRACT(EPOCH FROM NOW() - INTERVAL '1 day' * %s)::BIGINT * 1000 "
+            "AND tool IS NOT NULL AND tool != '' "
+            "GROUP BY tool, category "
+            "HAVING COUNT(*) >= 2 "
+            "ORDER BY COUNT(*) DESC "
+            "LIMIT 10",
+            (days,),
+        )
+        if not rows:
+            return ""
+
+        lines = ["### Fix Strategy Effectiveness"]
+        for r in rows:
+            total = r["total"]
+            resolved = r["resolved"]
+            rate = round(resolved / total * 100) if total > 0 else 0
+            indicator = "effective" if rate >= 60 else "weak" if rate >= 30 else "ineffective"
+            lines.append(f"- {r['tool']} for {r['category']}: {rate}% resolved ({resolved}/{total}) — {indicator}")
+
+        lines.append("")
+        lines.append("Prefer strategies marked 'effective'. Avoid repeating 'ineffective' strategies.")
+        return "\n".join(lines)
+    except Exception:
+        logger.debug("Failed to compute fix outcomes", exc_info=True)
         return ""
 
 

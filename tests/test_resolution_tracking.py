@@ -150,3 +150,42 @@ class TestResolutionsEndpoint:
         finally:
             # Cleanup
             database.execute("DELETE FROM actions WHERE id = ?", ("r1",))
+
+
+class TestFixOutcomes:
+    @patch("sre_agent.db.get_database")
+    def test_returns_strategy_success_rates(self, mock_get_db):
+        from sre_agent.intelligence import _compute_fix_outcomes
+
+        db = MagicMock()
+        mock_get_db.return_value = db
+        db.fetchall.return_value = [
+            {"tool": "rollback_deployment", "category": "image_pull", "total": 10, "resolved": 8},
+            {"tool": "restart_deployment", "category": "workloads", "total": 5, "resolved": 1},
+            {"tool": "patch_resources", "category": "crashloop", "total": 3, "resolved": 3},
+            {"tool": "delete_pod", "category": "crashloop", "total": 8, "resolved": 2},
+        ]
+        result = _compute_fix_outcomes(7)
+        assert "rollback_deployment" in result
+        assert "80%" in result
+        assert "effective" in result
+        assert "patch_resources" in result
+        assert "ineffective" in result  # delete_pod at 25%
+
+    @patch("sre_agent.db.get_database")
+    def test_returns_empty_when_no_data(self, mock_get_db):
+        from sre_agent.intelligence import _compute_fix_outcomes
+
+        db = MagicMock()
+        mock_get_db.return_value = db
+        db.fetchall.return_value = []
+        result = _compute_fix_outcomes(7)
+        assert result == ""
+
+    @patch("sre_agent.db.get_database")
+    def test_no_crash_on_db_error(self, mock_get_db):
+        from sre_agent.intelligence import _compute_fix_outcomes
+
+        mock_get_db.side_effect = Exception("DB down")
+        result = _compute_fix_outcomes(7)
+        assert result == ""
