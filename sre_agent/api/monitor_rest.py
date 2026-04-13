@@ -89,39 +89,28 @@ def get_scanner_coverage(days: int = 7) -> dict:
 
         database = db.get_database()
 
-        # Get current timestamp
-        now_ts_row = database.fetchone("SELECT EXTRACT(EPOCH FROM NOW())::BIGINT * 1000 AS ts")
-        now_ts = now_ts_row["ts"] if now_ts_row else 0
-        cutoff_ts = int(now_ts - (days * 24 * 3600 * 1000))
+        # Single batch query instead of N+1 per-scanner queries
+        stats_rows = database.fetchall(
+            "SELECT category, "
+            "  COUNT(*) AS total_count, "
+            "  COUNT(*) FILTER (WHERE severity IN ('critical', 'warning')) AS actionable_count "
+            "FROM findings "
+            "WHERE timestamp >= EXTRACT(EPOCH FROM NOW() - INTERVAL '1 day' * ?)::BIGINT * 1000 "
+            "GROUP BY category",
+            (days,),
+        )
+        stats_by_cat = {r["category"]: r for r in stats_rows} if stats_rows else {}
 
-        # Get finding counts per scanner category
-        # Note: findings table uses 'category' field which maps to scanner IDs
         for scanner_id, _ in all_scanners:
-            # Get total findings for this scanner
-            finding_row = database.fetchone(
-                "SELECT COUNT(*) as cnt FROM findings WHERE category = ? AND timestamp >= ?",
-                (scanner_id, cutoff_ts),
-            )
-            finding_count = finding_row["cnt"] if finding_row else 0
-
-            # Get actionable findings (severity = critical or warning)
-            actionable_row = database.fetchone(
-                "SELECT COUNT(*) as cnt FROM findings "
-                "WHERE category = ? AND timestamp >= ? AND severity IN ('critical', 'warning')",
-                (scanner_id, cutoff_ts),
-            )
-            actionable_count = actionable_row["cnt"] if actionable_row else 0
-
-            # Calculate noise percentage
-            noise_pct = 0.0
-            if finding_count > 0:
-                noise_count = finding_count - actionable_count
-                noise_pct = round(noise_count / finding_count, 2)
+            row = stats_by_cat.get(scanner_id, {})
+            finding_count = row.get("total_count", 0)
+            actionable_count = row.get("actionable_count", 0)
+            noise_pct = round((finding_count - actionable_count) / finding_count, 2) if finding_count > 0 else 0.0
 
             per_scanner.append(
                 {
                     "name": scanner_id,
-                    "enabled": True,  # All scanners currently enabled
+                    "enabled": True,
                     "finding_count": finding_count,
                     "actionable_count": actionable_count,
                     "noise_pct": noise_pct,
@@ -129,7 +118,6 @@ def get_scanner_coverage(days: int = 7) -> dict:
             )
     except Exception as e:
         logger.debug("Failed to get per-scanner stats: %s", e)
-        # Return basic stats without DB data
         for scanner_id, _ in all_scanners:
             per_scanner.append(
                 {
@@ -156,16 +144,12 @@ def get_fix_history_summary(days: int = 7) -> dict:
 
     try:
         database = db.get_database()
-        # Get current timestamp once
-        now_ts_row = database.fetchone("SELECT EXTRACT(EPOCH FROM NOW())::BIGINT * 1000 AS ts")
-        now_ts = now_ts_row["ts"] if now_ts_row else 0
 
-        # Calculate timestamp cutoff (days * 24 hours * 3600 seconds * 1000 ms)
-        cutoff_ts = int(now_ts - (days * 24 * 3600 * 1000))
-
-        # Get all actions within the time window
+        # Get all actions within the time window using SQL interval
         actions = database.fetchall(
-            "SELECT status, category, duration_ms FROM actions WHERE timestamp >= ?", (cutoff_ts,)
+            "SELECT status, category, duration_ms FROM actions "
+            "WHERE timestamp >= EXTRACT(EPOCH FROM NOW() - INTERVAL '1 day' * ?)::BIGINT * 1000",
+            (days,),
         )
 
         total_actions = len(actions)
@@ -203,18 +187,17 @@ def get_fix_history_summary(days: int = 7) -> dict:
 
         by_category = sorted(categories.values(), key=lambda x: x["count"], reverse=True)
 
-        # Calculate trend (current week vs previous week)
-        week_cutoff = int(now_ts - (7 * 24 * 3600 * 1000))
-        prev_week_cutoff = int(now_ts - (14 * 24 * 3600 * 1000))
-
+        # Calculate trend (current week vs previous week) using SQL intervals
         current_week_count_row = database.fetchone(
-            "SELECT COUNT(*) as cnt FROM actions WHERE timestamp >= ?", (week_cutoff,)
+            "SELECT COUNT(*) as cnt FROM actions "
+            "WHERE timestamp >= EXTRACT(EPOCH FROM NOW() - INTERVAL '7 days')::BIGINT * 1000"
         )
         current_week_count = current_week_count_row["cnt"] if current_week_count_row else 0
 
         previous_week_count_row = database.fetchone(
-            "SELECT COUNT(*) as cnt FROM actions WHERE timestamp >= ? AND timestamp < ?",
-            (prev_week_cutoff, week_cutoff),
+            "SELECT COUNT(*) as cnt FROM actions "
+            "WHERE timestamp >= EXTRACT(EPOCH FROM NOW() - INTERVAL '14 days')::BIGINT * 1000 "
+            "  AND timestamp < EXTRACT(EPOCH FROM NOW() - INTERVAL '7 days')::BIGINT * 1000"
         )
         previous_week_count = previous_week_count_row["cnt"] if previous_week_count_row else 0
 

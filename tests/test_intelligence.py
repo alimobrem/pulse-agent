@@ -142,15 +142,23 @@ class TestErrorHotspots:
                 return []
             if "GROUP BY tool_name" in sql and "view_designer" in sql:
                 return []
+            # CTE query for error hotspots (batch query with top_errors)
+            if "hotspots" in sql and "top_errors" in sql:
+                return [
+                    {
+                        "tool_name": "get_prometheus_query",
+                        "error_count": 32,
+                        "total_count": 267,
+                        "common_error": "Query returned no results",
+                    }
+                ]
             if "HAVING" in sql:
                 return [{"tool_name": "get_prometheus_query", "error_count": 32, "total_count": 267}]
             return []
 
         db = MagicMock()
         db.fetchall.side_effect = mock_fetchall
-        db.fetchone.side_effect = lambda sql, params=None: (
-            {"error_message": "Query returned no results", "cnt": 20} if "error_message" in sql else None
-        )
+        db.fetchone.return_value = None
 
         with patch("sre_agent.db.get_database", return_value=db):
             result = get_intelligence_context()
@@ -164,6 +172,9 @@ class TestErrorHotspots:
                 return []
             if "view_designer" in sql:
                 return []
+            # CTE query for error hotspots
+            if "hotspots" in sql and "top_errors" in sql:
+                return [{"tool_name": "list_pods", "error_count": 10, "total_count": 100, "common_error": ""}]
             if "HAVING" in sql:
                 return [{"tool_name": "list_pods", "error_count": 10, "total_count": 100}]
             return []

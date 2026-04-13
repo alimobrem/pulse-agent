@@ -96,52 +96,58 @@ def get_intelligence_context(mode: str = "sre", max_age_days: int = 7) -> str:
         return ""
 
 
+def _fetch_query_reliability_data(days: int) -> dict:
+    """Fetch query reliability data (shared by text and structured versions)."""
+    from .db import get_database
+
+    db = get_database()
+    rows = db.fetchall(
+        "SELECT query_template, success_count, failure_count "
+        "FROM promql_queries "
+        "WHERE (last_success > NOW() - INTERVAL '1 day' * ? "
+        "   OR last_failure > NOW() - INTERVAL '1 day' * ?) "
+        "AND success_count + failure_count >= 3 "
+        "ORDER BY success_count + failure_count DESC "
+        "LIMIT 20",
+        (days, days),
+    )
+    preferred: list[dict] = []
+    unreliable: list[dict] = []
+
+    for row in rows or []:
+        template = row["query_template"]
+        success = row["success_count"]
+        failure = row["failure_count"]
+        total = success + failure
+        rate = success / total if total > 0 else 0
+
+        entry = {"query": template, "success_rate": round(rate, 2), "total": total}
+        if rate > 0.8 and len(preferred) < 10:
+            preferred.append(entry)
+        elif rate < 0.3 and len(unreliable) < 5:
+            unreliable.append(entry)
+
+    return {"preferred": preferred, "unreliable": unreliable}
+
+
 def _compute_query_reliability(days: int) -> str:
     """Compute PromQL query reliability from promql_queries table."""
     try:
-        from .db import get_database
-
-        db = get_database()
-        rows = db.fetchall(
-            "SELECT query_template, success_count, failure_count "
-            "FROM promql_queries "
-            "WHERE (last_success > NOW() - INTERVAL '1 day' * ? "
-            "   OR last_failure > NOW() - INTERVAL '1 day' * ?) "
-            "AND success_count + failure_count >= 3 "
-            "ORDER BY success_count + failure_count DESC "
-            "LIMIT 20",
-            (days, days),
-        )
-        if not rows:
-            return ""
-
-        preferred: list[str] = []
-        avoid: list[str] = []
-
-        for row in rows:
-            template = row["query_template"]
-            success = row["success_count"]
-            failure = row["failure_count"]
-            total = success + failure
-            rate = success / total if total > 0 else 0
-
-            truncated = template[:80] + "..." if len(template) > 80 else template
-
-            if rate > 0.8 and len(preferred) < 10:
-                preferred.append(f"- `{truncated}`: {success}/{total} success → USE THIS")
-            elif rate < 0.3 and len(avoid) < 5:
-                avoid.append(f"- `{truncated}`: {success}/{total} success → AVOID")
-
-        if not preferred and not avoid:
+        data = _fetch_query_reliability_data(days)
+        if not data["preferred"] and not data["unreliable"]:
             return ""
 
         lines = ["### Query Reliability"]
-        if preferred:
+        if data["preferred"]:
             lines.append("**Preferred queries:**")
-            lines.extend(preferred)
-        if avoid:
+            for q in data["preferred"]:
+                truncated = q["query"][:80] + "..." if len(q["query"]) > 80 else q["query"]
+                lines.append(f"- `{truncated}`: {q['total']} calls, {q['success_rate'] * 100:.0f}% success → USE THIS")
+        if data["unreliable"]:
             lines.append("**Unreliable queries (avoid):**")
-            lines.extend(avoid)
+            for q in data["unreliable"]:
+                truncated = q["query"][:80] + "..." if len(q["query"]) > 80 else q["query"]
+                lines.append(f"- `{truncated}`: {q['total']} calls, {q['success_rate'] * 100:.0f}% success → AVOID")
         return "\n".join(lines)
     except Exception:
         logger.debug("Failed to compute query reliability", exc_info=True)
@@ -193,59 +199,72 @@ def _compute_dashboard_patterns(days: int) -> str:
         return ""
 
 
+def _fetch_error_hotspots(days: int) -> list[dict]:
+    """Fetch error hotspot data with top error messages in a single batch query."""
+    from .db import get_database
+
+    db = get_database()
+
+    # Single query: hotspots + top error message per tool via window function
+    rows = db.fetchall(
+        "WITH hotspots AS ("
+        "    SELECT tool_name, "
+        "           COUNT(*) FILTER (WHERE status = 'error') as error_count, "
+        "           COUNT(*) as total_count "
+        "    FROM tool_usage "
+        "    WHERE timestamp > NOW() - INTERVAL '1 day' * ? "
+        "    GROUP BY tool_name "
+        "    HAVING COUNT(*) > 5 "
+        "       AND COUNT(*) FILTER (WHERE status = 'error')::float / COUNT(*) > 0.05 "
+        "    ORDER BY COUNT(*) FILTER (WHERE status = 'error')::float / COUNT(*) DESC "
+        "    LIMIT 5"
+        "), "
+        "top_errors AS ("
+        "    SELECT tool_name, error_message, COUNT(*) as cnt, "
+        "           ROW_NUMBER() OVER (PARTITION BY tool_name ORDER BY COUNT(*) DESC) as rn "
+        "    FROM tool_usage "
+        "    WHERE tool_name IN (SELECT tool_name FROM hotspots) "
+        "      AND status = 'error' "
+        "      AND timestamp > NOW() - INTERVAL '1 day' * ? "
+        "      AND error_message IS NOT NULL "
+        "    GROUP BY tool_name, error_message"
+        ") "
+        "SELECT h.tool_name, h.error_count, h.total_count, "
+        "       COALESCE(SUBSTRING(te.error_message, 1, 80), '') as common_error "
+        "FROM hotspots h "
+        "LEFT JOIN top_errors te ON h.tool_name = te.tool_name AND te.rn = 1 "
+        "ORDER BY h.error_count::float / h.total_count DESC",
+        (days, days),
+    )
+
+    result = []
+    for row in rows or []:
+        total = row["total_count"]
+        errors = row["error_count"]
+        result.append(
+            {
+                "tool": row["tool_name"],
+                "error_count": errors,
+                "total_count": total,
+                "error_rate": round(errors / total * 100, 1) if total > 0 else 0,
+                "common_error": row["common_error"],
+            }
+        )
+    return result
+
+
 def _compute_error_hotspots(days: int) -> str:
     """Compute tools with high error rates from tool_usage."""
     try:
-        from .db import get_database
-
-        db = get_database()
-
-        hotspot_rows = db.fetchall(
-            "SELECT tool_name, "
-            "       COUNT(*) FILTER (WHERE status = 'error') as error_count, "
-            "       COUNT(*) as total_count "
-            "FROM tool_usage "
-            "WHERE timestamp > NOW() - INTERVAL '1 day' * ? "
-            "GROUP BY tool_name "
-            "HAVING COUNT(*) > 5 "
-            "   AND COUNT(*) FILTER (WHERE status = 'error')::float / COUNT(*) > 0.05 "
-            "ORDER BY COUNT(*) FILTER (WHERE status = 'error')::float / COUNT(*) DESC "
-            "LIMIT 5",
-            (days,),
-        )
-
-        if not hotspot_rows:
+        hotspots = _fetch_error_hotspots(days)
+        if not hotspots:
             return ""
 
         lines = ["### Error Hotspots"]
-        for row in hotspot_rows:
-            tool = row["tool_name"]
-            errors = row["error_count"]
-            total = row["total_count"]
-            error_rate = round(errors / total * 100, 1) if total > 0 else 0
-
-            # Get most common error message for this tool
-            err_msg = ""
-            try:
-                err_row = db.fetchone(
-                    "SELECT error_message, COUNT(*) as cnt "
-                    "FROM tool_usage "
-                    "WHERE tool_name = ? AND status = 'error' "
-                    "  AND timestamp > NOW() - INTERVAL '1 day' * ? "
-                    "  AND error_message IS NOT NULL "
-                    "GROUP BY error_message "
-                    "ORDER BY cnt DESC "
-                    "LIMIT 1",
-                    (tool, days),
-                )
-                if err_row and err_row.get("error_message"):
-                    err_msg = err_row["error_message"][:80]
-            except Exception:
-                pass
-
-            line = f"- {tool}: {error_rate}% error rate ({errors}/{total})"
-            if err_msg:
-                line += f' — common: "{err_msg}"'
+        for h in hotspots:
+            line = f"- {h['tool']}: {h['error_rate']}% error rate ({h['error_count']}/{h['total_count']})"
+            if h["common_error"]:
+                line += f' — common: "{h["common_error"]}"'
             lines.append(line)
 
         return "\n".join(lines)
@@ -519,38 +538,7 @@ def get_wasted_tools(days: int = 7) -> list[str]:
 def _compute_query_reliability_structured(days: int) -> dict:
     """Structured version of _compute_query_reliability."""
     try:
-        from .db import get_database
-
-        db = get_database()
-        rows = db.fetchall(
-            "SELECT query_template, success_count, failure_count "
-            "FROM promql_queries "
-            "WHERE (last_success > NOW() - INTERVAL '1 day' * ? "
-            "   OR last_failure > NOW() - INTERVAL '1 day' * ?) "
-            "AND success_count + failure_count >= 3 "
-            "ORDER BY success_count + failure_count DESC "
-            "LIMIT 20",
-            (days, days),
-        )
-        if not rows:
-            return {"preferred": [], "unreliable": []}
-
-        preferred: list[dict] = []
-        unreliable: list[dict] = []
-
-        for row in rows:
-            template = row["query_template"]
-            success = row["success_count"]
-            failure = row["failure_count"]
-            total = success + failure
-            rate = success / total if total > 0 else 0
-
-            if rate > 0.8 and len(preferred) < 10:
-                preferred.append({"query": template, "success_rate": round(rate, 2), "total": total})
-            elif rate < 0.3 and len(unreliable) < 5:
-                unreliable.append({"query": template, "success_rate": round(rate, 2), "total": total})
-
-        return {"preferred": preferred, "unreliable": unreliable}
+        return _fetch_query_reliability_data(days)
     except Exception:
         logger.debug("Failed to compute query reliability structured", exc_info=True)
         return {"preferred": [], "unreliable": []}
@@ -559,63 +547,16 @@ def _compute_query_reliability_structured(days: int) -> dict:
 def _compute_error_hotspots_structured(days: int) -> list[dict]:
     """Structured version of _compute_error_hotspots."""
     try:
-        from .db import get_database
-
-        db = get_database()
-
-        hotspot_rows = db.fetchall(
-            "SELECT tool_name, "
-            "       COUNT(*) FILTER (WHERE status = 'error') as error_count, "
-            "       COUNT(*) as total_count "
-            "FROM tool_usage "
-            "WHERE timestamp > NOW() - INTERVAL '1 day' * ? "
-            "GROUP BY tool_name "
-            "HAVING COUNT(*) > 5 "
-            "   AND COUNT(*) FILTER (WHERE status = 'error')::float / COUNT(*) > 0.05 "
-            "ORDER BY COUNT(*) FILTER (WHERE status = 'error')::float / COUNT(*) DESC "
-            "LIMIT 5",
-            (days,),
-        )
-
-        if not hotspot_rows:
-            return []
-
-        result = []
-        for row in hotspot_rows:
-            tool = row["tool_name"]
-            errors = row["error_count"]
-            total = row["total_count"]
-            error_rate = round(errors / total, 2) if total > 0 else 0
-
-            # Get most common error message for this tool
-            err_msg = ""
-            try:
-                err_row = db.fetchone(
-                    "SELECT error_message, COUNT(*) as cnt "
-                    "FROM tool_usage "
-                    "WHERE tool_name = ? AND status = 'error' "
-                    "  AND timestamp > NOW() - INTERVAL '1 day' * ? "
-                    "  AND error_message IS NOT NULL "
-                    "GROUP BY error_message "
-                    "ORDER BY cnt DESC "
-                    "LIMIT 1",
-                    (tool, days),
-                )
-                if err_row and err_row.get("error_message"):
-                    err_msg = err_row["error_message"][:80]
-            except Exception:
-                pass
-
-            result.append(
-                {
-                    "tool": tool,
-                    "error_rate": error_rate,
-                    "total": total,
-                    "common_error": err_msg,
-                }
-            )
-
-        return result
+        hotspots = _fetch_error_hotspots(days)
+        return [
+            {
+                "tool": h["tool"],
+                "error_rate": round(h["error_rate"] / 100, 2),
+                "total": h["total_count"],
+                "common_error": h["common_error"],
+            }
+            for h in hotspots
+        ]
     except Exception:
         logger.debug("Failed to compute error hotspots structured", exc_info=True)
         return []

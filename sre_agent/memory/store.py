@@ -470,8 +470,12 @@ class IncidentStore:
         )
         prev_avg = prev_row["avg_score"] if prev_row and prev_row["avg_score"] else 0.0
 
-        # Calculate trend (positive = improving)
-        quality_trend = round(avg_quality_score - prev_avg, 2) if prev_avg > 0 else 0.0
+        prev_avg = round(prev_avg, 2) if prev_avg else 0.0
+        quality_trend = {
+            "current": avg_quality_score,
+            "previous": prev_avg,
+            "delta": round(avg_quality_score - prev_avg, 3),
+        }
 
         # Get anti-patterns: low-score incidents grouped by error_type and namespace
         anti_patterns = []

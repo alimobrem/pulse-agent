@@ -147,11 +147,11 @@ class TestConfidenceCalibration:
             "rating": "good",
             "total_predictions": 150,
             "buckets": [
-                {"range": "0.0-0.2", "avg_predicted": 0.15, "avg_actual": 0.10, "count": 5},
-                {"range": "0.2-0.4", "avg_predicted": 0.32, "avg_actual": 0.30, "count": 10},
-                {"range": "0.4-0.6", "avg_predicted": 0.55, "avg_actual": 0.50, "count": 20},
-                {"range": "0.6-0.8", "avg_predicted": 0.72, "avg_actual": 0.75, "count": 50},
-                {"range": "0.8-1.0", "avg_predicted": 0.91, "avg_actual": 0.95, "count": 65},
+                {"range": "0.0-0.2", "predicted": 0.15, "actual": 0.10, "count": 5},
+                {"range": "0.2-0.4", "predicted": 0.32, "actual": 0.30, "count": 10},
+                {"range": "0.4-0.6", "predicted": 0.55, "actual": 0.50, "count": 20},
+                {"range": "0.6-0.8", "predicted": 0.72, "actual": 0.75, "count": 50},
+                {"range": "0.8-1.0", "predicted": 0.91, "actual": 0.95, "count": 65},
             ],
         }
 
@@ -286,7 +286,7 @@ class TestAccuracyAnalytics:
         """Test that accuracy endpoint returns complete statistics."""
         mock_accuracy = {
             "avg_quality_score": 0.78,
-            "quality_trend": 0.05,
+            "quality_trend": {"current": 0.85, "previous": 0.80, "delta": 0.05},
             "dimensions": {
                 "quality": 0.78,
                 "override_rate": 0.12,
@@ -326,7 +326,7 @@ class TestAccuracyAnalytics:
         assert r.status_code == 200
         data = r.json()
         assert data["avg_quality_score"] == 0.78
-        assert data["quality_trend"] == 0.05
+        assert data["quality_trend"]["delta"] == 0.05
         assert data["dimensions"]["quality"] == 0.78
         assert data["dimensions"]["override_rate"] == 0.12
         assert len(data["anti_patterns"]) == 2
@@ -340,7 +340,7 @@ class TestAccuracyAnalytics:
         """Test that empty data returns zero stats."""
         mock_empty = {
             "avg_quality_score": 0.0,
-            "quality_trend": 0.0,
+            "quality_trend": {"current": 0.0, "previous": 0.0, "delta": 0.0},
             "dimensions": {"quality": 0.0, "override_rate": 0.0},
             "anti_patterns": [],
             "learning": {
@@ -375,7 +375,7 @@ class TestAccuracyAnalytics:
         """Test that days parameter is passed through correctly."""
         mock_accuracy = {
             "avg_quality_score": 0.85,
-            "quality_trend": 0.03,
+            "quality_trend": {"current": 0.83, "previous": 0.80, "delta": 0.03},
             "dimensions": {"quality": 0.85, "override_rate": 0.08},
             "anti_patterns": [],
             "learning": {

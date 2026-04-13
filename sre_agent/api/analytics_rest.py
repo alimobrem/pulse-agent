@@ -12,6 +12,21 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/agent/analytics", tags=["analytics"])
 
+_EMPTY_ACCURACY: dict = {
+    "avg_quality_score": 0.0,
+    "quality_trend": {"current": 0.0, "previous": 0.0, "delta": 0.0},
+    "dimensions": {"quality": 0.0, "override_rate": 0.0},
+    "anti_patterns": [],
+    "learning": {
+        "runbook_count": 0,
+        "success_rate": 0.0,
+        "pattern_count": 0,
+        "pattern_types": [],
+        "new_runbooks_this_month": 0,
+    },
+    "override_rate": {"rate": 0.0, "total_proposed": 0, "rejected_actions": 0},
+}
+
 
 def _compute_confidence_calibration(days: int) -> dict:
     """Compute confidence calibration statistics from investigations and actions.
@@ -29,7 +44,7 @@ def _compute_confidence_calibration(days: int) -> dict:
         from .. import db
 
         database = db.get_database()
-        cutoff_sql = "EXTRACT(EPOCH FROM NOW() - INTERVAL '1 day' * %s) * 1000"
+        cutoff_sql = "EXTRACT(EPOCH FROM NOW() - INTERVAL '1 day' * ?) * 1000"
 
         # Query investigations joined with actions to get confidence + verification pairs
         query = f"""
@@ -87,8 +102,8 @@ def _compute_confidence_calibration(days: int) -> dict:
             buckets.append(
                 {
                     "range": f"{bucket_min}-{bucket_max}",
-                    "avg_predicted": round(avg_predicted, 2),
-                    "avg_actual": round(avg_actual, 2),
+                    "predicted": round(avg_predicted, 2),
+                    "actual": round(avg_actual, 2),
                     "count": len(bucket_rows),
                 }
             )
@@ -139,17 +154,18 @@ def _compute_accuracy_stats(days: int) -> dict:
         dict with avg_quality_score, quality_trend, dimensions, anti_patterns, learning, override_rate
     """
     try:
-        # Get memory store stats
-        from ..memory.store import IncidentStore
+        # Reuse the shared store singleton (avoids CREATE TABLE per request)
+        from ..memory.memory_tools import _store as memory_store
 
-        store = IncidentStore()
-        memory_stats = store.get_accuracy_stats(days)
+        if memory_store is None:
+            return _EMPTY_ACCURACY
+        memory_stats = memory_store.get_accuracy_stats(days)
 
         # Get override rate from tool_usage table (PostgreSQL)
         from .. import db
 
         database = db.get_database()
-        cutoff_sql = "EXTRACT(EPOCH FROM NOW() - INTERVAL '1 day' * %s) * 1000"
+        cutoff_sql = "EXTRACT(EPOCH FROM NOW() - INTERVAL '1 day' * ?) * 1000"
 
         # Query for confirmation-required actions
         override_query = f"""
@@ -187,24 +203,7 @@ def _compute_accuracy_stats(days: int) -> dict:
 
     except Exception as e:
         logger.exception("Failed to compute accuracy stats: %s", e)
-        return {
-            "avg_quality_score": 0.0,
-            "quality_trend": 0.0,
-            "dimensions": {"quality": 0.0, "override_rate": 0.0},
-            "anti_patterns": [],
-            "learning": {
-                "runbook_count": 0,
-                "success_rate": 0.0,
-                "pattern_count": 0,
-                "pattern_types": [],
-                "new_runbooks_this_month": 0,
-            },
-            "override_rate": {
-                "rate": 0.0,
-                "total_proposed": 0,
-                "rejected_actions": 0,
-            },
-        }
+        return _EMPTY_ACCURACY.copy()
 
 
 @router.get("/accuracy")
@@ -236,20 +235,14 @@ def _compute_cost_stats(days: int) -> dict:
         from .. import db
 
         database = db.get_database()
-        cutoff_sql = "NOW() - INTERVAL '1 day' * %s"
-        half_period_sql = "NOW() - INTERVAL '1 day' * %s"
+        interval_sql = "NOW() - INTERVAL '1 day' * ?"
 
-        # Query per-session token sums for current period
-        current_query = f"""
-            SELECT
-                session_id,
-                SUM(input_tokens + output_tokens) AS session_tokens
-            FROM tool_turns
-            WHERE timestamp > {cutoff_sql}
-            GROUP BY session_id
-        """
-
-        current_rows = database.fetchall(current_query, (days,))
+        # Current period: last N days
+        current_rows = database.fetchall(
+            f"SELECT session_id, SUM(input_tokens + output_tokens) AS session_tokens "
+            f"FROM tool_turns WHERE timestamp > {interval_sql} GROUP BY session_id",
+            (days,),
+        )
 
         if len(current_rows) == 0:
             return {
@@ -260,24 +253,18 @@ def _compute_cost_stats(days: int) -> dict:
                 "total_incidents": 0,
             }
 
-        # Compute current period stats
         current_total_tokens = sum(row["session_tokens"] for row in current_rows)
         current_incidents = len(current_rows)
         current_avg = current_total_tokens / current_incidents if current_incidents > 0 else 0
 
-        # Query previous period (half-period comparison for trend)
-        half_days = days // 2
-        previous_query = f"""
-            SELECT
-                session_id,
-                SUM(input_tokens + output_tokens) AS session_tokens
-            FROM tool_turns
-            WHERE timestamp > {cutoff_sql}
-              AND timestamp <= {half_period_sql}
-            GROUP BY session_id
-        """
-
-        previous_rows = database.fetchall(previous_query, (days, half_days))
+        # Previous period: N*2 to N days ago (same-length window for fair comparison)
+        previous_rows = database.fetchall(
+            f"SELECT session_id, SUM(input_tokens + output_tokens) AS session_tokens "
+            f"FROM tool_turns "
+            f"WHERE timestamp > {interval_sql} AND timestamp <= {interval_sql} "
+            f"GROUP BY session_id",
+            (days * 2, days),
+        )
         previous_total_tokens = sum(row["session_tokens"] for row in previous_rows)
         previous_incidents = len(previous_rows)
         previous_avg = previous_total_tokens / previous_incidents if previous_incidents > 0 else 0
@@ -295,7 +282,7 @@ def _compute_cost_stats(days: int) -> dict:
                 COUNT(DISTINCT session_id) AS incident_count,
                 SUM(input_tokens + output_tokens) AS total_tokens
             FROM tool_turns
-            WHERE timestamp > {cutoff_sql}
+            WHERE timestamp > {interval_sql}
             GROUP BY agent_mode
             ORDER BY total_tokens DESC
         """
@@ -351,7 +338,7 @@ def get_cost_stats(
 @router.get("/intelligence")
 def get_intelligence_analytics(
     days: int = Query(7, ge=1, le=90),
-    mode: str = Query("sre"),
+    mode: str = Query("sre", pattern="^(sre|security|view_designer)$"),
     _token: None = Depends(verify_token),
 ):
     """Get intelligence analytics sections.
@@ -516,5 +503,5 @@ def _compute_recommendations() -> dict:
                 }
             )
     except Exception:
-        pass
+        logger.debug("Failed to compute recommendations", exc_info=True)
     return {"recommendations": recommendations[:4]}
