@@ -202,9 +202,40 @@ def _mcp_post(base_url: str, payload: dict, session_id: str = "") -> tuple[dict,
 
 def _connect_sse(conn: MCPConnection) -> MCPConnection:
     """Connect via SSE/streamable HTTP transport to MCP server."""
+    import time
     import urllib.error
 
     base_url = conn.url.rstrip("/")
+
+    # Retry with backoff — MCP sidecar may not be ready during startup
+    max_retries = 3
+    for attempt in range(max_retries):
+        try:
+            return _connect_sse_attempt(conn, base_url)
+        except urllib.error.URLError as e:
+            if attempt < max_retries - 1:
+                delay = 2**attempt  # 1s, 2s, 4s
+                logger.info(
+                    "MCP '%s' not ready (attempt %d/%d), retrying in %ds: %s",
+                    conn.name,
+                    attempt + 1,
+                    max_retries,
+                    delay,
+                    e.reason,
+                )
+                time.sleep(delay)
+            else:
+                conn.error = f"Cannot connect to MCP server at {base_url}: {e.reason}"
+        except Exception as e:
+            conn.error = f"SSE connection failed: {e}"
+            break
+
+    return conn
+
+
+def _connect_sse_attempt(conn: MCPConnection, base_url: str) -> MCPConnection:
+    """Single SSE connection attempt — raises on failure."""
+    import urllib.error
 
     try:
         # Initialize
@@ -283,10 +314,10 @@ def _connect_sse(conn: MCPConnection) -> MCPConnection:
         conn._sse_session_id = session_id  # type: ignore[attr-defined]
         logger.info("MCP SSE '%s' connected: %d tools, %d prompts", conn.name, len(conn.tools), len(conn.prompts))
 
-    except urllib.error.URLError as e:
-        conn.error = f"Cannot connect to MCP server at {base_url}: {e.reason}"
-    except Exception as e:
-        conn.error = f"SSE connection failed: {e}"
+    except urllib.error.URLError:
+        raise  # Let retry loop in _connect_sse handle it
+    except Exception:
+        raise  # Let retry loop in _connect_sse handle it
 
     return conn
 
