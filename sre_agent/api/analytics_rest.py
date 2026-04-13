@@ -10,7 +10,7 @@ from .auth import verify_token
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/api/agent/analytics", tags=["analytics"])
+router = APIRouter(prefix="/analytics", tags=["analytics"])
 
 _EMPTY_ACCURACY: dict = {
     "avg_quality_score": 0.0,
@@ -491,7 +491,7 @@ def _get_readiness_summary() -> dict:
 
 # ── Recommendations Router ─────────────────────────────────────────────────
 
-recommendations_router = APIRouter(prefix="/api/agent", tags=["analytics"])
+recommendations_router = APIRouter(tags=["analytics"])
 
 
 @recommendations_router.get("/recommendations")

@@ -156,7 +156,7 @@ class TestConfidenceCalibration:
         }
 
         with patch("sre_agent.api.analytics_rest._compute_confidence_calibration", return_value=mock_calibration):
-            r = api_client.get("/api/agent/analytics/confidence", headers=api_headers)
+            r = api_client.get("/analytics/confidence", headers=api_headers)
 
         assert r.status_code == 200
         data = r.json()
@@ -178,7 +178,7 @@ class TestConfidenceCalibration:
         }
 
         with patch("sre_agent.api.analytics_rest._compute_confidence_calibration", return_value=mock_no_data):
-            r = api_client.get("/api/agent/analytics/confidence", headers=api_headers)
+            r = api_client.get("/analytics/confidence", headers=api_headers)
 
         assert r.status_code == 200
         data = r.json()
@@ -188,7 +188,7 @@ class TestConfidenceCalibration:
 
     def test_requires_auth(self, api_client):
         """Test that the endpoint requires authentication."""
-        r = api_client.get("/api/agent/analytics/confidence")
+        r = api_client.get("/analytics/confidence")
         assert r.status_code == 401
 
     def test_custom_days_parameter(self, api_client, api_headers):
@@ -203,7 +203,7 @@ class TestConfidenceCalibration:
 
         with patch("sre_agent.api.analytics_rest._compute_confidence_calibration") as mock_fn:
             mock_fn.return_value = mock_calibration
-            r = api_client.get("/api/agent/analytics/confidence?days=7", headers=api_headers)
+            r = api_client.get("/analytics/confidence?days=7", headers=api_headers)
 
         assert r.status_code == 200
         mock_fn.assert_called_once_with(7)
@@ -211,11 +211,11 @@ class TestConfidenceCalibration:
     def test_validates_days_range(self, api_client, api_headers):
         """Test that days parameter validates range (1-365)."""
         # Test too low
-        r = api_client.get("/api/agent/analytics/confidence?days=0", headers=api_headers)
+        r = api_client.get("/analytics/confidence?days=0", headers=api_headers)
         assert r.status_code == 422  # Pydantic validation error
 
         # Test too high
-        r = api_client.get("/api/agent/analytics/confidence?days=366", headers=api_headers)
+        r = api_client.get("/analytics/confidence?days=366", headers=api_headers)
         assert r.status_code == 422
 
 
@@ -321,7 +321,7 @@ class TestAccuracyAnalytics:
         }
 
         with patch("sre_agent.api.analytics_rest._compute_accuracy_stats", return_value=mock_accuracy):
-            r = api_client.get("/api/agent/analytics/accuracy", headers=api_headers)
+            r = api_client.get("/analytics/accuracy", headers=api_headers)
 
         assert r.status_code == 200
         data = r.json()
@@ -358,7 +358,7 @@ class TestAccuracyAnalytics:
         }
 
         with patch("sre_agent.api.analytics_rest._compute_accuracy_stats", return_value=mock_empty):
-            r = api_client.get("/api/agent/analytics/accuracy", headers=api_headers)
+            r = api_client.get("/analytics/accuracy", headers=api_headers)
 
         assert r.status_code == 200
         data = r.json()
@@ -368,7 +368,7 @@ class TestAccuracyAnalytics:
 
     def test_requires_auth(self, api_client):
         """Test that the endpoint requires authentication."""
-        r = api_client.get("/api/agent/analytics/accuracy")
+        r = api_client.get("/analytics/accuracy")
         assert r.status_code == 401
 
     def test_custom_days_parameter(self, api_client, api_headers):
@@ -394,7 +394,7 @@ class TestAccuracyAnalytics:
 
         with patch("sre_agent.api.analytics_rest._compute_accuracy_stats") as mock_fn:
             mock_fn.return_value = mock_accuracy
-            r = api_client.get("/api/agent/analytics/accuracy?days=7", headers=api_headers)
+            r = api_client.get("/analytics/accuracy?days=7", headers=api_headers)
 
         assert r.status_code == 200
         mock_fn.assert_called_once_with(7)
@@ -402,11 +402,11 @@ class TestAccuracyAnalytics:
     def test_validates_days_range(self, api_client, api_headers):
         """Test that days parameter validates range (1-365)."""
         # Test too low
-        r = api_client.get("/api/agent/analytics/accuracy?days=0", headers=api_headers)
+        r = api_client.get("/analytics/accuracy?days=0", headers=api_headers)
         assert r.status_code == 422  # Pydantic validation error
 
         # Test too high
-        r = api_client.get("/api/agent/analytics/accuracy?days=366", headers=api_headers)
+        r = api_client.get("/analytics/accuracy?days=366", headers=api_headers)
         assert r.status_code == 422
 
 
@@ -442,7 +442,7 @@ class TestCostAnalytics:
         }
 
         with patch("sre_agent.api.analytics_rest._compute_cost_stats", return_value=mock_cost):
-            r = api_client.get("/api/agent/analytics/cost", headers=api_headers)
+            r = api_client.get("/analytics/cost", headers=api_headers)
 
         assert r.status_code == 200
         data = r.json()
@@ -467,7 +467,7 @@ class TestCostAnalytics:
         }
 
         with patch("sre_agent.api.analytics_rest._compute_cost_stats", return_value=mock_empty):
-            r = api_client.get("/api/agent/analytics/cost", headers=api_headers)
+            r = api_client.get("/analytics/cost", headers=api_headers)
 
         assert r.status_code == 200
         data = r.json()
@@ -478,7 +478,7 @@ class TestCostAnalytics:
 
     def test_requires_auth(self, api_client):
         """Test that the endpoint requires authentication."""
-        r = api_client.get("/api/agent/analytics/cost")
+        r = api_client.get("/analytics/cost")
         assert r.status_code == 401
 
     def test_custom_days_parameter(self, api_client, api_headers):
@@ -493,7 +493,7 @@ class TestCostAnalytics:
 
         with patch("sre_agent.api.analytics_rest._compute_cost_stats") as mock_fn:
             mock_fn.return_value = mock_cost
-            r = api_client.get("/api/agent/analytics/cost?days=7", headers=api_headers)
+            r = api_client.get("/analytics/cost?days=7", headers=api_headers)
 
         assert r.status_code == 200
         mock_fn.assert_called_once_with(7)
@@ -501,11 +501,11 @@ class TestCostAnalytics:
     def test_validates_days_range(self, api_client, api_headers):
         """Test that days parameter validates range (1-365)."""
         # Test too low
-        r = api_client.get("/api/agent/analytics/cost?days=0", headers=api_headers)
+        r = api_client.get("/analytics/cost?days=0", headers=api_headers)
         assert r.status_code == 422  # Pydantic validation error
 
         # Test too high
-        r = api_client.get("/api/agent/analytics/cost?days=366", headers=api_headers)
+        r = api_client.get("/analytics/cost?days=366", headers=api_headers)
         assert r.status_code == 422
 
 
@@ -564,7 +564,7 @@ class TestIntelligenceAnalytics:
         }
 
         with patch("sre_agent.intelligence.get_intelligence_sections", return_value=mock_intelligence):
-            r = api_client.get("/api/agent/analytics/intelligence", headers=api_headers)
+            r = api_client.get("/analytics/intelligence", headers=api_headers)
 
         assert r.status_code == 200
         data = r.json()
@@ -605,7 +605,7 @@ class TestIntelligenceAnalytics:
 
     def test_requires_auth(self, api_client):
         """Test that the endpoint requires authentication."""
-        r = api_client.get("/api/agent/analytics/intelligence")
+        r = api_client.get("/analytics/intelligence")
         assert r.status_code == 401
 
     def test_custom_days_parameter(self, api_client, api_headers):
@@ -623,7 +623,7 @@ class TestIntelligenceAnalytics:
 
         with patch("sre_agent.intelligence.get_intelligence_sections") as mock_fn:
             mock_fn.return_value = mock_intelligence
-            r = api_client.get("/api/agent/analytics/intelligence?days=30", headers=api_headers)
+            r = api_client.get("/analytics/intelligence?days=30", headers=api_headers)
 
         assert r.status_code == 200
         # Verify that the function was called with correct params
@@ -632,11 +632,11 @@ class TestIntelligenceAnalytics:
     def test_validates_days_range(self, api_client, api_headers):
         """Test that days parameter validates range (1-90)."""
         # Test too low
-        r = api_client.get("/api/agent/analytics/intelligence?days=0", headers=api_headers)
+        r = api_client.get("/analytics/intelligence?days=0", headers=api_headers)
         assert r.status_code == 422  # Pydantic validation error
 
         # Test too high
-        r = api_client.get("/api/agent/analytics/intelligence?days=91", headers=api_headers)
+        r = api_client.get("/analytics/intelligence?days=91", headers=api_headers)
         assert r.status_code == 422
 
     def test_custom_mode_parameter(self, api_client, api_headers):
@@ -654,7 +654,7 @@ class TestIntelligenceAnalytics:
 
         with patch("sre_agent.intelligence.get_intelligence_sections") as mock_fn:
             mock_fn.return_value = mock_intelligence
-            r = api_client.get("/api/agent/analytics/intelligence?mode=security&days=14", headers=api_headers)
+            r = api_client.get("/analytics/intelligence?mode=security&days=14", headers=api_headers)
 
         assert r.status_code == 200
         # Verify that the function was called with correct params
@@ -677,12 +677,12 @@ class TestPromptAnalytics:
                 },
                 "versions": [],
             }
-            r = api_client.get("/api/agent/analytics/prompt", headers=api_headers)
+            r = api_client.get("/analytics/prompt", headers=api_headers)
         assert r.status_code == 200
         assert r.json()["stats"]["total_prompts"] == 200
 
     def test_requires_auth(self, api_client):
-        r = api_client.get("/api/agent/analytics/prompt")
+        r = api_client.get("/analytics/prompt")
         assert r.status_code == 401
 
 
@@ -702,19 +702,19 @@ class TestRecommendations:
                     }
                 ]
             }
-            r = api_client.get("/api/agent/recommendations", headers=api_headers)
+            r = api_client.get("/recommendations", headers=api_headers)
         assert r.status_code == 200
         assert len(r.json()["recommendations"]) == 1
 
     def test_empty(self, api_client, api_headers):
         with patch("sre_agent.api.analytics_rest._compute_recommendations") as mock:
             mock.return_value = {"recommendations": []}
-            r = api_client.get("/api/agent/recommendations", headers=api_headers)
+            r = api_client.get("/recommendations", headers=api_headers)
         assert r.status_code == 200
         assert r.json()["recommendations"] == []
 
     def test_requires_auth(self, api_client):
-        r = api_client.get("/api/agent/recommendations")
+        r = api_client.get("/recommendations")
         assert r.status_code == 401
 
 
@@ -732,10 +732,10 @@ class TestReadinessSummary:
                 "pass_rate": 0.933,
                 "attention_items": [{"gate": "cert_expiry", "message": "Certificate expiring"}],
             }
-            r = api_client.get("/api/agent/analytics/readiness", headers=api_headers)
+            r = api_client.get("/analytics/readiness", headers=api_headers)
         assert r.status_code == 200
         assert r.json()["passed"] == 28
 
     def test_requires_auth(self, api_client):
-        r = api_client.get("/api/agent/analytics/readiness")
+        r = api_client.get("/analytics/readiness")
         assert r.status_code == 401
