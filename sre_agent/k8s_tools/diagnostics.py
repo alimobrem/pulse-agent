@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import atexit
 import json
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 
 from anthropic import beta_tool
@@ -11,6 +13,10 @@ from kubernetes.client.rest import ApiException
 from .. import k8s_client as _kc
 from ..errors import ToolError
 from .validators import MAX_RESULTS, _validate_k8s_namespace
+
+# Shared pool for parallel pod log searching
+_log_pool = ThreadPoolExecutor(max_workers=5, thread_name_prefix="logs")
+atexit.register(_log_pool.shutdown, wait=False)
 
 
 @beta_tool
@@ -658,16 +664,12 @@ def search_logs(namespace: str, label_selector: str, pattern: str, tail_lines: i
 
         return pod_matches[:50], bool(pod_matches)  # Cap per pod
 
-    from concurrent.futures import ThreadPoolExecutor
-
     matches: list[str] = []
     pods_with_matches = 0
-    with ThreadPoolExecutor(max_workers=5) as executor:
-        results = executor.map(_fetch_pod_logs, pods_to_search)
-        for pod_matches, had_matches in results:
-            matches.extend(pod_matches)
-            if had_matches:
-                pods_with_matches += 1
+    for pod_matches, had_matches in _log_pool.map(_fetch_pod_logs, pods_to_search):
+        matches.extend(pod_matches)
+        if had_matches:
+            pods_with_matches += 1
 
     if not matches:
         return f"No matches for '{pattern}' in logs of {pods_searched} pods matching '{label_selector}'."

@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import atexit
 import json
 import re
+from concurrent.futures import ThreadPoolExecutor
 
 from anthropic import beta_tool
 from kubernetes.client.rest import ApiException
@@ -12,6 +14,10 @@ from kubernetes.stream import stream as k8s_stream
 from .. import k8s_client as _kc
 from ..errors import ToolError
 from .validators import _validate_k8s_name, _validate_k8s_namespace
+
+# Shared pool for parallel Prometheus queries in resource recommendations
+_query_pool = ThreadPoolExecutor(max_workers=4, thread_name_prefix="prom")
+atexit.register(_query_pool.shutdown, wait=False)
 
 # Characters that indicate shell metacharacters (security risk)
 _DANGEROUS_CHARS = set(";|&$><`")
@@ -384,13 +390,10 @@ def get_resource_recommendations(namespace: str, time_range: str = "24h") -> str
             pass
         return []
 
-    from concurrent.futures import ThreadPoolExecutor
-
-    with ThreadPoolExecutor(max_workers=4) as executor:
-        cpu_usage_f = executor.submit(_instant_query, cpu_query)
-        mem_usage_f = executor.submit(_instant_query, mem_query)
-        cpu_requests_f = executor.submit(_instant_query, cpu_req_query)
-        mem_requests_f = executor.submit(_instant_query, mem_req_query)
+    cpu_usage_f = _query_pool.submit(_instant_query, cpu_query)
+    mem_usage_f = _query_pool.submit(_instant_query, mem_query)
+    cpu_requests_f = _query_pool.submit(_instant_query, cpu_req_query)
+    mem_requests_f = _query_pool.submit(_instant_query, mem_req_query)
 
     cpu_usage = cpu_usage_f.result()
     mem_usage = mem_usage_f.result()

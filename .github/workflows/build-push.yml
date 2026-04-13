@@ -35,6 +35,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install -e ".[test]"
           ruff check sre_agent/ tests/
+          ruff format --check sre_agent/ tests/
           python -m pytest tests/ -q
 
       - name: Set image tag

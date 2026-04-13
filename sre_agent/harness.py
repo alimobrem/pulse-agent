@@ -9,10 +9,16 @@ Claude Harness — optimizations for getting the most out of the agent.
 
 from __future__ import annotations
 
+import atexit
+import concurrent.futures
 import json
 import logging
 
 logger = logging.getLogger("pulse_agent.harness")
+
+# Shared pool for cluster context gathering (nodes, namespaces, version, etc.)
+_context_pool = concurrent.futures.ThreadPoolExecutor(max_workers=5, thread_name_prefix="ctx")
+atexit.register(_context_pool.shutdown, wait=False)
 
 # ---------------------------------------------------------------------------
 # 1. Dynamic Tool Selection — delegated to skill_loader.py
@@ -214,8 +220,6 @@ def build_cached_system_prompt(
 
 def gather_cluster_context(mode: str = "sre") -> str:
     """Pre-fetch key cluster state concurrently, scoped by agent mode."""
-    import concurrent.futures
-
     from .errors import ToolError
     from .k8s_client import get_core_client, get_custom_client, safe
 
@@ -309,16 +313,15 @@ def gather_cluster_context(mode: str = "sre") -> str:
         fetchers["views"] = _fetch_view_count
     # Security mode: just nodes + namespaces + version (lightweight)
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=5) as pool:
-        futures = {pool.submit(fn): key for key, fn in fetchers.items()}
-        for future in concurrent.futures.as_completed(futures, timeout=10):
-            key = futures[future]
-            try:
-                result = future.result(timeout=5)
-                if result:
-                    results[key] = result
-            except Exception as e:
-                logger.warning("Cluster context fetch '%s' failed: %s", key, e)
+    futures = {_context_pool.submit(fn): key for key, fn in fetchers.items()}
+    for future in concurrent.futures.as_completed(futures, timeout=10):
+        key = futures[future]
+        try:
+            result = future.result(timeout=5)
+            if result:
+                results[key] = result
+        except Exception as e:
+            logger.warning("Cluster context fetch '%s' failed: %s", key, e)
 
     if not results:
         return ""

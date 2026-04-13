@@ -30,6 +30,21 @@ from .context import _apply_style_hint, _build_context_prefix
 
 logger = logging.getLogger("pulse_agent.api")
 
+# Keywords that force a mode switch out of view_designer.
+# Defined at module level to avoid set construction per message.
+_HARD_SWITCH_SRE = {
+    "crash",
+    "oom",
+    "pending",
+    "drain",
+    "cordon",
+    "crashloop",
+    "node not ready",
+    "why are",
+    "what's wrong",
+}
+_HARD_SWITCH_SEC = {"rbac", "scc", "vulnerability", "compliance", "privilege", "security audit"}
+
 
 async def websocket_agent(websocket: WebSocket, mode: str):
     """WebSocket endpoint for agent chat.
@@ -363,22 +378,6 @@ async def websocket_auto_agent(websocket: WebSocket):
                 is_strong = True
             except Exception:
                 intent, is_strong = classify_intent(content)
-
-            # Sticky view_designer: once in dashboard mode, stay there unless
-            # the user clearly asks about something SRE/security-specific.
-            # This prevents "update the chart" from routing to SRE.
-            _HARD_SWITCH_SRE = {
-                "crash",
-                "oom",
-                "pending",
-                "drain",
-                "cordon",
-                "crashloop",
-                "node not ready",
-                "why are",
-                "what's wrong",
-            }
-            _HARD_SWITCH_SEC = {"rbac", "scc", "vulnerability", "compliance", "privilege", "security audit"}
 
             q_lower = content.lower()
             if last_mode == "view_designer" and intent != "view_designer":

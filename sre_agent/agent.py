@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import atexit
 import concurrent.futures
 import json
 import logging
@@ -85,6 +86,11 @@ WRITE_TOOLS = WRITE_TOOLS | {
 logger = logging.getLogger("pulse_agent")
 
 MAX_ITERATIONS = 25
+
+# Shared thread pool for tool execution — avoids creating/destroying a pool per call.
+# 4 workers: 2 for parallel read tools + headroom for timeout wrappers.
+_tool_pool = concurrent.futures.ThreadPoolExecutor(max_workers=4, thread_name_prefix="tool")
+atexit.register(_tool_pool.shutdown, wait=False)
 
 
 # ---------------------------------------------------------------------------
@@ -351,33 +357,32 @@ def _execute_tool_with_timeout(
 ) -> tuple[str, dict | None, dict]:
     """Execute a tool with a timeout guard."""
     timeout = timeout or TOOL_TIMEOUT
-    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-        future = pool.submit(_execute_tool, name, input_data, tool_map)
-        try:
-            return future.result(timeout=timeout)
-        except concurrent.futures.TimeoutError:
-            logger.error(
-                json.dumps(
-                    {
-                        "event": "tool_timeout",
-                        "tool": name,
-                        "timeout": timeout,
-                        "timestamp": datetime.now(UTC).isoformat(),
-                    }
-                )
+    future = _tool_pool.submit(_execute_tool, name, input_data, tool_map)
+    try:
+        return future.result(timeout=timeout)
+    except concurrent.futures.TimeoutError:
+        logger.error(
+            json.dumps(
+                {
+                    "event": "tool_timeout",
+                    "tool": name,
+                    "timeout": timeout,
+                    "timestamp": datetime.now(UTC).isoformat(),
+                }
             )
-            from .error_tracker import get_tracker
-            from .errors import ToolError
+        )
+        from .error_tracker import get_tracker
+        from .errors import ToolError
 
-            err = ToolError(message=f"{name} timed out after {timeout}s", category="server", operation=name)
-            get_tracker().record(err)
-            meta = {
-                "status": "error",
-                "error_message": f"{name} timed out after {timeout}s",
-                "error_category": "server",
-                "result_bytes": 0,
-            }
-            return f"Error: {name} timed out after {timeout}s", None, meta
+        err = ToolError(message=f"{name} timed out after {timeout}s", category="server", operation=name)
+        get_tracker().record(err)
+        meta = {
+            "status": "error",
+            "error_message": f"{name} timed out after {timeout}s",
+            "error_category": "server",
+            "result_bytes": 0,
+        }
+        return f"Error: {name} timed out after {timeout}s", None, meta
 
 
 def run_agent_streaming(
@@ -573,49 +578,49 @@ def run_agent_streaming(
             write_blocks = [b for b in tool_blocks if b.name in write_tools]
             results_map: dict[str, tuple[str, dict | None]] = {}
 
-            # Execute read tools in parallel
+            # Execute read tools in parallel via shared pool
             if read_blocks:
                 start_time = time.time()
-                with concurrent.futures.ThreadPoolExecutor(max_workers=min(len(read_blocks), 2)) as pool:
-                    futures = {
-                        pool.submit(_execute_tool_with_timeout, b.name, b.input, tool_map): b for b in read_blocks
-                    }
-                    for future in concurrent.futures.as_completed(futures):
-                        block = futures[future]
-                        elapsed_ms = int((time.time() - start_time) * 1000)
-                        try:
-                            text, component, exec_meta = future.result()
-                            results_map[block.id] = (text, component)
-                            if on_tool_result:
-                                on_tool_result(
-                                    {
-                                        "tool_name": block.name,
-                                        "input": block.input,
-                                        "status": exec_meta["status"],
-                                        "error_message": exec_meta["error_message"],
-                                        "error_category": exec_meta["error_category"],
-                                        "duration_ms": elapsed_ms,
-                                        "result_bytes": exec_meta["result_bytes"],
-                                        "was_confirmed": None,
-                                        "turn_number": iterations,
-                                    }
-                                )
-                        except Exception:
-                            results_map[block.id] = (f"Error executing {block.name}", None)
-                            if on_tool_result:
-                                on_tool_result(
-                                    {
-                                        "tool_name": block.name,
-                                        "input": block.input,
-                                        "status": "error",
-                                        "error_message": f"Error executing {block.name}",
-                                        "error_category": "server",
-                                        "duration_ms": elapsed_ms,
-                                        "result_bytes": 0,
-                                        "was_confirmed": None,
-                                        "turn_number": iterations,
-                                    }
-                                )
+                # Submit _execute_tool directly (not _execute_tool_with_timeout)
+                # to avoid nested pool submissions that could exhaust workers.
+                futures = {_tool_pool.submit(_execute_tool, b.name, b.input, tool_map): b for b in read_blocks}
+                timeout = TOOL_TIMEOUT
+                for future in concurrent.futures.as_completed(futures, timeout=timeout):
+                    block = futures[future]
+                    elapsed_ms = int((time.time() - start_time) * 1000)
+                    try:
+                        text, component, exec_meta = future.result(timeout=timeout)
+                        results_map[block.id] = (text, component)
+                        if on_tool_result:
+                            on_tool_result(
+                                {
+                                    "tool_name": block.name,
+                                    "input": block.input,
+                                    "status": exec_meta["status"],
+                                    "error_message": exec_meta["error_message"],
+                                    "error_category": exec_meta["error_category"],
+                                    "duration_ms": elapsed_ms,
+                                    "result_bytes": exec_meta["result_bytes"],
+                                    "was_confirmed": None,
+                                    "turn_number": iterations,
+                                }
+                            )
+                    except Exception:
+                        results_map[block.id] = (f"Error executing {block.name}", None)
+                        if on_tool_result:
+                            on_tool_result(
+                                {
+                                    "tool_name": block.name,
+                                    "input": block.input,
+                                    "status": "error",
+                                    "error_message": f"Error executing {block.name}",
+                                    "error_category": "server",
+                                    "duration_ms": elapsed_ms,
+                                    "result_bytes": 0,
+                                    "was_confirmed": None,
+                                    "turn_number": iterations,
+                                }
+                            )
 
             # Execute write tools sequentially (need confirmation gate)
             for block in write_blocks:

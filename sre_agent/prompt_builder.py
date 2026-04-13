@@ -16,6 +16,7 @@ Assembly order (static → dynamic):
 
 from __future__ import annotations
 
+import contextvars
 import logging
 from typing import TYPE_CHECKING
 
@@ -24,13 +25,15 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger("pulse_agent.prompt_builder")
 
-# Stores the latest assembly data for prompt logging (consumed by agent_ws)
-_last_assembled: dict = {}
+# Per-context storage for prompt assembly data — avoids race conditions
+# between concurrent WebSocket sessions that would overwrite a shared dict.
+_last_assembled: contextvars.ContextVar[dict | None] = contextvars.ContextVar("_last_assembled", default=None)
 
 
 def get_last_assembled() -> dict:
     """Return a snapshot of the latest prompt assembly data for logging."""
-    return dict(_last_assembled)
+    val = _last_assembled.get()
+    return dict(val) if val else {}
 
 
 # ---------------------------------------------------------------------------
@@ -167,7 +170,7 @@ def assemble_prompt(
 
     dynamic_context = "\n\n".join(p for p in dynamic_parts if p)
 
-    _last_assembled.update(
+    _last_assembled.set(
         {
             "static": static_prompt,
             "dynamic": dynamic_context,
