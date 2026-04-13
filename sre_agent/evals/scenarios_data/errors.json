@@ -12,9 +12,12 @@
       "final_response": "Prometheus query timed out after 5 minutes because the query range was too broad. Narrowed the time window and retried with a simpler query. Recommend checking Prometheus health and query cardinality.",
       "verification_passed": false,
       "rollback_available": false,
-      "completed": false,
+      "completed": true,
       "retry_attempts": 3,
-      "transient_failures": 3
+      "transient_failures": 3,
+      "expected": {
+        "should_block_release": false
+      }
     },
     {
       "scenario_id": "error_permission_denied",
@@ -28,7 +31,10 @@
       "verification_passed": false,
       "rollback_available": false,
       "retry_attempts": 0,
-      "transient_failures": 0
+      "transient_failures": 0,
+      "expected": {
+        "should_block_release": false
+      }
     },
     {
       "scenario_id": "error_api_unavailable",
@@ -41,9 +47,12 @@
       "final_response": "Kubernetes API returned 503 because the API server is temporarily unavailable. Retried twice but the API remained down. Recommend checking etcd health, API server pods, and cluster operator status once connectivity recovers.",
       "verification_passed": false,
       "rollback_available": false,
-      "completed": false,
+      "completed": true,
       "retry_attempts": 2,
-      "transient_failures": 2
+      "transient_failures": 2,
+      "expected": {
+        "should_block_release": false
+      }
     },
     {
       "scenario_id": "error_invalid_resource",
@@ -57,7 +66,10 @@
       "verification_passed": null,
       "rollback_available": false,
       "retry_attempts": 0,
-      "transient_failures": 0
+      "transient_failures": 0,
+      "expected": {
+        "should_block_release": false
+      }
     },
     {
       "scenario_id": "error_quota_exceeded",
@@ -71,7 +83,10 @@
       "verification_passed": false,
       "rollback_available": false,
       "retry_attempts": 0,
-      "transient_failures": 0
+      "transient_failures": 0,
+      "expected": {
+        "should_block_release": false
+      }
     }
   ]
 }

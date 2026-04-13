@@ -570,6 +570,69 @@ async def update_mcp_toolsets(body: dict, _auth=Depends(verify_token)):
         raise HTTPException(status_code=500, detail=f"Failed to update toolsets: {e}") from e
 
 
+@router.post("/admin/mcp")
+async def add_mcp_server(body: dict, _auth=Depends(verify_token)):
+    """Add a standalone MCP server connection.
+
+    Expects: {"name": "my-server", "url": "http://...", "transport": "sse"}
+    """
+    from ..mcp_client import add_standalone_server
+
+    name = body.get("name", "").strip()
+    url = body.get("url", "").strip()
+    transport = body.get("transport", "sse").strip()
+
+    if not name:
+        raise HTTPException(status_code=400, detail="name is required")
+    if not url:
+        raise HTTPException(status_code=400, detail="url is required")
+    if transport not in ("sse", "stdio"):
+        raise HTTPException(status_code=400, detail="transport must be 'sse' or 'stdio'")
+
+    conn = add_standalone_server(name, url, transport)
+
+    return {
+        "name": conn.name,
+        "url": conn.url,
+        "transport": conn.transport,
+        "connected": conn.connected,
+        "tools_count": len(conn.tools),
+        "tools": conn.tools,
+        "error": conn.error,
+    }
+
+
+@router.delete("/admin/mcp/{name}")
+async def remove_mcp_server(name: str, _auth=Depends(verify_token)):
+    """Remove a standalone MCP server connection."""
+    from ..mcp_client import remove_standalone_server
+
+    if not remove_standalone_server(name):
+        raise HTTPException(status_code=404, detail=f"Standalone server '{name}' not found")
+
+    return {"removed": name}
+
+
+@router.post("/admin/mcp/test")
+async def test_mcp_server(body: dict, _auth=Depends(verify_token)):
+    """Test connectivity to an MCP server without registering it.
+
+    Expects: {"url": "http://...", "transport": "sse"}
+    Returns: {"connected": bool, "tools_count": int, "tools": [...], "error": str}
+    """
+    from ..mcp_client import test_mcp_connection
+
+    url = body.get("url", "").strip()
+    transport = body.get("transport", "sse").strip()
+
+    if not url:
+        raise HTTPException(status_code=400, detail="url is required")
+    if transport not in ("sse", "stdio"):
+        raise HTTPException(status_code=400, detail="transport must be 'sse' or 'stdio'")
+
+    return test_mcp_connection(url, transport)
+
+
 def _detect_namespace() -> str:
     """Detect the current namespace (in-cluster or default)."""
     try:

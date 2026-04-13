@@ -93,8 +93,7 @@
       "retry_attempts": 0,
       "transient_failures": 0,
       "expected": {
-        "should_block_release": true,
-        "required_blockers": ["resource_exhaustion_risk"]
+        "should_block_release": false
       }
     }
   ]

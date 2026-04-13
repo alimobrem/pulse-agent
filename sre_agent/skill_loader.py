@@ -176,6 +176,7 @@ _VALID_CATEGORIES = {
     "operations",
     "gitops",
     "fleet",
+    "self",
 }
 
 _VALID_CONFIGURABLE_TYPES = {"enum", "string", "boolean", "number"}
@@ -810,6 +811,33 @@ TOOL_CATEGORIES = {
             "fleet_compare_resource",
         ],
     },
+    "self": {
+        "keywords": [
+            "skill",
+            "capabilities",
+            "what can you",
+            "help",
+            "tools",
+            "component",
+            "promql",
+            "runbook",
+            "api resource",
+        ],
+        "tools": [
+            "list_my_skills",
+            "list_my_tools",
+            "list_ui_components",
+            "list_promql_recipes",
+            "list_runbooks",
+            "explain_resource",
+            "list_api_resources",
+            "list_deprecated_apis",
+            "create_skill",
+            "edit_skill",
+            "delete_skill",
+            "create_skill_from_template",
+        ],
+    },
 }
 
 # Tools always included regardless of category — these are lightweight and
@@ -859,6 +887,23 @@ _SELF_DESCRIBE_KEYWORDS = {
     "deprecated",
     "what do you",
     "capabilities",
+}
+
+
+# MCP tools that duplicate native tools — skip these when building tool_defs.
+# Native tools are faster (direct K8s API), have validation, and richer rendering.
+# MCP tools only fill gaps (e.g. helm_list, helm_install have no native equivalent).
+_MCP_NATIVE_OVERLAP: set[str] = {
+    "pods_list",  # native: list_pods
+    "resources_list",  # native: list_resources
+    "prometheus_query",  # native: get_prometheus_query
+    "alertmanager_alerts",  # native: get_firing_alerts
+    "logs_read",  # native: get_pod_logs
+    "nodes_list",  # native: list_nodes
+    "events_list",  # native: get_events
+    "deployments_list",  # native: list_deployments
+    "pods_run",  # native: apply_yaml (covered)
+    "pods_delete",  # native: delete_pod
 }
 
 
@@ -956,11 +1001,13 @@ def select_tools(query: str, all_tools: list, all_tool_map: dict, mode: str = "s
     if any(kw in query.lower() for kw in _SELF_DESCRIBE_KEYWORDS):
         mode_tool_names.update(_SELF_DESCRIBE_TOOLS)
 
-    # Always include MCP tools — they're general-purpose and extend native capabilities
+    # Include MCP tools that don't duplicate native tools
     try:
         from .mcp_client import list_mcp_tools
 
-        mode_tool_names.update(t["name"] for t in list_mcp_tools())
+        for t in list_mcp_tools():
+            if t["name"] not in _MCP_NATIVE_OVERLAP:
+                mode_tool_names.update([t["name"]])
     except Exception:
         pass
 
@@ -1012,13 +1059,13 @@ def build_config_from_skill(skill: Skill) -> dict:
 
         tool_map = {n: t for n, t in all_tools.items() if n in tool_names}
 
-    # Always include MCP tools
+    # Include MCP tools that don't duplicate native tools
     try:
         from .mcp_client import list_mcp_tools
 
         for t_info in list_mcp_tools():
             mcp_name = t_info["name"]
-            if mcp_name not in tool_map and mcp_name in all_tools:
+            if mcp_name not in _MCP_NATIVE_OVERLAP and mcp_name not in tool_map and mcp_name in all_tools:
                 tool_map[mcp_name] = all_tools[mcp_name]
     except Exception:
         pass

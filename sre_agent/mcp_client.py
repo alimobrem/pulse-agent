@@ -537,10 +537,101 @@ def disconnect_all() -> None:
     _connections.clear()
 
 
+def add_standalone_server(name: str, url: str, transport: str = "sse") -> MCPConnection:
+    """Add and connect a standalone MCP server (not tied to a skill).
+
+    Returns the MCPConnection (check .connected and .error for status).
+    """
+    key = f"standalone:{name}"
+    if key in _connections:
+        # Disconnect old connection first
+        _disconnect_one(key)
+
+    config = {
+        "name": name,
+        "server": {"url": url, "transport": transport},
+        "toolsets": [],
+    }
+    conn = connect_mcp_server(key, config)
+    _connections[key] = conn
+
+    if conn.connected:
+        register_mcp_tools(conn)
+
+    return conn
+
+
+def remove_standalone_server(name: str) -> bool:
+    """Remove a standalone MCP server. Returns True if found and removed."""
+    key = f"standalone:{name}"
+    if key not in _connections:
+        return False
+    _disconnect_one(key)
+    return True
+
+
+def _disconnect_one(key: str) -> None:
+    """Disconnect and remove a single MCP connection by key."""
+    conn = _connections.pop(key, None)
+    if conn is None:
+        return
+
+    # Unregister tools from tool registry
+    from .tool_registry import unregister_tool
+
+    for tool_name in conn.tools:
+        unregister_tool(tool_name)
+
+    # Terminate process if stdio
+    if conn.process:
+        try:
+            conn.process.terminate()
+            conn.process.wait(timeout=5)
+        except Exception:
+            try:
+                conn.process.kill()
+            except Exception:
+                pass
+    conn.connected = False
+
+
+def test_mcp_connection(url: str, transport: str = "sse") -> dict:
+    """Test connectivity to an MCP server without registering.
+
+    Returns {"connected": bool, "tools_count": int, "error": str}.
+    """
+    config = {
+        "server": {"url": url, "transport": transport},
+        "toolsets": [],
+    }
+    conn = connect_mcp_server("__test__", config)
+
+    result = {
+        "connected": conn.connected,
+        "tools_count": len(conn.tools),
+        "tools": conn.tools[:20],  # preview first 20
+        "error": conn.error,
+    }
+
+    # Clean up — terminate process if stdio
+    if conn.process:
+        try:
+            conn.process.terminate()
+            conn.process.wait(timeout=5)
+        except Exception:
+            try:
+                conn.process.kill()
+            except Exception:
+                pass
+
+    return result
+
+
 def list_mcp_connections() -> list[dict]:
     """List all MCP connections with status."""
-    return [
-        {
+    result = []
+    for key, c in _connections.items():
+        entry = {
             "name": c.name,
             "url": c.url,
             "transport": c.transport,
@@ -549,9 +640,10 @@ def list_mcp_connections() -> list[dict]:
             "prompts": c.prompts,
             "toolsets": c.toolsets,
             "error": c.error,
+            "standalone": key.startswith("standalone:"),
         }
-        for c in _connections.values()
-    ]
+        result.append(entry)
+    return result
 
 
 def list_mcp_tools() -> list[dict]:

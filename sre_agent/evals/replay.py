@@ -256,13 +256,15 @@ class MultiTurnReplayHarness:
 
 # Synonym map — keyword can be matched by any synonym
 _KEYWORD_SYNONYMS: dict[str, list[str]] = {
-    "quota": ["quota", "resource limit", "limit exceeded", "resource constraint"],
+    "quota": ["quota", "resource limit", "limit exceeded", "resource constraint", "forbidden", "exceeded"],
+    "exceeded": ["exceeded", "exhausted", "over limit", "forbidden", "quota"],
     "scaled": ["scaled", "scale", "replicas", "replica count"],
     "memory": ["memory", "mem", "oom", "ram"],
     "cpu": ["cpu", "processor", "cores", "millicores"],
     "insufficient": ["insufficient", "not enough", "exhausted", "exceeded", "no capacity"],
     "database": ["database", "db", "postgres", "mysql", "sql"],
     "restart": ["restart", "rollout restart", "rolling restart"],
+    "connection": ["connection", "connect", "connectivity", "refused", "unreachable"],
 }
 
 

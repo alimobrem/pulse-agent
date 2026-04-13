@@ -254,6 +254,8 @@ def _format_text(results: list[dict]) -> str:
         lines.append(f"Duration: {r['duration_ms']:.0f}ms")
         tool_calls = score.get("total_tool_calls", score.get("tool_calls", []))
         lines.append(f"Tools called: {', '.join(tool_calls) or '(none)'}")
+        if r.get("error"):
+            lines.append(f"Error: {r['error']}")
         lines.append("Checks:")
         for check in score["checks"]:
             mark = "  [x]" if check["passed"] else "  [ ]"

@@ -22,5 +22,11 @@ def get_tool_map() -> dict:
     return dict(TOOL_REGISTRY)
 
 
+def unregister_tool(name: str) -> None:
+    """Remove a tool from the registry."""
+    TOOL_REGISTRY.pop(name, None)
+    WRITE_TOOL_NAMES.discard(name)
+
+
 def get_write_tools() -> set[str]:
     return set(WRITE_TOOL_NAMES)
