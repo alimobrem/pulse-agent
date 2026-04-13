@@ -3,9 +3,10 @@ name: capacity_planner
 version: 1
 description: Cluster capacity analysis, resource forecasting, and scaling recommendations
 keywords:
-  - capacity, forecast, headroom, exhaustion, scale plan, grow
-  - resource budget, overcommit, right-size, bin-pack
-  - how much room, running out, run out, when will, enough resources
+  - capacity forecast, capacity projection, headroom, exhaustion
+  - scale plan, growth plan, capacity plan
+  - resource budget, overcommit ratio, right-size, bin-pack
+  - how much room, running out of, run out of, when will we, enough resources
 categories:
   - diagnostics
   - monitoring
