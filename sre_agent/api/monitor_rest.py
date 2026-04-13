@@ -80,7 +80,7 @@ def get_scanner_coverage(days: int = 7) -> dict:
             }
         )
 
-    coverage_pct = covered_count / total_categories if total_categories > 0 else 0.0
+    coverage_pct = round(covered_count / total_categories * 100, 1) if total_categories > 0 else 0.0
 
     # Try to get per-scanner finding stats from the database
     per_scanner = []
@@ -132,7 +132,7 @@ def get_scanner_coverage(days: int = 7) -> dict:
     return {
         "active_scanners": active_scanners,
         "total_scanners": total_scanners,
-        "coverage_pct": round(coverage_pct, 2),
+        "coverage_pct": coverage_pct,
         "categories": categories,
         "per_scanner": per_scanner,
     }
