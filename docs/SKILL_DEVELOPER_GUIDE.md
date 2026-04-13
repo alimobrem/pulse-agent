@@ -495,7 +495,7 @@ configurable:
 
 ### How Preferences Are Applied
 
-Users set preferences via the Agent Settings UI or chat ("I prefer brief answers"). At runtime:
+Users set preferences via the Mission Control UI or chat ("I prefer brief answers"). At runtime:
 
 ```
 Skill prompt (fixed)
