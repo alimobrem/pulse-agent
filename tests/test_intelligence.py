@@ -318,7 +318,7 @@ class TestRoutingAccuracy:
         assert isinstance(result, str)
         assert "Routing Accuracy" in result
         assert "85%" in result
-        assert "15%" in result
+        assert "15" in result
 
     def test_routing_accuracy_empty_data(self):
         db = MagicMock()
@@ -347,7 +347,7 @@ class TestFeedbackAnalysis:
         assert isinstance(result, str)
         assert "Feedback Analysis" in result
         assert "get_prometheus_query" in result
-        assert "3/10" in result
+        assert "3 negative" in result
 
     def test_feedback_analysis_empty_data(self):
         db = MagicMock()
@@ -366,9 +366,12 @@ class TestTokenTrending:
     def test_token_trending_returns_string(self):
         db = MagicMock()
         db.fetchone.return_value = {
-            "current_avg": 3200,
-            "prev_avg": 3636,
+            "current_input": 3200,
+            "prev_input": 3636,
             "current_output": 1100,
+            "prev_output": 1000,
+            "current_cache": 500,
+            "prev_cache": 400,
         }
         db.fetchall.return_value = []
 
@@ -383,9 +386,12 @@ class TestTokenTrending:
     def test_token_trending_no_prev(self):
         db = MagicMock()
         db.fetchone.return_value = {
-            "current_avg": 2500,
-            "prev_avg": None,
+            "current_input": 2500,
+            "prev_input": None,
             "current_output": 800,
+            "prev_output": None,
+            "current_cache": None,
+            "prev_cache": None,
         }
         db.fetchall.return_value = []
 
@@ -397,7 +403,14 @@ class TestTokenTrending:
 
     def test_token_trending_empty_data(self):
         db = MagicMock()
-        db.fetchone.return_value = {"current_avg": None, "prev_avg": None, "current_output": None}
+        db.fetchone.return_value = {
+            "current_input": None,
+            "prev_input": None,
+            "current_output": None,
+            "prev_output": None,
+            "current_cache": None,
+            "prev_cache": None,
+        }
         db.fetchall.return_value = []
 
         with patch("sre_agent.db.get_database", return_value=db):

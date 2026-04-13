@@ -154,45 +154,49 @@ def _compute_query_reliability(days: int) -> str:
         return ""
 
 
+def _fetch_dashboard_patterns_data(days: int) -> dict:
+    """Fetch dashboard pattern data (shared by text and structured versions)."""
+    from .db import get_database
+
+    db = get_database()
+    tool_rows = db.fetchall(
+        "SELECT tool_name, COUNT(*) as call_count "
+        "FROM tool_usage "
+        "WHERE agent_mode = 'view_designer' "
+        "  AND timestamp > NOW() - INTERVAL '1 day' * ? "
+        "  AND status = 'success' "
+        "GROUP BY tool_name "
+        "ORDER BY call_count DESC "
+        "LIMIT 10",
+        (days,),
+    )
+    avg_row = db.fetchone(
+        "SELECT AVG(tool_count)::int as avg_tools FROM ("
+        "    SELECT session_id, COUNT(*) as tool_count "
+        "    FROM tool_usage "
+        "    WHERE agent_mode = 'view_designer' "
+        "      AND timestamp > NOW() - INTERVAL '1 day' * ? "
+        "    GROUP BY session_id"
+        ") sub",
+        (days,),
+    )
+    top_components = [{"kind": r["tool_name"], "count": r["call_count"]} for r in tool_rows or []]
+    avg_widgets = avg_row["avg_tools"] if avg_row and avg_row.get("avg_tools") else 0
+    return {"top_components": top_components, "avg_widgets": avg_widgets}
+
+
 def _compute_dashboard_patterns(days: int) -> str:
     """Compute dashboard/view designer usage patterns from tool_usage."""
     try:
-        from .db import get_database
-
-        db = get_database()
-
-        tool_rows = db.fetchall(
-            "SELECT tool_name, COUNT(*) as call_count "
-            "FROM tool_usage "
-            "WHERE agent_mode = 'view_designer' "
-            "  AND timestamp > NOW() - INTERVAL '1 day' * ? "
-            "  AND status = 'success' "
-            "GROUP BY tool_name "
-            "ORDER BY call_count DESC "
-            "LIMIT 10",
-            (days,),
-        )
-
-        avg_row = db.fetchone(
-            "SELECT AVG(tool_count)::int as avg_tools FROM ("
-            "    SELECT session_id, COUNT(*) as tool_count "
-            "    FROM tool_usage "
-            "    WHERE agent_mode = 'view_designer' "
-            "      AND timestamp > NOW() - INTERVAL '1 day' * ? "
-            "    GROUP BY session_id"
-            ") sub",
-            (days,),
-        )
-
-        if not tool_rows:
+        data = _fetch_dashboard_patterns_data(days)
+        if not data["top_components"]:
             return ""
-
         lines = ["### Dashboard Patterns"]
-        if avg_row and avg_row.get("avg_tools"):
-            lines.append(f"Average tools per dashboard session: {avg_row['avg_tools']}")
+        if data["avg_widgets"]:
+            lines.append(f"Average tools per dashboard session: {data['avg_widgets']}")
         lines.append("**Most used tools in view building:**")
-        for row in tool_rows:
-            lines.append(f"- {row['tool_name']}: {row['call_count']} calls")
+        for c in data["top_components"]:
+            lines.append(f"- {c['kind']}: {c['count']} calls")
         return "\n".join(lines)
     except Exception:
         logger.debug("Failed to compute dashboard patterns", exc_info=True)
@@ -273,219 +277,264 @@ def _compute_error_hotspots(days: int) -> str:
         return ""
 
 
+def _fetch_token_efficiency_data(days: int) -> dict:
+    """Fetch token efficiency data (shared by text and structured versions)."""
+    from .db import get_database
+
+    db = get_database()
+    row = db.fetchone(
+        "SELECT COALESCE(ROUND(AVG(input_tokens)), 0) AS avg_input, "
+        "COALESCE(ROUND(AVG(output_tokens)), 0) AS avg_output, "
+        "COALESCE(ROUND(AVG(cache_read_tokens)), 0) AS avg_cache, "
+        "COUNT(*) AS total_turns "
+        "FROM tool_turns "
+        "WHERE input_tokens IS NOT NULL "
+        "AND timestamp > NOW() - INTERVAL '1 day' * ?",
+        (days,),
+    )
+    if not row or not row.get("total_turns"):
+        return {"avg_input": 0, "avg_output": 0, "cache_hit_rate": 0.0, "total_turns": 0}
+    avg_input = int(row["avg_input"])
+    avg_output = int(row["avg_output"])
+    avg_cache = int(row["avg_cache"])
+    cache_pct = round((avg_cache / avg_input) * 100, 1) if avg_input > 0 else 0.0
+    return {
+        "avg_input": avg_input,
+        "avg_output": avg_output,
+        "cache_hit_rate": cache_pct,
+        "total_turns": row["total_turns"],
+    }
+
+
 def _compute_token_efficiency(days: int) -> str:
     """Compute token usage efficiency metrics from tool_turns."""
     try:
-        from .db import get_database
-
-        db = get_database()
-        row = db.fetchone(
-            "SELECT COALESCE(ROUND(AVG(input_tokens)), 0) AS avg_input, "
-            "COALESCE(ROUND(AVG(output_tokens)), 0) AS avg_output, "
-            "COALESCE(ROUND(AVG(cache_read_tokens)), 0) AS avg_cache, "
-            "COUNT(*) AS total_turns "
-            "FROM tool_turns "
-            "WHERE input_tokens IS NOT NULL "
-            "AND timestamp > NOW() - INTERVAL '1 day' * ?",
-            (days,),
-        )
-        if not row or not row.get("total_turns"):
+        data = _fetch_token_efficiency_data(days)
+        if not data["total_turns"]:
             return ""
-
         lines = ["### Token Efficiency"]
-        lines.append(f"Average input tokens per turn: {int(row['avg_input'])}")
-        lines.append(f"Average output tokens per turn: {int(row['avg_output'])}")
-        avg_cache = int(row["avg_cache"])
-        if avg_cache:
-            total_input = int(row["avg_input"]) or 1
-            cache_pct = round((avg_cache / total_input) * 100)
-            lines.append(f"Cache hit rate: {cache_pct}%")
-        lines.append(f"Total turns analyzed: {row['total_turns']}")
+        lines.append(f"Average input tokens per turn: {data['avg_input']}")
+        lines.append(f"Average output tokens per turn: {data['avg_output']}")
+        if data["cache_hit_rate"]:
+            lines.append(f"Cache hit rate: {data['cache_hit_rate']}%")
+        lines.append(f"Total turns analyzed: {data['total_turns']}")
         return "\n".join(lines)
     except Exception:
         logger.debug("Failed to compute token efficiency", exc_info=True)
         return ""
 
 
+def _query_wasted_tools(db, days: int, threshold: float = 0.05, limit: int | None = 10) -> list[dict]:
+    """Query tools that are offered frequently but rarely called."""
+    query = (
+        "WITH offered AS ("
+        "    SELECT unnest(tools_offered) as tool_name, COUNT(*) as offered_count "
+        "    FROM tool_turns "
+        "    WHERE timestamp > NOW() - INTERVAL '1 day' * ? AND tools_offered IS NOT NULL "
+        "    GROUP BY 1"
+        "), "
+        "called AS ("
+        "    SELECT unnest(tools_called) as tool_name, COUNT(*) as called_count "
+        "    FROM tool_turns "
+        "    WHERE timestamp > NOW() - INTERVAL '1 day' * ? AND tools_called IS NOT NULL "
+        "    GROUP BY 1"
+        ") "
+        "SELECT o.tool_name, o.offered_count, COALESCE(c.called_count, 0) as called_count "
+        "FROM offered o "
+        "LEFT JOIN called c ON o.tool_name = c.tool_name "
+        "WHERE o.offered_count >= 20 "
+        f"AND COALESCE(c.called_count, 0)::float / o.offered_count < {threshold} "
+        "ORDER BY o.offered_count DESC"
+    )
+    if limit is not None:
+        query += f" LIMIT {limit}"
+    return db.fetchall(query, (days, days)) or []
+
+
+def _fetch_harness_effectiveness_data(days: int) -> dict:
+    """Fetch harness effectiveness data (shared by text and structured versions)."""
+    from .db import get_database
+
+    db = get_database()
+    acc_row = db.fetchone(
+        "SELECT AVG(array_length(tools_called, 1)::float "
+        "/ NULLIF(array_length(tools_offered, 1), 0)) as accuracy, "
+        "COALESCE(ROUND(AVG(array_length(tools_called, 1))), 0) as avg_called, "
+        "COALESCE(ROUND(AVG(array_length(tools_offered, 1))), 0) as avg_offered "
+        "FROM tool_turns "
+        "WHERE tools_offered IS NOT NULL AND tools_called IS NOT NULL "
+        "AND timestamp > NOW() - INTERVAL '1 day' * ?",
+        (days,),
+    )
+    if not acc_row or acc_row.get("accuracy") is None:
+        return {"accuracy": 0.0, "avg_called": 0, "avg_offered": 0, "wasted": []}
+    wasted_rows = _query_wasted_tools(db, days, threshold=0.05, limit=10)
+    wasted = [{"tool": r["tool_name"], "offered": r["offered_count"], "used": r["called_count"]} for r in wasted_rows]
+    return {
+        "accuracy": round(acc_row["accuracy"] * 100, 1),
+        "avg_called": int(acc_row["avg_called"]),
+        "avg_offered": int(acc_row["avg_offered"]),
+        "wasted": wasted,
+    }
+
+
 def _compute_harness_effectiveness(days: int) -> str:
     """Compute tool selection accuracy and wasted tools from tool_turns."""
     try:
-        from .db import get_database
-
-        db = get_database()
-
-        # Selection accuracy: avg ratio of tools_called / tools_offered
-        acc_row = db.fetchone(
-            "SELECT AVG(array_length(tools_called, 1)::float "
-            "/ NULLIF(array_length(tools_offered, 1), 0)) as accuracy, "
-            "COALESCE(ROUND(AVG(array_length(tools_called, 1))), 0) as avg_called, "
-            "COALESCE(ROUND(AVG(array_length(tools_offered, 1))), 0) as avg_offered "
-            "FROM tool_turns "
-            "WHERE tools_offered IS NOT NULL AND tools_called IS NOT NULL "
-            "AND timestamp > NOW() - INTERVAL '1 day' * ?",
-            (days,),
-        )
-
-        if not acc_row or acc_row.get("accuracy") is None:
+        data = _fetch_harness_effectiveness_data(days)
+        if not data["accuracy"]:
             return ""
-
-        accuracy_pct = round(acc_row["accuracy"] * 100)
-        avg_called = int(acc_row["avg_called"])
-        avg_offered = int(acc_row["avg_offered"])
-
         lines = ["### Harness Effectiveness"]
         lines.append(
-            f"Tool selection accuracy: {accuracy_pct}% (avg {avg_called} of {avg_offered} offered tools used per turn)"
+            f"Tool selection accuracy: {data['accuracy']:.0f}% "
+            f"(avg {data['avg_called']} of {data['avg_offered']} offered tools used per turn)"
         )
-
-        # Wasted tools: offered 20+ times but called <5% of the time
-        wasted_rows = db.fetchall(
-            "WITH offered AS ("
-            "    SELECT unnest(tools_offered) as tool_name, COUNT(*) as offered_count "
-            "    FROM tool_turns "
-            "    WHERE timestamp > NOW() - INTERVAL '1 day' * ? AND tools_offered IS NOT NULL "
-            "    GROUP BY 1"
-            "), "
-            "called AS ("
-            "    SELECT unnest(tools_called) as tool_name, COUNT(*) as called_count "
-            "    FROM tool_turns "
-            "    WHERE timestamp > NOW() - INTERVAL '1 day' * ? AND tools_called IS NOT NULL "
-            "    GROUP BY 1"
-            ") "
-            "SELECT o.tool_name, o.offered_count, COALESCE(c.called_count, 0) as called_count "
-            "FROM offered o "
-            "LEFT JOIN called c ON o.tool_name = c.tool_name "
-            "WHERE o.offered_count >= 20 "
-            "AND COALESCE(c.called_count, 0)::float / o.offered_count < 0.05 "
-            "ORDER BY o.offered_count DESC "
-            "LIMIT 10",
-            (days, days),
-        )
-
-        if wasted_rows:
+        if data["wasted"]:
             lines.append("Wasted tools (offered but rarely used):")
-            for row in wasted_rows:
-                offered = row["offered_count"]
-                called = row["called_count"]
-                pct = round(called / offered * 100) if offered else 0
-                lines.append(f"- {row['tool_name']}: offered {offered}x, used {called}x ({pct}%)")
-
+            for w in data["wasted"]:
+                pct = round(w["used"] / w["offered"] * 100) if w["offered"] else 0
+                lines.append(f"- {w['tool']}: offered {w['offered']}x, used {w['used']}x ({pct}%)")
         return "\n".join(lines)
     except Exception:
         logger.debug("Failed to compute harness effectiveness", exc_info=True)
         return ""
 
 
+def _fetch_routing_accuracy_data(days: int) -> dict:
+    """Fetch routing accuracy data (shared by text and structured versions)."""
+    from .db import get_database
+
+    db = get_database()
+    row = db.fetchone(
+        "SELECT "
+        "    COUNT(*) FILTER (WHERE agent_mode != prev_mode) as switches, "
+        "    COUNT(*) as total "
+        "FROM ("
+        "    SELECT agent_mode, "
+        "           LAG(agent_mode) OVER (PARTITION BY session_id ORDER BY turn_number) as prev_mode "
+        "    FROM tool_turns "
+        "    WHERE timestamp > NOW() - INTERVAL '1 day' * ?"
+        ") sub "
+        "WHERE prev_mode IS NOT NULL",
+        (days,),
+    )
+    if not row or not row.get("total"):
+        return {"mode_switch_rate": 0.0, "total_sessions": 0}
+    switches = row["switches"]
+    total = row["total"]
+    switch_pct = round(switches / total * 100, 1) if total else 0
+    return {"mode_switch_rate": switch_pct, "total_sessions": total}
+
+
 def _compute_routing_accuracy(days: int) -> str:
     """Compute mode routing accuracy from mode switches within sessions."""
     try:
-        from .db import get_database
-
-        db = get_database()
-
-        row = db.fetchone(
-            "SELECT "
-            "    COUNT(*) FILTER (WHERE agent_mode != prev_mode) as switches, "
-            "    COUNT(*) as total "
-            "FROM ("
-            "    SELECT agent_mode, "
-            "           LAG(agent_mode) OVER (PARTITION BY session_id ORDER BY turn_number) as prev_mode "
-            "    FROM tool_turns "
-            "    WHERE timestamp > NOW() - INTERVAL '1 day' * ?"
-            ") sub "
-            "WHERE prev_mode IS NOT NULL",
-            (days,),
-        )
-
-        if not row or not row.get("total"):
+        data = _fetch_routing_accuracy_data(days)
+        if not data["total_sessions"]:
             return ""
-
-        switches = row["switches"]
-        total = row["total"]
-        switch_pct = round(switches / total * 100) if total else 0
-        accuracy = 100 - switch_pct
-
+        accuracy = 100 - data["mode_switch_rate"]
         return (
             f"### Routing Accuracy\n"
-            f"Mode routing accuracy: {accuracy}% "
-            f"({switch_pct}% of multi-turn sessions had mode switches)"
+            f"Mode routing accuracy: {accuracy:.0f}% "
+            f"({data['mode_switch_rate']}% of multi-turn sessions had mode switches)"
         )
     except Exception:
         logger.debug("Failed to compute routing accuracy", exc_info=True)
         return ""
 
 
+def _fetch_feedback_analysis_data(days: int) -> dict:
+    """Fetch feedback analysis data (shared by text and structured versions)."""
+    from .db import get_database
+
+    db = get_database()
+    rows = db.fetchall(
+        "SELECT u.tool_name, "
+        "       COUNT(*) FILTER (WHERE t.feedback = 'negative') as negative, "
+        "       COUNT(*) as total "
+        "FROM tool_turns t "
+        "JOIN tool_usage u ON t.session_id = u.session_id AND t.turn_number = u.turn_number "
+        "WHERE t.feedback IS NOT NULL "
+        "AND t.timestamp > NOW() - INTERVAL '1 day' * ? "
+        "GROUP BY u.tool_name "
+        "HAVING COUNT(*) FILTER (WHERE t.feedback = 'negative') > 0 "
+        "ORDER BY COUNT(*) FILTER (WHERE t.feedback = 'negative')::float / COUNT(*) DESC "
+        "LIMIT 5",
+        (days,),
+    )
+    return {"negative": [{"tool": r["tool_name"], "count": r["negative"]} for r in rows or []]}
+
+
 def _compute_feedback_analysis(days: int) -> str:
     """Correlate feedback with tools to find tools with negative feedback."""
     try:
-        from .db import get_database
-
-        db = get_database()
-
-        rows = db.fetchall(
-            "SELECT u.tool_name, "
-            "       COUNT(*) FILTER (WHERE t.feedback = 'negative') as negative, "
-            "       COUNT(*) as total "
-            "FROM tool_turns t "
-            "JOIN tool_usage u ON t.session_id = u.session_id AND t.turn_number = u.turn_number "
-            "WHERE t.feedback IS NOT NULL "
-            "AND t.timestamp > NOW() - INTERVAL '1 day' * ? "
-            "GROUP BY u.tool_name "
-            "HAVING COUNT(*) FILTER (WHERE t.feedback = 'negative') > 0 "
-            "ORDER BY COUNT(*) FILTER (WHERE t.feedback = 'negative')::float / COUNT(*) DESC "
-            "LIMIT 5",
-            (days,),
-        )
-
-        if not rows:
+        data = _fetch_feedback_analysis_data(days)
+        if not data["negative"]:
             return ""
-
         lines = ["### Feedback Analysis", "Tools with negative feedback:"]
-        for row in rows:
-            lines.append(f"- {row['tool_name']}: {row['negative']}/{row['total']} negative")
-
+        for f in data["negative"]:
+            lines.append(f"- {f['tool']}: {f['count']} negative")
         return "\n".join(lines)
     except Exception:
         logger.debug("Failed to compute feedback analysis", exc_info=True)
         return ""
 
 
+def _fetch_token_trending_data(days: int) -> dict:
+    """Fetch token trending data (shared by text and structured versions)."""
+    from .db import get_database
+
+    db = get_database()
+    row = db.fetchone(
+        "SELECT "
+        "    AVG(input_tokens) FILTER (WHERE timestamp > NOW() - INTERVAL '1 day' * ?) as current_input, "
+        "    AVG(input_tokens) FILTER (WHERE timestamp BETWEEN "
+        "NOW() - INTERVAL '1 day' * ? AND NOW() - INTERVAL '1 day' * ?) as prev_input, "
+        "    AVG(output_tokens) FILTER (WHERE timestamp > NOW() - INTERVAL '1 day' * ?) as current_output, "
+        "    AVG(output_tokens) FILTER (WHERE timestamp BETWEEN "
+        "NOW() - INTERVAL '1 day' * ? AND NOW() - INTERVAL '1 day' * ?) as prev_output, "
+        "    AVG(cache_read_tokens) FILTER (WHERE timestamp > NOW() - INTERVAL '1 day' * ?) as current_cache, "
+        "    AVG(cache_read_tokens) FILTER (WHERE timestamp BETWEEN "
+        "NOW() - INTERVAL '1 day' * ? AND NOW() - INTERVAL '1 day' * ?) as prev_cache "
+        "FROM tool_turns "
+        "WHERE input_tokens IS NOT NULL",
+        (days, days * 2, days, days, days * 2, days, days, days * 2, days),
+    )
+    if not row or row.get("current_input") is None:
+        return {"input_delta_pct": 0.0, "output_delta_pct": 0.0, "cache_delta_pct": 0.0}
+
+    def _delta(cur, prev):
+        return round((cur - prev) / prev * 100, 1) if prev and prev > 0 else 0.0
+
+    ci, pi = (row["current_input"] or 0), (row["prev_input"] or 0)
+    co, po = (row["current_output"] or 0), (row["prev_output"] or 0)
+    cc, pc = (row["current_cache"] or 0), (row["prev_cache"] or 0)
+
+    return {
+        "input_delta_pct": _delta(ci, pi),
+        "output_delta_pct": _delta(co, po),
+        "cache_delta_pct": _delta(cc, pc),
+        "_current_input": int(ci),
+        "_current_output": int(co),
+    }
+
+
 def _compute_token_trending(days: int) -> str:
     """Compute week-over-week token usage trending."""
     try:
-        from .db import get_database
-
-        db = get_database()
-
-        row = db.fetchone(
-            "SELECT "
-            "    AVG(input_tokens) FILTER (WHERE timestamp > NOW() - INTERVAL '1 day' * ?) as current_avg, "
-            "    AVG(input_tokens) FILTER (WHERE timestamp BETWEEN "
-            "NOW() - INTERVAL '1 day' * ? AND NOW() - INTERVAL '1 day' * ?) as prev_avg, "
-            "    AVG(output_tokens) FILTER (WHERE timestamp > NOW() - INTERVAL '1 day' * ?) as current_output "
-            "FROM tool_turns "
-            "WHERE input_tokens IS NOT NULL",
-            (days, days * 2, days, days),
-        )
-
-        if not row or row.get("current_avg") is None:
+        data = _fetch_token_trending_data(days)
+        current_avg = data.get("_current_input", 0)
+        current_output = data.get("_current_output", 0)
+        if not current_avg:
             return ""
 
-        current_avg = int(row["current_avg"])
-        current_output = int(row["current_output"]) if row.get("current_output") else 0
-
         lines = ["### Token Trending"]
-
-        prev_avg = row.get("prev_avg")
-        if prev_avg and prev_avg > 0:
-            change_pct = round((current_avg - prev_avg) / prev_avg * 100)
-            arrow = "\u2193" if change_pct < 0 else "\u2191"
-            lines.append(f"Avg input: {current_avg:,} tokens ({arrow}{abs(change_pct)}% from last week)")
+        if data["input_delta_pct"]:
+            arrow = "\u2193" if data["input_delta_pct"] < 0 else "\u2191"
+            lines.append(f"Avg input: {current_avg:,} tokens ({arrow}{abs(data['input_delta_pct'])}% from last week)")
         else:
             lines.append(f"Avg input: {current_avg:,} tokens")
-
         lines.append(f"Avg output: {current_output:,} tokens")
-
         return "\n".join(lines)
     except Exception:
         logger.debug("Failed to compute token trending", exc_info=True)
@@ -501,30 +550,8 @@ def get_wasted_tools(days: int = 7) -> list[str]:
         from .db import get_database
 
         db = get_database()
-
-        rows = db.fetchall(
-            "WITH offered AS ("
-            "    SELECT unnest(tools_offered) as tool_name, COUNT(*) as offered_count "
-            "    FROM tool_turns "
-            "    WHERE timestamp > NOW() - INTERVAL '1 day' * ? AND tools_offered IS NOT NULL "
-            "    GROUP BY 1"
-            "), "
-            "called AS ("
-            "    SELECT unnest(tools_called) as tool_name, COUNT(*) as called_count "
-            "    FROM tool_turns "
-            "    WHERE timestamp > NOW() - INTERVAL '1 day' * ? AND tools_called IS NOT NULL "
-            "    GROUP BY 1"
-            ") "
-            "SELECT o.tool_name "
-            "FROM offered o "
-            "LEFT JOIN called c ON o.tool_name = c.tool_name "
-            "WHERE o.offered_count >= 20 "
-            "AND COALESCE(c.called_count, 0)::float / o.offered_count < 0.02 "
-            "ORDER BY o.offered_count DESC",
-            (days, days),
-        )
-
-        return [row["tool_name"] for row in rows] if rows else []
+        rows = _query_wasted_tools(db, days, threshold=0.02, limit=None)
+        return [row["tool_name"] for row in rows]
     except Exception:
         logger.debug("Failed to get wasted tools", exc_info=True)
         return []
@@ -565,31 +592,11 @@ def _compute_error_hotspots_structured(days: int) -> list[dict]:
 def _compute_token_efficiency_structured(days: int) -> dict:
     """Structured version of _compute_token_efficiency."""
     try:
-        from .db import get_database
-
-        db = get_database()
-        row = db.fetchone(
-            "SELECT COALESCE(ROUND(AVG(input_tokens)), 0) AS avg_input, "
-            "COALESCE(ROUND(AVG(output_tokens)), 0) AS avg_output, "
-            "COALESCE(ROUND(AVG(cache_read_tokens)), 0) AS avg_cache, "
-            "COUNT(*) AS total_turns "
-            "FROM tool_turns "
-            "WHERE input_tokens IS NOT NULL "
-            "AND timestamp > NOW() - INTERVAL '1 day' * ?",
-            (days,),
-        )
-        if not row or not row.get("total_turns"):
-            return {"avg_input": 0, "avg_output": 0, "cache_hit_rate": 0.0}
-
-        avg_input = int(row["avg_input"])
-        avg_output = int(row["avg_output"])
-        avg_cache = int(row["avg_cache"])
-        cache_pct = round((avg_cache / avg_input) * 100, 1) if avg_input > 0 else 0.0
-
+        data = _fetch_token_efficiency_data(days)
         return {
-            "avg_input": avg_input,
-            "avg_output": avg_output,
-            "cache_hit_rate": cache_pct,
+            "avg_input": data["avg_input"],
+            "avg_output": data["avg_output"],
+            "cache_hit_rate": data["cache_hit_rate"],
         }
     except Exception:
         logger.debug("Failed to compute token efficiency structured", exc_info=True)
@@ -599,59 +606,8 @@ def _compute_token_efficiency_structured(days: int) -> dict:
 def _compute_harness_effectiveness_structured(days: int) -> dict:
     """Structured version of _compute_harness_effectiveness."""
     try:
-        from .db import get_database
-
-        db = get_database()
-
-        # Selection accuracy: avg ratio of tools_called / tools_offered
-        acc_row = db.fetchone(
-            "SELECT AVG(array_length(tools_called, 1)::float "
-            "/ NULLIF(array_length(tools_offered, 1), 0)) as accuracy "
-            "FROM tool_turns "
-            "WHERE tools_offered IS NOT NULL AND tools_called IS NOT NULL "
-            "AND timestamp > NOW() - INTERVAL '1 day' * ?",
-            (days,),
-        )
-
-        if not acc_row or acc_row.get("accuracy") is None:
-            return {"accuracy": 0.0, "wasted": []}
-
-        accuracy_pct = round(acc_row["accuracy"] * 100, 1)
-
-        # Wasted tools: offered 20+ times but called <5% of the time
-        wasted_rows = db.fetchall(
-            "WITH offered AS ("
-            "    SELECT unnest(tools_offered) as tool_name, COUNT(*) as offered_count "
-            "    FROM tool_turns "
-            "    WHERE timestamp > NOW() - INTERVAL '1 day' * ? AND tools_offered IS NOT NULL "
-            "    GROUP BY 1"
-            "), "
-            "called AS ("
-            "    SELECT unnest(tools_called) as tool_name, COUNT(*) as called_count "
-            "    FROM tool_turns "
-            "    WHERE timestamp > NOW() - INTERVAL '1 day' * ? AND tools_called IS NOT NULL "
-            "    GROUP BY 1"
-            ") "
-            "SELECT o.tool_name, o.offered_count, COALESCE(c.called_count, 0) as called_count "
-            "FROM offered o "
-            "LEFT JOIN called c ON o.tool_name = c.tool_name "
-            "WHERE o.offered_count >= 20 "
-            "AND COALESCE(c.called_count, 0)::float / o.offered_count < 0.05 "
-            "ORDER BY o.offered_count DESC "
-            "LIMIT 10",
-            (days, days),
-        )
-
-        wasted = [
-            {
-                "tool": row["tool_name"],
-                "offered": row["offered_count"],
-                "used": row["called_count"],
-            }
-            for row in wasted_rows
-        ]
-
-        return {"accuracy": accuracy_pct, "wasted": wasted}
+        data = _fetch_harness_effectiveness_data(days)
+        return {"accuracy": data["accuracy"], "wasted": data["wasted"]}
     except Exception:
         logger.debug("Failed to compute harness effectiveness structured", exc_info=True)
         return {"accuracy": 0.0, "wasted": []}
@@ -660,32 +616,7 @@ def _compute_harness_effectiveness_structured(days: int) -> dict:
 def _compute_routing_accuracy_structured(days: int) -> dict:
     """Structured version of _compute_routing_accuracy."""
     try:
-        from .db import get_database
-
-        db = get_database()
-
-        row = db.fetchone(
-            "SELECT "
-            "    COUNT(*) FILTER (WHERE agent_mode != prev_mode) as switches, "
-            "    COUNT(*) as total "
-            "FROM ("
-            "    SELECT agent_mode, "
-            "           LAG(agent_mode) OVER (PARTITION BY session_id ORDER BY turn_number) as prev_mode "
-            "    FROM tool_turns "
-            "    WHERE timestamp > NOW() - INTERVAL '1 day' * ?"
-            ") sub "
-            "WHERE prev_mode IS NOT NULL",
-            (days,),
-        )
-
-        if not row or not row.get("total"):
-            return {"mode_switch_rate": 0.0, "total_sessions": 0}
-
-        switches = row["switches"]
-        total = row["total"]
-        switch_pct = round(switches / total * 100, 1) if total else 0.0
-
-        return {"mode_switch_rate": switch_pct, "total_sessions": total}
+        return _fetch_routing_accuracy_data(days)
     except Exception:
         logger.debug("Failed to compute routing accuracy structured", exc_info=True)
         return {"mode_switch_rate": 0.0, "total_sessions": 0}
@@ -694,30 +625,7 @@ def _compute_routing_accuracy_structured(days: int) -> dict:
 def _compute_feedback_analysis_structured(days: int) -> dict:
     """Structured version of _compute_feedback_analysis."""
     try:
-        from .db import get_database
-
-        db = get_database()
-
-        rows = db.fetchall(
-            "SELECT u.tool_name, "
-            "       COUNT(*) FILTER (WHERE t.feedback = 'negative') as negative "
-            "FROM tool_turns t "
-            "JOIN tool_usage u ON t.session_id = u.session_id AND t.turn_number = u.turn_number "
-            "WHERE t.feedback IS NOT NULL "
-            "AND t.timestamp > NOW() - INTERVAL '1 day' * ? "
-            "GROUP BY u.tool_name "
-            "HAVING COUNT(*) FILTER (WHERE t.feedback = 'negative') > 0 "
-            "ORDER BY COUNT(*) FILTER (WHERE t.feedback = 'negative')::float / COUNT(*) DESC "
-            "LIMIT 5",
-            (days,),
-        )
-
-        if not rows:
-            return {"negative": []}
-
-        negative = [{"tool": row["tool_name"], "count": row["negative"]} for row in rows]
-
-        return {"negative": negative}
+        return _fetch_feedback_analysis_data(days)
     except Exception:
         logger.debug("Failed to compute feedback analysis structured", exc_info=True)
         return {"negative": []}
@@ -726,45 +634,8 @@ def _compute_feedback_analysis_structured(days: int) -> dict:
 def _compute_token_trending_structured(days: int) -> dict:
     """Structured version of _compute_token_trending."""
     try:
-        from .db import get_database
-
-        db = get_database()
-
-        row = db.fetchone(
-            "SELECT "
-            "    AVG(input_tokens) FILTER (WHERE timestamp > NOW() - INTERVAL '1 day' * ?) as current_input, "
-            "    AVG(input_tokens) FILTER (WHERE timestamp BETWEEN "
-            "NOW() - INTERVAL '1 day' * ? AND NOW() - INTERVAL '1 day' * ?) as prev_input, "
-            "    AVG(output_tokens) FILTER (WHERE timestamp > NOW() - INTERVAL '1 day' * ?) as current_output, "
-            "    AVG(output_tokens) FILTER (WHERE timestamp BETWEEN "
-            "NOW() - INTERVAL '1 day' * ? AND NOW() - INTERVAL '1 day' * ?) as prev_output, "
-            "    AVG(cache_read_tokens) FILTER (WHERE timestamp > NOW() - INTERVAL '1 day' * ?) as current_cache, "
-            "    AVG(cache_read_tokens) FILTER (WHERE timestamp BETWEEN "
-            "NOW() - INTERVAL '1 day' * ? AND NOW() - INTERVAL '1 day' * ?) as prev_cache "
-            "FROM tool_turns "
-            "WHERE input_tokens IS NOT NULL",
-            (days, days * 2, days, days, days * 2, days, days, days * 2, days),
-        )
-
-        if not row or row.get("current_input") is None:
-            return {"input_delta_pct": 0.0, "output_delta_pct": 0.0, "cache_delta_pct": 0.0}
-
-        current_input = row["current_input"] or 0
-        prev_input = row["prev_input"] or 0
-        current_output = row["current_output"] or 0
-        prev_output = row["prev_output"] or 0
-        current_cache = row["current_cache"] or 0
-        prev_cache = row["prev_cache"] or 0
-
-        input_delta_pct = round((current_input - prev_input) / prev_input * 100, 1) if prev_input > 0 else 0.0
-        output_delta_pct = round((current_output - prev_output) / prev_output * 100, 1) if prev_output > 0 else 0.0
-        cache_delta_pct = round((current_cache - prev_cache) / prev_cache * 100, 1) if prev_cache > 0 else 0.0
-
-        return {
-            "input_delta_pct": input_delta_pct,
-            "output_delta_pct": output_delta_pct,
-            "cache_delta_pct": cache_delta_pct,
-        }
+        data = _fetch_token_trending_data(days)
+        return {k: v for k, v in data.items() if not k.startswith("_")}
     except Exception:
         logger.debug("Failed to compute token trending structured", exc_info=True)
         return {"input_delta_pct": 0.0, "output_delta_pct": 0.0, "cache_delta_pct": 0.0}
@@ -773,39 +644,7 @@ def _compute_token_trending_structured(days: int) -> dict:
 def _compute_dashboard_patterns_structured(days: int) -> dict:
     """Structured version of _compute_dashboard_patterns."""
     try:
-        from .db import get_database
-
-        db = get_database()
-
-        # Most used components (from view_components table if available)
-        # For now, we'll use tool_usage from view_designer mode
-        tool_rows = db.fetchall(
-            "SELECT tool_name, COUNT(*) as call_count "
-            "FROM tool_usage "
-            "WHERE agent_mode = 'view_designer' "
-            "  AND timestamp > NOW() - INTERVAL '1 day' * ? "
-            "  AND status = 'success' "
-            "GROUP BY tool_name "
-            "ORDER BY call_count DESC "
-            "LIMIT 10",
-            (days,),
-        )
-
-        avg_row = db.fetchone(
-            "SELECT AVG(tool_count)::int as avg_tools FROM ("
-            "    SELECT session_id, COUNT(*) as tool_count "
-            "    FROM tool_usage "
-            "    WHERE agent_mode = 'view_designer' "
-            "      AND timestamp > NOW() - INTERVAL '1 day' * ? "
-            "    GROUP BY session_id"
-            ") sub",
-            (days,),
-        )
-
-        top_components = [{"kind": row["tool_name"], "count": row["call_count"]} for row in tool_rows]
-        avg_widgets = avg_row["avg_tools"] if avg_row and avg_row.get("avg_tools") else 0
-
-        return {"top_components": top_components, "avg_widgets": avg_widgets}
+        return _fetch_dashboard_patterns_data(days)
     except Exception:
         logger.debug("Failed to compute dashboard patterns structured", exc_info=True)
         return {"top_components": [], "avg_widgets": 0}
