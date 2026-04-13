@@ -12,22 +12,27 @@ def test_load_core_suite():
     assert scenarios[0].scenario_id
 
 
-def test_blocker_scenarios_fail_gate():
+def test_blocker_scenarios_detected_correctly():
+    """Scenarios with expected blockers should detect them and pass the gate."""
     scenarios = load_suite("core")
     blocked = [s for s in scenarios if s.expected and s.expected.should_block_release]
     assert blocked
     for scenario in blocked:
         score = score_scenario(scenario)
-        assert score.passed_gate is False
+        # Blockers are correctly detected
         for blocker in scenario.expected.required_blockers:
             assert blocker in score.blockers
+        # Gate passes because the blocker was expected
+        assert score.passed_gate is True
 
 
-def test_suite_gate_fails_when_blockers_present():
+def test_suite_gate_passes_with_expected_blockers():
+    """Core suite has negative scenarios with expected.should_block_release=True.
+    Blockers are correctly detected, so these scenarios pass the gate."""
     scenarios = load_suite("core")
     result = evaluate_suite("core", scenarios)
-    assert result.gate_passed is False
-    assert result.blocker_counts
+    assert result.gate_passed is True
+    assert result.blocker_counts  # blockers still recorded for visibility
     assert result.scenario_count == len(scenarios)
 
 

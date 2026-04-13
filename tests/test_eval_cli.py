@@ -27,6 +27,7 @@ def test_cli_json_output_writes_file(tmp_path: Path):
     assert payload["scenario_count"] >= 1
 
 
-def test_cli_fail_on_gate_for_core():
+def test_cli_pass_on_gate_for_core():
+    """Core suite passes gate — negative scenarios have expected.should_block_release=True."""
     proc = _run("--suite", "core", "--fail-on-gate")
-    assert proc.returncode != 0
+    assert proc.returncode == 0

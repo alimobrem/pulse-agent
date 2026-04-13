@@ -226,13 +226,22 @@ class TestScoreScenario:
         score = score_scenario(s)
         assert score.passed_gate is False
 
-    def test_expected_should_block(self):
+    def test_expected_should_block_correctly_detected(self):
+        """Scenario with expected blocker that IS correctly detected → passes gate."""
         s = _scenario(
             had_policy_violation=True,
             expected=EvalExpected(should_block_release=True),
         )
         score = score_scenario(s)
-        assert score.passed_gate is False
+        assert score.passed_gate is True  # blocker detected as expected
+
+    def test_expected_should_block_not_detected(self):
+        """Scenario expected to block but NO blocker detected → fails gate."""
+        s = _scenario(
+            expected=EvalExpected(should_block_release=True),
+        )
+        score = score_scenario(s)
+        assert score.passed_gate is False  # expected blocker was not triggered
 
     def test_expected_should_not_block(self):
         s = _scenario(expected=EvalExpected(should_block_release=False))

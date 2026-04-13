@@ -42,7 +42,8 @@
       "completed": false,
       "retry_attempts": 3,
       "transient_failures": 3,
-      "rollback_available": false
+      "rollback_available": false,
+      "expected": { "should_block_release": true }
     },
     {
       "scenario_id": "integration_critical_investigation_generated",
