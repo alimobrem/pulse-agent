@@ -194,6 +194,10 @@ class MonitorSession:
                 reasoning=f"Auto-fix for {category}: {finding.get('title', '')} (confidence={confidence:.2f})",
                 confidence=confidence,
             )
+            if targeted_plan:
+                action_report["fixStrategy"] = targeted_plan.strategy
+                action_report["causeCategory"] = targeted_plan.cause_category
+                action_report["fixDescription"] = targeted_plan.description
 
             # Ask-first mode: emit proposal and wait for explicit decision.
             if self.trust_level == 2:
@@ -238,6 +242,8 @@ class MonitorSession:
                 if targeted_plan:
                     tool, before_state, after_state = await asyncio.to_thread(execute_targeted_fix, targeted_plan)
                 else:
+                    # handler is guaranteed to be not None due to check at line 146
+                    assert handler is not None
                     tool, before_state, after_state = await asyncio.to_thread(handler, finding)
                 duration_ms = _ts() - start_ms
 
