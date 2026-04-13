@@ -319,6 +319,85 @@ def llm_pick_tools(
         return []
 
 
+ALWAYS_INCLUDE_SLIM = {
+    "list_pods",
+    "get_events",
+    "namespace_summary",
+    "record_audit_entry",
+    "list_my_skills",
+}
+
+_MIN_TOOL_SET_SIZE = 8
+
+
+def select_tools_adaptive(
+    query: str,
+    *,
+    all_tool_map: dict,
+    fallback_categories: list[str] | None = None,
+) -> tuple[list[dict], dict, list[str]]:
+    """Adaptive tool selection: TF-IDF -> LLM -> category fallback.
+
+    Returns (tool_defs, tool_map, offered_names) — same signature as select_tools().
+    """
+    from .skill_loader import TOOL_CATEGORIES
+
+    # Phase 1: TF-IDF prediction
+    result = predict_tools(query)
+
+    if result.confidence == "high" and result.tools:
+        tool_names = set(result.tools)
+        source = "tfidf"
+    else:
+        # Phase 2: LLM fallback
+        llm_tools = llm_pick_tools(
+            query=query,
+            tool_names=list(all_tool_map.keys()),
+        )
+        if llm_tools:
+            tool_names = set(llm_tools)
+            source = "llm"
+
+            # Bootstrap TF-IDF from LLM picks (fire-and-forget)
+            try:
+                learn(query=query, tools_called=llm_tools, tools_offered=list(all_tool_map.keys()))
+            except Exception:
+                pass
+        else:
+            # Phase 3: Category fallback
+            tool_names = set()
+            for cat_name in fallback_categories or []:
+                cat = TOOL_CATEGORIES.get(cat_name, {})
+                tool_names.update(cat.get("tools", []))
+            source = "category"
+
+    # Always include slim set
+    tool_names.update(ALWAYS_INCLUDE_SLIM)
+
+    # Enforce minimum set size by padding from categories
+    if len(tool_names) < _MIN_TOOL_SET_SIZE and fallback_categories:
+        for cat_name in fallback_categories:
+            cat = TOOL_CATEGORIES.get(cat_name, {})
+            tool_names.update(cat.get("tools", []))
+            if len(tool_names) >= _MIN_TOOL_SET_SIZE:
+                break
+
+    # Build final tool map — only include tools that actually exist in the registry
+    tool_map = {n: t for n, t in all_tool_map.items() if n in tool_names}
+    tool_defs = [t.to_dict() for t in tool_map.values()]
+    offered = list(tool_map.keys())
+
+    logger.info(
+        "Adaptive tool selection: source=%s, predicted=%d, final=%d (query: %.50s)",
+        source,
+        len(result.tools) if result.tools else 0,
+        len(tool_map),
+        query,
+    )
+
+    return tool_defs, tool_map, offered
+
+
 def decay_scores(*, factor: float = 0.95, prune_days: int = 30) -> None:
     """Apply daily decay to prediction scores and prune stale entries.
 
