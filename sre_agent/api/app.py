@@ -23,6 +23,7 @@ from ..monitor import get_investigation_stats, is_autofix_paused
 from ..security_agent import (
     ALL_TOOLS as SEC_ALL_TOOLS,
 )
+from .analytics_rest import router as analytics_router
 from .auth import verify_token
 from .chat_rest import router as chat_router
 from .eval_rest import router as eval_router
@@ -124,6 +125,7 @@ app.include_router(eval_router)
 app.include_router(views_router)
 app.include_router(chat_router)
 app.include_router(skill_router)
+app.include_router(analytics_router)
 
 # Register WebSocket endpoints
 app.websocket("/ws/{mode}")(websocket_agent)
