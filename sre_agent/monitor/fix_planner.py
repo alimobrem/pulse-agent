@@ -11,7 +11,10 @@ from __future__ import annotations
 
 import logging
 import re
+from collections.abc import Callable
 from dataclasses import dataclass
+
+from ..k8s_client import get_apps_client, get_core_client
 
 logger = logging.getLogger("pulse_agent.monitor")
 
@@ -105,3 +108,158 @@ def plan_fix(investigation: dict, finding: dict) -> FixPlan | None:
             "resources": finding.get("resources", []),
         },
     )
+
+
+def execute_fix(plan: FixPlan) -> tuple[str, str, str]:
+    """Execute a targeted fix plan. Returns (tool_name, before_state, after_state).
+
+    Raises ValueError for unknown strategies.
+    """
+    executor = _EXECUTORS.get(plan.strategy)
+    if not executor:
+        raise ValueError(f"No executor for strategy: {plan.strategy}")
+
+    logger.info(
+        "Intelligent fix: strategy=%s cause=%s confidence=%.2f",
+        plan.strategy,
+        plan.cause_category,
+        plan.confidence,
+    )
+    return executor(plan)
+
+
+def _execute_patch_image(plan: FixPlan) -> tuple[str, str, str]:
+    """Fix bad image by rolling back to the previous deployment revision."""
+    resources = plan.params.get("resources", [])
+    if not resources:
+        raise ValueError("No resources in fix plan")
+
+    r = resources[0]
+    ns = r.get("namespace", "default")
+    core = get_core_client()
+    apps = get_apps_client()
+
+    pod = core.read_namespaced_pod(r["name"], ns)
+    bad_image = pod.spec.containers[0].image if pod.spec.containers else "unknown"
+
+    # Find owning Deployment
+    dep_name = None
+    for ref in pod.metadata.owner_references or []:
+        if ref.kind == "ReplicaSet":
+            rs = apps.read_namespaced_replica_set(ref.name, ns)
+            for rs_ref in rs.metadata.owner_references or []:
+                if rs_ref.kind == "Deployment":
+                    dep_name = rs_ref.name
+                    break
+
+    if not dep_name:
+        # Fallback: delete the pod
+        core.delete_namespaced_pod(r["name"], ns)
+        return (
+            "delete_pod",
+            f"Pod {r['name']} in {ns}: image={bad_image}",
+            f"Pod {r['name']} deleted — could not find owning Deployment",
+        )
+
+    dep = apps.read_namespaced_deployment(dep_name, ns)
+    revision = (dep.metadata.annotations or {}).get("deployment.kubernetes.io/revision", "0")
+    before = f"Deployment {dep_name} in {ns}: image={bad_image}, revision={revision}"
+
+    # Find previous revision's ReplicaSet
+    rollback_revision = max(int(revision) - 1, 0)
+    rs_list = apps.list_namespaced_replica_set(
+        ns, label_selector=",".join(f"{k}={v}" for k, v in (dep.spec.selector.match_labels or {}).items())
+    )
+
+    for rs in rs_list.items:
+        rs_rev = (rs.metadata.annotations or {}).get("deployment.kubernetes.io/revision", "")
+        if rs_rev == str(rollback_revision) and rs.spec.template.spec.containers:
+            good_image = rs.spec.template.spec.containers[0].image
+            container_name = rs.spec.template.spec.containers[0].name
+            body = {"spec": {"template": {"spec": {"containers": [{"name": container_name, "image": good_image}]}}}}
+            apps.patch_namespaced_deployment(dep_name, ns, body=body)
+            return (
+                "rollback_deployment",
+                before,
+                f"Deployment {dep_name} patched: image={good_image} (rolled back from rev {revision})",
+            )
+
+    # Fallback: delete pod if previous revision not found
+    core.delete_namespaced_pod(r["name"], ns)
+    return ("delete_pod", before, f"Pod {r['name']} deleted — previous revision not found")
+
+
+def _execute_patch_resources(plan: FixPlan) -> tuple[str, str, str]:
+    """Fix OOM by doubling the memory limit on the deployment."""
+    resources = plan.params.get("resources", [])
+    if not resources:
+        raise ValueError("No resources in fix plan")
+
+    r = resources[0]
+    ns = r.get("namespace", "default")
+    name = r.get("name", "")
+    kind = r.get("kind", "")
+    apps = get_apps_client()
+
+    # If resource is a Pod, find the owning Deployment
+    if kind == "Pod":
+        core = get_core_client()
+        pod = core.read_namespaced_pod(name, ns)
+        for ref in pod.metadata.owner_references or []:
+            if ref.kind == "ReplicaSet":
+                rs = apps.read_namespaced_replica_set(ref.name, ns)
+                for rs_ref in rs.metadata.owner_references or []:
+                    if rs_ref.kind == "Deployment":
+                        name = rs_ref.name
+                        kind = "Deployment"
+                        break
+
+    if kind != "Deployment":
+        raise ValueError(f"Cannot patch resources on {kind}/{name} — only Deployments supported")
+
+    dep = apps.read_namespaced_deployment(name, ns)
+    container = dep.spec.template.spec.containers[0]
+
+    current_limit = "256Mi"
+    if container.resources and container.resources.limits:
+        current_limit = container.resources.limits.get("memory", "256Mi")
+
+    from ..units import parse_memory_bytes
+
+    current_bytes = parse_memory_bytes(current_limit)
+    new_bytes = current_bytes * 2
+    new_limit = f"{new_bytes // (1024 * 1024)}Mi"
+
+    before = f"Deployment {name} in {ns}: memory limit={current_limit}"
+
+    body = {
+        "spec": {
+            "template": {
+                "spec": {
+                    "containers": [
+                        {
+                            "name": container.name,
+                            "resources": {"limits": {"memory": new_limit}},
+                        }
+                    ]
+                }
+            }
+        }
+    }
+    apps.patch_namespaced_deployment(name, ns, body=body)
+
+    return ("patch_resources", before, f"Deployment {name} patched: memory limit {current_limit} -> {new_limit}")
+
+
+def _execute_noop(plan: FixPlan) -> tuple[str, str, str]:
+    """Strategies that can't be auto-fixed yet."""
+    return ("skip", "", f"Strategy {plan.strategy} requires manual intervention: {plan.description}")
+
+
+_EXECUTORS: dict[str, Callable] = {
+    "patch_image": _execute_patch_image,
+    "patch_resources": _execute_patch_resources,
+    "create_configmap": _execute_noop,
+    "patch_probe": _execute_noop,
+    "suggest_quota_increase": _execute_noop,
+}
