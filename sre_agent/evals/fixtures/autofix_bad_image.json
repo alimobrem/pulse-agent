@@ -1,0 +1,16 @@
+{
+  "name": "autofix_bad_image",
+  "prompt": "The deployment api-server in production has pods in ImagePullBackOff. The image app:v999 doesn't exist. What's happening and can you fix it?",
+  "recorded_responses": {
+    "describe_pod": "{\"name\": \"api-server-6d4b8c9f7-x2k9p\", \"namespace\": \"production\", \"containers\": [{\"name\": \"api-server\", \"image\": \"app:v999\", \"ready\": false, \"state\": \"waiting\", \"reason\": \"ImagePullBackOff\"}], \"conditions\": [{\"type\": \"Ready\", \"status\": \"False\"}]}",
+    "get_events": "2m ago  Warning  Failed  Pod/api-server  Failed to pull image \"app:v999\": rpc error: code = NotFound desc = failed to pull and unpack image: manifest unknown\n5m ago  Warning  Failed  Pod/api-server  Error: ImagePullBackOff",
+    "list_pods": "production/api-server-6d4b8c9f7-x2k9p  Status=Pending  Restarts=0  Age=10m",
+    "describe_deployment": "{\"name\": \"api-server\", \"namespace\": \"production\", \"replicas\": 1, \"availableReplicas\": 0, \"image\": \"app:v999\", \"revision\": \"5\"}"
+  },
+  "expected": {
+    "should_mention": ["image", "v999", "does not exist"],
+    "should_use_tools": ["describe_pod", "get_events"],
+    "should_not_use_tools": ["delete_pod", "drain_node"],
+    "max_tool_calls": 8
+  }
+}

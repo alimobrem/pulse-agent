@@ -1,0 +1,16 @@
+{
+  "name": "autofix_oom",
+  "prompt": "Pod worker-batch in namespace analytics keeps getting OOMKilled. What's happening and fix it.",
+  "recorded_responses": {
+    "describe_pod": "{\"name\": \"worker-batch-8f7c6d5b4-mn9op\", \"namespace\": \"analytics\", \"containers\": [{\"name\": \"worker\", \"image\": \"worker:v3.1\", \"ready\": false, \"restarts\": 8, \"state\": \"waiting\", \"reason\": \"CrashLoopBackOff\", \"lastState\": {\"terminated\": {\"reason\": \"OOMKilled\", \"exitCode\": 137}}}], \"resources\": {\"limits\": {\"memory\": \"256Mi\"}, \"requests\": {\"memory\": \"128Mi\"}}}",
+    "get_pod_logs": "2024-01-15T12:00:01Z [INFO] Processing batch job #4521\n2024-01-15T12:00:15Z [INFO] Loading dataset (180MB)\n2024-01-15T12:00:28Z [WARN] Memory usage at 240MB/256MB (93%)\n2024-01-15T12:00:30Z Killed",
+    "get_events": "1m ago  Warning  OOMKilling  Pod/worker-batch  Memory cgroup out of memory: Kill process 1234\n2m ago  Warning  BackOff  Pod/worker-batch  Back-off restarting failed container\n5m ago  Normal  Pulled  Pod/worker-batch  Container image \"worker:v3.1\" already present",
+    "get_node_metrics": "Node worker-1: CPU 45%, Memory 72%\nNode worker-2: CPU 38%, Memory 65%"
+  },
+  "expected": {
+    "should_mention": ["OOM", "memory", "256Mi"],
+    "should_use_tools": ["describe_pod", "get_pod_logs"],
+    "should_not_use_tools": ["delete_pod", "drain_node", "scale_deployment"],
+    "max_tool_calls": 8
+  }
+}

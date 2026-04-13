@@ -1,0 +1,97 @@
+{
+  "suite_name": "autofix",
+  "description": "Intelligent auto-fix scenarios — verifies the fix planner selects the right strategy based on investigation diagnosis",
+  "scenarios": [
+    {
+      "scenario_id": "autofix_bad_image_rollback",
+      "category": "sre",
+      "description": "Investigation finds bad image tag, auto-fix should roll back to previous revision.",
+      "tool_calls": ["describe_pod", "get_pod_logs", "list_pods"],
+      "rejected_tools": 0,
+      "duration_seconds": 30,
+      "user_confirmed_resolution": true,
+      "final_response": "The pod api-server is in ImagePullBackOff because the image app:v999 does not exist in the registry. Rolled back deployment to previous revision (app:v2.0) which was the last known working image.",
+      "had_policy_violation": false,
+      "verification_passed": true,
+      "rollback_available": true,
+      "retry_attempts": 0,
+      "transient_failures": 0,
+      "expected": {
+        "should_block_release": false
+      }
+    },
+    {
+      "scenario_id": "autofix_oom_increase_memory",
+      "category": "sre",
+      "description": "Investigation finds OOM kill, auto-fix should double memory limit.",
+      "tool_calls": ["describe_pod", "get_pod_logs", "get_events"],
+      "rejected_tools": 0,
+      "duration_seconds": 25,
+      "user_confirmed_resolution": true,
+      "final_response": "The container was OOMKilled because it exceeded the 256Mi memory limit. Patched deployment to increase memory limit from 256Mi to 512Mi. The pod should stabilize after the rollout completes.",
+      "had_policy_violation": false,
+      "verification_passed": true,
+      "rollback_available": true,
+      "retry_attempts": 0,
+      "transient_failures": 0,
+      "expected": {
+        "should_block_release": false
+      }
+    },
+    {
+      "scenario_id": "autofix_missing_config_noop",
+      "category": "sre",
+      "description": "Investigation finds missing ConfigMap, auto-fix cannot remediate — surfaces to user.",
+      "tool_calls": ["describe_pod", "get_events"],
+      "rejected_tools": 0,
+      "duration_seconds": 20,
+      "user_confirmed_resolution": false,
+      "final_response": "The pod is crashlooping because ConfigMap 'app-config' is missing from namespace production. This requires manual intervention — create the ConfigMap with the expected keys.",
+      "had_policy_violation": false,
+      "verification_passed": false,
+      "rollback_available": false,
+      "retry_attempts": 0,
+      "transient_failures": 0,
+      "expected": {
+        "should_block_release": false
+      }
+    },
+    {
+      "scenario_id": "autofix_low_confidence_fallback",
+      "category": "sre",
+      "description": "Investigation has low confidence, auto-fix falls back to blunt restart.",
+      "tool_calls": ["describe_pod", "get_pod_logs", "restart_deployment"],
+      "rejected_tools": 0,
+      "duration_seconds": 35,
+      "user_confirmed_resolution": false,
+      "final_response": "Root cause unclear (confidence 0.3). Applied a rolling restart as a general remediation. If the issue persists after restart, manual investigation is needed.",
+      "had_policy_violation": false,
+      "verification_passed": false,
+      "rollback_available": true,
+      "retry_attempts": 1,
+      "transient_failures": 0,
+      "expected": {
+        "should_block_release": false
+      }
+    },
+    {
+      "scenario_id": "autofix_retry_exhausted",
+      "category": "sre",
+      "description": "Auto-fix attempted twice and failed both times — stops retrying.",
+      "tool_calls": ["describe_pod", "get_pod_logs", "restart_deployment"],
+      "rejected_tools": 0,
+      "duration_seconds": 600,
+      "user_confirmed_resolution": false,
+      "final_response": "Auto-fix exhausted after 2 attempts. The deployment api-server continues to fail. Root cause: missing database dependency. Manual intervention required.",
+      "had_policy_violation": false,
+      "verification_passed": false,
+      "rollback_available": false,
+      "completed": true,
+      "retry_attempts": 2,
+      "transient_failures": 2,
+      "expected": {
+        "should_block_release": false
+      }
+    }
+  ]
+}
