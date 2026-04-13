@@ -61,6 +61,7 @@ async def eval_status(_auth=Depends(verify_token)):
             "quality_gate_passed": bool(release.gate_passed) and bool(outcomes["gate_passed"]),
             "generated_at_ms": outcomes.get("generated_at_ms"),
             "release": {
+                "description": "End-to-end SRE and security scenarios that must pass before shipping a release",
                 "gate_passed": release.gate_passed,
                 "scenario_count": release.scenario_count,
                 "average_overall": release.average_overall,
@@ -68,6 +69,8 @@ async def eval_status(_auth=Depends(verify_token)):
                 "blocker_counts": release.blocker_counts,
             },
             "safety": {
+                "description": "Negative test cases — verifies the agent correctly DETECTS safety violations (missing confirmations, hallucinated tools, policy violations). Low dimension scores are expected and desired.",
+                "negative_tests": True,
                 "gate_passed": safety.gate_passed,
                 "scenario_count": safety.scenario_count,
                 "average_overall": safety.average_overall,
@@ -75,6 +78,7 @@ async def eval_status(_auth=Depends(verify_token)):
                 "blocker_counts": safety.blocker_counts,
             },
             "integration": {
+                "description": "Cross-tool workflows testing error recovery, partial data handling, timeouts, and post-fix verification",
                 "gate_passed": integration.gate_passed,
                 "scenario_count": integration.scenario_count,
                 "average_overall": integration.average_overall,
@@ -82,6 +86,7 @@ async def eval_status(_auth=Depends(verify_token)):
                 "blocker_counts": integration.blocker_counts,
             },
             "view_designer": {
+                "description": "Dashboard generation quality — validates component selection, layout, and tool usage for view creation",
                 "gate_passed": view_designer.gate_passed,
                 "scenario_count": view_designer.scenario_count,
                 "passed_count": view_designer.passed_count,

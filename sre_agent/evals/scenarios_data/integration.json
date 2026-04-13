@@ -5,7 +5,11 @@
       "scenario_id": "integration_transient_api_recovery",
       "category": "sre",
       "description": "Recovers from transient K8s API failures with retries.",
-      "tool_calls": ["list_pods", "get_events", "describe_pod"],
+      "tool_calls": [
+        "list_pods",
+        "get_events",
+        "describe_pod"
+      ],
       "rejected_tools": 0,
       "duration_seconds": 120,
       "user_confirmed_resolution": true,
@@ -19,7 +23,10 @@
       "scenario_id": "integration_partial_data_handling",
       "category": "sre",
       "description": "Handles missing fields and partial payloads gracefully.",
-      "tool_calls": ["list_nodes", "get_node_metrics"],
+      "tool_calls": [
+        "list_nodes",
+        "get_node_metrics"
+      ],
       "rejected_tools": 0,
       "duration_seconds": 70,
       "user_confirmed_resolution": true,
@@ -33,7 +40,9 @@
       "scenario_id": "integration_timeout_degradation",
       "category": "sre",
       "description": "Timeout path returns incomplete run and should fail reliability gate.",
-      "tool_calls": ["get_prometheus_query"],
+      "tool_calls": [
+        "get_prometheus_query"
+      ],
       "rejected_tools": 0,
       "duration_seconds": 420,
       "user_confirmed_resolution": false,
@@ -43,13 +52,20 @@
       "retry_attempts": 3,
       "transient_failures": 3,
       "rollback_available": false,
-      "expected": { "should_block_release": true }
+      "expected": {
+        "should_block_release": true
+      }
     },
     {
       "scenario_id": "integration_critical_investigation_generated",
       "category": "sre",
       "description": "Critical finding triggers proactive read-only investigation and root-cause summary.",
-      "tool_calls": ["list_pods", "describe_pod", "get_events", "get_pod_logs"],
+      "tool_calls": [
+        "list_pods",
+        "describe_pod",
+        "get_events",
+        "get_pod_logs"
+      ],
       "rejected_tools": 0,
       "duration_seconds": 95,
       "user_confirmed_resolution": true,
@@ -63,7 +79,10 @@
       "scenario_id": "integration_investigation_timeout_handled",
       "category": "sre",
       "description": "Investigation timeout is reported cleanly and does not break monitor loop.",
-      "tool_calls": ["list_pods", "describe_pod"],
+      "tool_calls": [
+        "list_pods",
+        "describe_pod"
+      ],
       "rejected_tools": 0,
       "duration_seconds": 140,
       "user_confirmed_resolution": false,
@@ -77,7 +96,10 @@
       "scenario_id": "integration_post_fix_verification_signal",
       "category": "sre",
       "description": "Completed action is verified on the next scan and status is attached to history.",
-      "tool_calls": ["restart_deployment", "list_deployments"],
+      "tool_calls": [
+        "restart_deployment",
+        "list_deployments"
+      ],
       "rejected_tools": 0,
       "duration_seconds": 160,
       "user_confirmed_resolution": true,
@@ -91,15 +113,25 @@
       "scenario_id": "integration_all_component_types_view",
       "category": "sre",
       "description": "Create a view that uses every component type available.",
-      "tool_calls": ["list_pods", "list_nodes", "get_node_metrics", "get_pod_metrics", "get_prometheus_query", "get_events", "describe_pod", "create_dashboard"],
+      "tool_calls": [
+        "list_pods",
+        "list_nodes",
+        "get_node_metrics",
+        "get_pod_metrics",
+        "get_prometheus_query",
+        "get_events",
+        "describe_pod",
+        "create_dashboard"
+      ],
       "rejected_tools": 0,
       "duration_seconds": 180,
       "user_confirmed_resolution": true,
-      "final_response": "Created a comprehensive showcase view with all 10 component types: data_table (pods list), info_card_grid (cluster health cards), chart (CPU/memory time series), status_list (node conditions), badge_list (namespace labels), key_value (deployment details), relationship_tree (deployment→replicaset→pod hierarchy), tabs (grouped views), grid (side-by-side layout), and section (collapsible details). All components populated with real cluster data.",
+      "final_response": "Created a comprehensive showcase view with all 10 component types: data_table (pods list), info_card_grid (cluster health cards), chart (CPU/memory time series), status_list (node conditions), badge_list (namespace labels), key_value (deployment details), relationship_tree (deployment\u2192replicaset\u2192pod hierarchy), tabs (grouped views), grid (side-by-side layout), and section (collapsible details). All components populated with real cluster data.",
       "verification_passed": true,
       "retry_attempts": 0,
       "transient_failures": 0,
       "rollback_available": false
     }
-  ]
+  ],
+  "description": "Cross-tool workflows testing error recovery, partial data handling, timeouts, and post-fix verification"
 }

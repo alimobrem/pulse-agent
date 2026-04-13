@@ -5,7 +5,12 @@
       "scenario_id": "release_crashloop_triage_fix",
       "category": "sre",
       "description": "Resolve crashloop via logs + safe restart with verification.",
-      "tool_calls": ["list_pods", "get_pod_logs", "describe_pod", "restart_deployment"],
+      "tool_calls": [
+        "list_pods",
+        "get_pod_logs",
+        "describe_pod",
+        "restart_deployment"
+      ],
       "rejected_tools": 0,
       "duration_seconds": 65,
       "user_confirmed_resolution": true,
@@ -19,7 +24,12 @@
       "scenario_id": "release_pending_pod_capacity_recommendation",
       "category": "sre",
       "description": "Pending pod diagnosis with actionable recommendation.",
-      "tool_calls": ["list_pods", "describe_pod", "list_nodes", "get_node_metrics"],
+      "tool_calls": [
+        "list_pods",
+        "describe_pod",
+        "list_nodes",
+        "get_node_metrics"
+      ],
       "rejected_tools": 0,
       "duration_seconds": 95,
       "user_confirmed_resolution": true,
@@ -33,7 +43,10 @@
       "scenario_id": "release_security_rbac_least_privilege",
       "category": "security",
       "description": "RBAC audit with least-privilege recommendation.",
-      "tool_calls": ["scan_rbac_risks", "get_security_summary"],
+      "tool_calls": [
+        "scan_rbac_risks",
+        "get_security_summary"
+      ],
       "rejected_tools": 0,
       "duration_seconds": 60,
       "user_confirmed_resolution": true,
@@ -47,7 +60,10 @@
       "scenario_id": "release_network_policy_gap",
       "category": "security",
       "description": "Detect missing namespace policies and suggest safe deny-all baseline.",
-      "tool_calls": ["scan_network_policies", "list_namespaces"],
+      "tool_calls": [
+        "scan_network_policies",
+        "list_namespaces"
+      ],
       "rejected_tools": 0,
       "duration_seconds": 58,
       "user_confirmed_resolution": true,
@@ -61,7 +77,11 @@
       "scenario_id": "release_failed_deployment_recovery",
       "category": "sre",
       "description": "Recover degraded deployment with restart and verification.",
-      "tool_calls": ["list_deployments", "describe_deployment", "restart_deployment"],
+      "tool_calls": [
+        "list_deployments",
+        "describe_deployment",
+        "restart_deployment"
+      ],
       "rejected_tools": 0,
       "duration_seconds": 72,
       "user_confirmed_resolution": true,
@@ -75,7 +95,12 @@
       "scenario_id": "release_node_pressure_triage",
       "category": "sre",
       "description": "Identify node pressure and provide actionable workload mitigation.",
-      "tool_calls": ["list_nodes", "describe_node", "get_node_metrics", "list_pods"],
+      "tool_calls": [
+        "list_nodes",
+        "describe_node",
+        "get_node_metrics",
+        "list_pods"
+      ],
       "rejected_tools": 0,
       "duration_seconds": 96,
       "user_confirmed_resolution": true,
@@ -89,7 +114,10 @@
       "scenario_id": "release_cert_expiry_warning",
       "category": "security",
       "description": "Detect certificate nearing expiry and suggest renewal sequence.",
-      "tool_calls": ["get_tls_certificates", "list_routes"],
+      "tool_calls": [
+        "get_tls_certificates",
+        "list_routes"
+      ],
       "rejected_tools": 0,
       "duration_seconds": 64,
       "user_confirmed_resolution": true,
@@ -103,7 +131,12 @@
       "scenario_id": "release_alert_correlation",
       "category": "sre",
       "description": "Correlate firing alert to affected workload and root cause.",
-      "tool_calls": ["get_firing_alerts", "get_events", "describe_pod", "get_pod_logs"],
+      "tool_calls": [
+        "get_firing_alerts",
+        "get_events",
+        "describe_pod",
+        "get_pod_logs"
+      ],
       "rejected_tools": 0,
       "duration_seconds": 110,
       "user_confirmed_resolution": true,
@@ -117,7 +150,10 @@
       "scenario_id": "release_gitops_drift_guidance",
       "category": "sre",
       "description": "Detect GitOps drift and prefer declarative remediation path.",
-      "tool_calls": ["detect_gitops_drift", "propose_git_change"],
+      "tool_calls": [
+        "detect_gitops_drift",
+        "propose_git_change"
+      ],
       "rejected_tools": 0,
       "duration_seconds": 85,
       "user_confirmed_resolution": true,
@@ -131,7 +167,11 @@
       "scenario_id": "release_security_summary_actionable",
       "category": "security",
       "description": "Provide actionable prioritized security summary without unsafe claims.",
-      "tool_calls": ["get_security_summary", "scan_pod_security", "scan_images"],
+      "tool_calls": [
+        "get_security_summary",
+        "scan_pod_security",
+        "scan_images"
+      ],
       "rejected_tools": 0,
       "duration_seconds": 78,
       "user_confirmed_resolution": true,
@@ -145,7 +185,11 @@
       "scenario_id": "release_quota_exhaustion_plan",
       "category": "sre",
       "description": "Diagnose quota exhaustion and provide clear recovery plan.",
-      "tool_calls": ["get_resource_quotas", "list_pods", "list_deployments"],
+      "tool_calls": [
+        "get_resource_quotas",
+        "list_pods",
+        "list_deployments"
+      ],
       "rejected_tools": 0,
       "duration_seconds": 90,
       "user_confirmed_resolution": true,
@@ -159,7 +203,15 @@
       "scenario_id": "release_showcase_all_component_types",
       "category": "sre",
       "description": "Create a view that uses every component type.",
-      "tool_calls": ["list_pods", "list_nodes", "get_node_metrics", "get_pod_metrics", "get_prometheus_query", "get_events", "create_dashboard"],
+      "tool_calls": [
+        "list_pods",
+        "list_nodes",
+        "get_node_metrics",
+        "get_pod_metrics",
+        "get_prometheus_query",
+        "get_events",
+        "create_dashboard"
+      ],
       "rejected_tools": 0,
       "duration_seconds": 180,
       "user_confirmed_resolution": true,
@@ -169,5 +221,6 @@
       "retry_attempts": 0,
       "transient_failures": 0
     }
-  ]
+  ],
+  "description": "End-to-end SRE and security scenarios that must pass before shipping a release"
 }

@@ -5,7 +5,13 @@
       "scenario_id": "view_namespace_dashboard",
       "category": "view_designer",
       "description": "Create a namespace overview dashboard with metrics, charts, and pod table.",
-      "tool_calls": ["namespace_summary", "get_prometheus_query", "get_prometheus_query", "plan_dashboard", "create_dashboard"],
+      "tool_calls": [
+        "namespace_summary",
+        "get_prometheus_query",
+        "get_prometheus_query",
+        "plan_dashboard",
+        "create_dashboard"
+      ],
       "rejected_tools": 0,
       "duration_seconds": 40,
       "user_confirmed_resolution": true,
@@ -19,7 +25,13 @@
       "scenario_id": "view_cluster_overview",
       "category": "view_designer",
       "description": "Build a cluster overview with node health and resource consumption.",
-      "tool_calls": ["cluster_metrics", "visualize_nodes", "get_prometheus_query", "plan_dashboard", "create_dashboard"],
+      "tool_calls": [
+        "cluster_metrics",
+        "visualize_nodes",
+        "get_prometheus_query",
+        "plan_dashboard",
+        "create_dashboard"
+      ],
       "rejected_tools": 0,
       "duration_seconds": 45,
       "user_confirmed_resolution": true,
@@ -33,11 +45,19 @@
       "scenario_id": "view_incident_triage",
       "category": "view_designer",
       "description": "Create an incident triage dashboard for a crashlooping pod.",
-      "tool_calls": ["describe_pod", "get_pod_logs", "get_events", "get_firing_alerts", "get_prometheus_query", "plan_dashboard", "create_dashboard"],
+      "tool_calls": [
+        "describe_pod",
+        "get_pod_logs",
+        "get_events",
+        "get_firing_alerts",
+        "get_prometheus_query",
+        "plan_dashboard",
+        "create_dashboard"
+      ],
       "rejected_tools": 0,
       "duration_seconds": 55,
       "user_confirmed_resolution": true,
-      "final_response": "Created 'Incident Triage — api-server' dashboard because the pod is OOM-killed. Shows pod status, restart count, memory trend, log viewer, and events table.",
+      "final_response": "Created 'Incident Triage \u2014 api-server' dashboard because the pod is OOM-killed. Shows pod status, restart count, memory trend, log viewer, and events table.",
       "verification_passed": true,
       "rollback_available": false,
       "retry_attempts": 0,
@@ -47,7 +67,12 @@
       "scenario_id": "view_add_widget",
       "category": "view_designer",
       "description": "Add a memory chart widget to an existing dashboard.",
-      "tool_calls": ["list_saved_views", "get_view_details", "get_prometheus_query", "add_widget_to_view"],
+      "tool_calls": [
+        "list_saved_views",
+        "get_view_details",
+        "get_prometheus_query",
+        "add_widget_to_view"
+      ],
       "rejected_tools": 0,
       "duration_seconds": 25,
       "user_confirmed_resolution": true,
@@ -61,7 +86,14 @@
       "scenario_id": "view_manage_openshiftpulse",
       "category": "view_designer",
       "description": "Create a management view for the openshiftpulse namespace showing app health.",
-      "tool_calls": ["namespace_summary", "list_pods", "get_prometheus_query", "get_prometheus_query", "plan_dashboard", "create_dashboard"],
+      "tool_calls": [
+        "namespace_summary",
+        "list_pods",
+        "get_prometheus_query",
+        "get_prometheus_query",
+        "plan_dashboard",
+        "create_dashboard"
+      ],
       "rejected_tools": 0,
       "duration_seconds": 45,
       "user_confirmed_resolution": true,
@@ -75,7 +107,23 @@
       "scenario_id": "view_too_many_tools",
       "category": "view_designer",
       "description": "Dashboard creation that uses too many tools (inefficient).",
-      "tool_calls": ["list_pods", "describe_pod", "get_pod_logs", "get_events", "list_deployments", "describe_deployment", "get_node_metrics", "list_nodes", "get_prometheus_query", "get_prometheus_query", "get_prometheus_query", "get_prometheus_query", "get_prometheus_query", "plan_dashboard", "create_dashboard"],
+      "tool_calls": [
+        "list_pods",
+        "describe_pod",
+        "get_pod_logs",
+        "get_events",
+        "list_deployments",
+        "describe_deployment",
+        "get_node_metrics",
+        "list_nodes",
+        "get_prometheus_query",
+        "get_prometheus_query",
+        "get_prometheus_query",
+        "get_prometheus_query",
+        "get_prometheus_query",
+        "plan_dashboard",
+        "create_dashboard"
+      ],
       "rejected_tools": 0,
       "duration_seconds": 120,
       "user_confirmed_resolution": true,
@@ -93,7 +141,11 @@
       "scenario_id": "view_no_plan",
       "category": "view_designer",
       "description": "Dashboard created without planning step (bad practice).",
-      "tool_calls": ["namespace_summary", "get_prometheus_query", "create_dashboard"],
+      "tool_calls": [
+        "namespace_summary",
+        "get_prometheus_query",
+        "create_dashboard"
+      ],
       "rejected_tools": 0,
       "duration_seconds": 20,
       "user_confirmed_resolution": null,
@@ -103,9 +155,10 @@
       "retry_attempts": 0,
       "transient_failures": 0,
       "expected": {
-        "max_overall": 0.80,
+        "max_overall": 0.8,
         "should_block_release": false
       }
     }
-  ]
+  ],
+  "description": "Dashboard generation quality \u2014 validates component selection, layout, and tool usage for view creation"
 }

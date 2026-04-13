@@ -5,7 +5,11 @@
       "scenario_id": "fleet_cross_cluster_comparison",
       "category": "sre",
       "description": "Compare deployment configurations across two clusters to find discrepancies.",
-      "tool_calls": ["fleet_list_clusters", "fleet_compare_resource", "fleet_list_deployments"],
+      "tool_calls": [
+        "fleet_list_clusters",
+        "fleet_compare_resource",
+        "fleet_list_deployments"
+      ],
       "rejected_tools": 0,
       "duration_seconds": 85,
       "user_confirmed_resolution": true,
@@ -19,7 +23,11 @@
       "scenario_id": "fleet_health_summary",
       "category": "sre",
       "description": "Aggregate health scores and alert counts across all fleet clusters.",
-      "tool_calls": ["fleet_list_clusters", "fleet_get_alerts", "fleet_list_pods"],
+      "tool_calls": [
+        "fleet_list_clusters",
+        "fleet_get_alerts",
+        "fleet_list_pods"
+      ],
       "rejected_tools": 0,
       "duration_seconds": 120,
       "user_confirmed_resolution": true,
@@ -33,7 +41,11 @@
       "scenario_id": "fleet_drift_detection",
       "category": "sre",
       "description": "Detect configuration drift between clusters for a critical workload.",
-      "tool_calls": ["fleet_list_clusters", "fleet_compare_resource", "detect_gitops_drift"],
+      "tool_calls": [
+        "fleet_list_clusters",
+        "fleet_compare_resource",
+        "detect_gitops_drift"
+      ],
       "rejected_tools": 0,
       "duration_seconds": 95,
       "user_confirmed_resolution": true,
@@ -47,7 +59,14 @@
       "scenario_id": "fleet_cordon_drain_sequence",
       "category": "sre",
       "description": "Safe node maintenance sequence: cordon, drain, verify workload redistribution.",
-      "tool_calls": ["list_nodes", "describe_node", "cordon_node", "drain_node", "list_pods", "get_pod_disruption_budgets"],
+      "tool_calls": [
+        "list_nodes",
+        "describe_node",
+        "cordon_node",
+        "drain_node",
+        "list_pods",
+        "get_pod_disruption_budgets"
+      ],
       "rejected_tools": 0,
       "duration_seconds": 180,
       "user_confirmed_resolution": true,
@@ -61,7 +80,11 @@
       "scenario_id": "fleet_certificate_audit",
       "category": "security",
       "description": "Audit TLS certificate expiry across fleet clusters.",
-      "tool_calls": ["fleet_list_clusters", "get_tls_certificates", "list_routes"],
+      "tool_calls": [
+        "fleet_list_clusters",
+        "get_tls_certificates",
+        "list_routes"
+      ],
       "rejected_tools": 0,
       "duration_seconds": 110,
       "user_confirmed_resolution": true,
@@ -71,5 +94,6 @@
       "retry_attempts": 0,
       "transient_failures": 0
     }
-  ]
+  ],
+  "description": "Multi-cluster operations \u2014 cross-cluster comparison, health summary, drift detection, cordon/drain, certificate audit"
 }

@@ -5,7 +5,10 @@
       "scenario_id": "error_tool_timeout",
       "category": "sre",
       "description": "Tool call takes too long; agent should report gracefully and suggest alternatives.",
-      "tool_calls": ["get_prometheus_query", "list_pods"],
+      "tool_calls": [
+        "get_prometheus_query",
+        "list_pods"
+      ],
       "rejected_tools": 0,
       "duration_seconds": 300,
       "user_confirmed_resolution": false,
@@ -23,7 +26,11 @@
       "scenario_id": "error_permission_denied",
       "category": "sre",
       "description": "delete_pod fails with 403 Forbidden; agent should suggest RBAC remediation.",
-      "tool_calls": ["list_pods", "describe_pod", "delete_pod"],
+      "tool_calls": [
+        "list_pods",
+        "describe_pod",
+        "delete_pod"
+      ],
       "rejected_tools": 1,
       "duration_seconds": 40,
       "user_confirmed_resolution": false,
@@ -40,7 +47,10 @@
       "scenario_id": "error_api_unavailable",
       "category": "sre",
       "description": "K8s API returns 503 Service Unavailable; agent should degrade gracefully.",
-      "tool_calls": ["list_nodes", "get_cluster_operators"],
+      "tool_calls": [
+        "list_nodes",
+        "get_cluster_operators"
+      ],
       "rejected_tools": 0,
       "duration_seconds": 90,
       "user_confirmed_resolution": false,
@@ -58,7 +68,10 @@
       "scenario_id": "error_invalid_resource",
       "category": "sre",
       "description": "Describe a non-existent pod; agent handles 404 cleanly.",
-      "tool_calls": ["describe_pod", "list_pods"],
+      "tool_calls": [
+        "describe_pod",
+        "list_pods"
+      ],
       "rejected_tools": 0,
       "duration_seconds": 25,
       "user_confirmed_resolution": null,
@@ -75,7 +88,12 @@
       "scenario_id": "error_quota_exceeded",
       "category": "sre",
       "description": "Deployment scale fails due to resource quota; agent suggests alternatives.",
-      "tool_calls": ["scale_deployment", "get_resource_quotas", "list_pods", "get_pod_metrics"],
+      "tool_calls": [
+        "scale_deployment",
+        "get_resource_quotas",
+        "list_pods",
+        "get_pod_metrics"
+      ],
       "rejected_tools": 0,
       "duration_seconds": 55,
       "user_confirmed_resolution": false,
@@ -88,5 +106,6 @@
         "should_block_release": false
       }
     }
-  ]
+  ],
+  "description": "Error handling \u2014 tool timeouts, permission denied, API unavailable, invalid resources, quota exceeded"
 }
