@@ -8,12 +8,13 @@ import logging
 import re
 import time
 import uuid
+from typing import cast
 
 from fastapi import HTTPException, WebSocket, WebSocketDisconnect
 
 from ..config import get_settings
 from ..monitor import MonitorSession, get_fix_history
-from ..orchestrator import build_orchestrated_config, classify_intent, fix_typos
+from ..orchestrator import AgentMode, build_orchestrated_config, classify_intent, fix_typos
 from .agent_ws import (
     MAX_MESSAGE_SIZE,
     MAX_MESSAGES_PER_MINUTE,
@@ -109,7 +110,7 @@ async def websocket_agent(websocket: WebSocket, mode: str):
         logger.debug("Failed to create chat session record", exc_info=True)
 
     # Use skill-based config (delegates to build_orchestrated_config which tries skills first)
-    config = build_orchestrated_config(mode)
+    config = build_orchestrated_config(cast("AgentMode", mode))
     system_prompt = config["system_prompt"]
     tool_defs = config["tool_defs"]
     tool_map = config["tool_map"]
@@ -405,7 +406,7 @@ async def websocket_auto_agent(websocket: WebSocket):
                 except Exception:
                     pass
 
-            config = build_orchestrated_config(intent)
+            config = build_orchestrated_config(cast("AgentMode", intent))
             last_mode = intent
             logger.info("Auto-agent classified intent=%s strong=%s for session=%s", intent, is_strong, session_id)
 
