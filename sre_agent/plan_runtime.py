@@ -141,7 +141,9 @@ class PlanRuntime:
                     result.phase_outputs[phase.id] = output
                     result.phases_completed += 1
                     if on_phase_complete:
-                        on_phase_complete(phase.id, output)
+                        r = on_phase_complete(phase.id, output)
+                        if asyncio.iscoroutine(r):
+                            await r
                 else:
                     approved_ready.append(phase)
             ready = approved_ready
@@ -152,7 +154,9 @@ class PlanRuntime:
             # Execute ready phases — parallel if multiple, sequential if one
             async def _run_one(p: SkillPhase) -> tuple[str, SkillOutput]:
                 if on_phase_start:
-                    on_phase_start(p.id, p.skill_name)
+                    result_cb = on_phase_start(p.id, p.skill_name)
+                    if asyncio.iscoroutine(result_cb):
+                        await result_cb
                 try:
                     out = await asyncio.wait_for(
                         self._execute_phase(p, incident, completed_outputs),
@@ -189,7 +193,9 @@ class PlanRuntime:
                 result.phase_outputs[phase_id] = output
                 result.phases_completed += 1
                 if on_phase_complete:
-                    on_phase_complete(phase_id, output)
+                    r = on_phase_complete(phase_id, output)
+                    if asyncio.iscoroutine(r):
+                        await r
                 logger.info(
                     "Phase '%s' complete: status=%s confidence=%.2f", phase_id, output.status, output.confidence
                 )

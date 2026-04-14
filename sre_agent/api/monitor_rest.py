@@ -630,6 +630,144 @@ async def unregister_slo(service: str, slo_type: str, _auth=Depends(verify_token
     return {"status": "removed", "service": service, "type": slo_type}
 
 
+@router.get("/analytics/fix-strategies")
+async def fix_strategy_effectiveness(
+    days: int = Query(30, ge=1, le=90),
+    _auth=Depends(verify_token),
+):
+    """Which fix strategies work for which root causes."""
+    try:
+        from .. import db
+
+        database = db.get_database()
+        rows = database.fetchall(
+            "SELECT category, tool, status, verification_status "
+            "FROM actions "
+            "WHERE timestamp >= EXTRACT(EPOCH FROM NOW() - INTERVAL '1 day' * ?)::BIGINT * 1000",
+            (days,),
+        )
+
+        strategies: dict[str, dict] = {}
+        for r in rows:
+            key = f"{r.get('category', 'unknown')}:{r.get('tool', 'unknown')}"
+            if key not in strategies:
+                strategies[key] = {
+                    "category": r.get("category", "unknown"),
+                    "tool": r.get("tool", "unknown"),
+                    "total": 0,
+                    "success": 0,
+                    "verified": 0,
+                    "failed": 0,
+                }
+            strategies[key]["total"] += 1
+            if r["status"] == "completed":
+                strategies[key]["success"] += 1
+            elif r["status"] == "failed":
+                strategies[key]["failed"] += 1
+            if r.get("verification_status") == "verified":
+                strategies[key]["verified"] += 1
+
+        result = sorted(strategies.values(), key=lambda x: -x["total"])
+        for s in result:
+            s["success_rate"] = round(s["success"] / s["total"], 2) if s["total"] > 0 else 0
+            s["verification_rate"] = round(s["verified"] / s["total"], 2) if s["total"] > 0 else 0
+
+        return {"strategies": result, "days": days}
+    except Exception as e:
+        logger.debug("Fix strategy analytics failed: %s", e)
+        return {"strategies": [], "days": days}
+
+
+@router.get("/analytics/learning")
+async def agent_learning_feed(
+    days: int = Query(7, ge=1, le=30),
+    _auth=Depends(verify_token),
+):
+    """What the agent learned recently — weight updates, scaffolded skills, noise suppression."""
+    events: list[dict] = []
+
+    try:
+        from .. import db
+
+        database = db.get_database()
+
+        # Weight snapshots
+        weight_rows = database.fetchall(
+            "SELECT channel_weights, timestamp FROM skill_selection_log "
+            "WHERE session_id = '__weight_snapshot__' "
+            "ORDER BY timestamp DESC LIMIT 5"
+        )
+        for r in weight_rows:
+            events.append(
+                {
+                    "type": "weight_update",
+                    "description": "Channel weights recomputed from selection outcomes",
+                    "data": r.get("channel_weights"),
+                    "timestamp": r.get("timestamp"),
+                }
+            )
+
+        # Selection stats
+        sel_row = database.fetchone(
+            "SELECT COUNT(*) as total, "
+            "COUNT(DISTINCT selected_skill) as skills_used, "
+            "SUM(CASE WHEN skill_overridden IS NOT NULL THEN 1 ELSE 0 END) as overrides "
+            "FROM skill_selection_log "
+            "WHERE timestamp > NOW() - INTERVAL '%s days'",
+            (days,),
+        )
+        if sel_row and sel_row["total"] > 0:
+            events.append(
+                {
+                    "type": "selection_summary",
+                    "description": f"{sel_row['total']} queries routed, {sel_row['skills_used']} skills used, {sel_row['overrides']} overrides",
+                    "data": dict(sel_row),
+                }
+            )
+
+        # Postmortem count
+        pm_row = database.fetchone(
+            "SELECT COUNT(*) as cnt FROM postmortems "
+            "WHERE generated_at > EXTRACT(EPOCH FROM NOW() - INTERVAL '%s days')::BIGINT * 1000",
+            (days,),
+        )
+        if pm_row and pm_row["cnt"] > 0:
+            events.append(
+                {
+                    "type": "postmortems_generated",
+                    "description": f"{pm_row['cnt']} postmortems auto-generated",
+                    "data": {"count": pm_row["cnt"]},
+                }
+            )
+
+    except Exception as e:
+        logger.debug("Learning feed failed: %s", e)
+
+    # Check for scaffolded skills (look for auto-generated files)
+    try:
+        from pathlib import Path
+
+        skills_dir = Path(__file__).parent.parent / "skills"
+        for skill_dir in skills_dir.iterdir():
+            if not skill_dir.is_dir():
+                continue
+            skill_md = skill_dir / "skill.md"
+            if skill_md.exists():
+                content = skill_md.read_text(encoding="utf-8")
+                if "generated_by: auto" in content:
+                    events.append(
+                        {
+                            "type": "skill_scaffolded",
+                            "description": f"Auto-generated skill: {skill_dir.name}",
+                            "data": {"name": skill_dir.name},
+                        }
+                    )
+    except Exception:
+        pass
+
+    return {"events": events, "days": days}
+
+
 @router.get("/plan-templates")
 async def list_plan_templates(_auth=Depends(verify_token)):
     """List all investigation plan templates."""

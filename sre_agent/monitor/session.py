@@ -328,11 +328,48 @@ class MonitorSession:
                 return False
 
             runtime = PlanRuntime()
+            finding_id = finding.get("id", "")
+            all_phases = [{"id": p.id, "status": "pending", "skill_name": p.skill_name} for p in template.phases]
+
+            async def _on_start(pid, sn):
+                logger.info("Plan phase '%s' starting (skill=%s)", pid, sn)
+                for p in all_phases:
+                    if p["id"] == pid:
+                        p["status"] = "running"
+                await self._ws.send_json(
+                    {
+                        "type": "investigation_progress",
+                        "findingId": finding_id,
+                        "phases": all_phases,
+                        "planId": template.id,
+                        "planName": template.name,
+                        "timestamp": int(time.time() * 1000),
+                    }
+                )
+
+            async def _on_complete(pid, out):
+                logger.info("Plan phase '%s' done (status=%s)", pid, out.status)
+                for p in all_phases:
+                    if p["id"] == pid:
+                        p["status"] = out.status
+                        p["summary"] = out.evidence_summary[:100] if out.evidence_summary else ""
+                        p["confidence"] = out.confidence
+                await self._ws.send_json(
+                    {
+                        "type": "investigation_progress",
+                        "findingId": finding_id,
+                        "phases": all_phases,
+                        "planId": template.id,
+                        "planName": template.name,
+                        "timestamp": int(time.time() * 1000),
+                    }
+                )
+
             result = await runtime.execute(
                 template,
                 incident=finding,
-                on_phase_start=lambda pid, sn: logger.info("Plan phase '%s' starting (skill=%s)", pid, sn),
-                on_phase_complete=lambda pid, out: logger.info("Plan phase '%s' done (status=%s)", pid, out.status),
+                on_phase_start=_on_start,
+                on_phase_complete=_on_complete,
             )
 
             # Generate postmortem
