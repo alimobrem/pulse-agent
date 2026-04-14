@@ -105,10 +105,59 @@ class SLORegistry:
             results.append(self.check_burn_rate(slo, value))
         return results
 
+    def query_prometheus_values(self) -> dict[str, float]:
+        """Query Prometheus for current SLO metric values.
+
+        Returns map of "service:type" -> current_value.
+        """
+        if not self._slos:
+            return {}
+
+        values: dict[str, float] = {}
+        try:
+            from .k8s_tools.monitoring import get_prometheus_query
+
+            for key, slo in self._slos.items():
+                query = self._build_prom_query(slo)
+                if not query:
+                    continue
+                result = get_prometheus_query(query=query)
+                if isinstance(result, str) and "error" not in result.lower():
+                    # Parse the value from the result
+                    try:
+                        import json
+
+                        data = json.loads(result) if result.startswith("{") else {}
+                        val = data.get("value", slo.target)
+                        values[key] = float(val)
+                    except (ValueError, TypeError):
+                        pass
+        except Exception:
+            logger.debug("Prometheus SLO query failed", exc_info=True)
+
+        return values
+
+    def _build_prom_query(self, slo: SLODefinition) -> str:
+        """Build a PromQL query for an SLO metric."""
+        svc = slo.service_name
+        window = f"{slo.window_days}d"
+        if slo.slo_type == "availability":
+            return f'1 - (sum(rate(http_requests_total{{service="{svc}",code=~"5.."}}[{window}])) / sum(rate(http_requests_total{{service="{svc}"}}[{window}])))'
+        if slo.slo_type == "latency":
+            return f'histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket{{service="{svc}"}}[{window}])) by (le))'
+        if slo.slo_type == "error_rate":
+            return f'sum(rate(http_requests_total{{service="{svc}",code=~"5.."}}[{window}])) / sum(rate(http_requests_total{{service="{svc}"}}[{window}]))'
+        return ""
+
+    def evaluate_with_prometheus(self) -> list[SLOStatus]:
+        """Evaluate all SLOs using live Prometheus data."""
+        values = self.query_prometheus_values()
+        return self.evaluate_all(values)
+
     def get_context_for_selector(self) -> str:
         """Generate context text for the skill selector about SLO status."""
         try:
-            statuses = self.evaluate_all({})  # No live data in this context
+            statuses = self.evaluate_with_prometheus()
             alerts = [s for s in statuses if s.alert_level != "ok"]
             if not alerts:
                 return ""

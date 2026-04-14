@@ -69,102 +69,139 @@ class PlanRuntime:
         phases = topological_order(plan)
         completed_outputs: dict[str, SkillOutput] = {}
 
-        for phase in phases:
-            # Check dependencies
-            deps_satisfied = all(
-                dep in completed_outputs and completed_outputs[dep].status in ("complete", "partial")
-                for dep in phase.depends_on
-            )
+        # Group phases that can run in parallel (same depends_on set)
+        remaining = list(phases)
+        plan_failed = False
 
-            if not deps_satisfied:
-                if phase.required:
+        while remaining and not plan_failed:
+            # Find phases whose dependencies are all satisfied
+            ready = []
+            not_ready = []
+            for phase in remaining:
+                if phase.runs == "always":
+                    not_ready.append(phase)
+                    continue
+                deps_ok = all(
+                    dep in completed_outputs and completed_outputs[dep].status in ("complete", "partial")
+                    for dep in phase.depends_on
+                )
+                if deps_ok:
+                    ready.append(phase)
+                else:
+                    not_ready.append(phase)
+
+            if not ready:
+                # No phases can run — check if required phases are blocked
+                blocked_required = [p for p in not_ready if p.required and p.runs != "always"]
+                if blocked_required:
                     result.status = "failed"
                     logger.warning(
-                        "Plan %s failed: phase '%s' dependencies not met",
+                        "Plan %s failed: phases %s blocked by failed dependencies",
                         plan.id,
-                        phase.id,
+                        [p.id for p in blocked_required],
                     )
-                    break
+                break
+
+            # Apply branch conditions
+            for phase in ready:
+                if phase.branch_on:
+                    branch_value = None
+                    for dep_id in phase.depends_on:
+                        dep_output = completed_outputs.get(dep_id)
+                        if dep_output and dep_output.findings.get(phase.branch_on):
+                            branch_value = dep_output.findings[phase.branch_on]
+                            break
+                        if dep_output and dep_output.branch_signal:
+                            branch_value = dep_output.branch_signal
+                            break
+                    if branch_value and phase.branches:
+                        matched_skills = phase.branches.get(str(branch_value), [])
+                        if matched_skills:
+                            phase.skill_name = matched_skills[0]
+                            logger.info(
+                                "Branch: phase '%s' -> skill '%s' (branch_value=%s)",
+                                phase.id,
+                                phase.skill_name,
+                                branch_value,
+                            )
+
+            # Check approval gates — skip phases requiring approval (log and mark as needs_escalation)
+            approved_ready = []
+            for phase in ready:
+                if phase.approval_required:
+                    logger.info("Phase '%s' requires approval — marking as needs_escalation", phase.id)
+                    output = SkillOutput(
+                        skill_id=phase.skill_name,
+                        phase_id=phase.id,
+                        status="needs_escalation",
+                        evidence_summary=f"Phase '{phase.id}' requires human approval before execution",
+                        confidence=0.0,
+                    )
+                    completed_outputs[phase.id] = output
+                    result.phase_outputs[phase.id] = output
+                    result.phases_completed += 1
+                    if on_phase_complete:
+                        on_phase_complete(phase.id, output)
+                else:
+                    approved_ready.append(phase)
+            ready = approved_ready
+            if not ready:
+                remaining = not_ready
                 continue
 
-            # Check branch conditions
-            if phase.branch_on:
-                branch_value = None
-                for dep_id in phase.depends_on:
-                    dep_output = completed_outputs.get(dep_id)
-                    if dep_output and dep_output.findings.get(phase.branch_on):
-                        branch_value = dep_output.findings[phase.branch_on]
-                        break
-                    if dep_output and dep_output.branch_signal:
-                        branch_value = dep_output.branch_signal
-                        break
+            # Execute ready phases — parallel if multiple, sequential if one
+            async def _run_one(p: SkillPhase) -> tuple[str, SkillOutput]:
+                if on_phase_start:
+                    on_phase_start(p.id, p.skill_name)
+                try:
+                    out = await asyncio.wait_for(
+                        self._execute_phase(p, incident, completed_outputs),
+                        timeout=p.timeout_seconds,
+                    )
+                except TimeoutError:
+                    out = SkillOutput(
+                        skill_id=p.skill_name,
+                        phase_id=p.id,
+                        status="failed",
+                        evidence_summary=f"Phase '{p.id}' timed out after {p.timeout_seconds}s",
+                        confidence=0.0,
+                    )
+                    logger.warning("Phase '%s' timed out after %ds", p.id, p.timeout_seconds)
+                except Exception as e:
+                    out = SkillOutput(
+                        skill_id=p.skill_name,
+                        phase_id=p.id,
+                        status="failed",
+                        evidence_summary=f"Phase '{p.id}' failed: {type(e).__name__}: {str(e)[:200]}",
+                        confidence=0.0,
+                    )
+                    logger.error("Phase '%s' failed: %s", p.id, e, exc_info=True)
+                return p.id, out
 
-                if branch_value and phase.branches:
-                    matched_skills = phase.branches.get(str(branch_value), [])
-                    if matched_skills:
-                        phase.skill_name = matched_skills[0]
-                        logger.info(
-                            "Branch: phase '%s' -> skill '%s' (branch_value=%s)",
-                            phase.id,
-                            phase.skill_name,
-                            branch_value,
-                        )
+            if len(ready) > 1:
+                logger.info("Running %d phases in parallel: %s", len(ready), [p.id for p in ready])
+                outputs = await asyncio.gather(*[_run_one(p) for p in ready])
+            else:
+                outputs = [await _run_one(ready[0])]
 
-            # Execute phase
-            if on_phase_start:
-                on_phase_start(phase.id, phase.skill_name)
-
-            try:
-                output = await asyncio.wait_for(
-                    self._execute_phase(phase, incident, completed_outputs),
-                    timeout=phase.timeout_seconds,
+            for phase_id, output in outputs:
+                completed_outputs[phase_id] = output
+                result.phase_outputs[phase_id] = output
+                result.phases_completed += 1
+                if on_phase_complete:
+                    on_phase_complete(phase_id, output)
+                logger.info(
+                    "Phase '%s' complete: status=%s confidence=%.2f", phase_id, output.status, output.confidence
                 )
-            except TimeoutError:
-                output = SkillOutput(
-                    skill_id=phase.skill_name,
-                    phase_id=phase.id,
-                    status="failed",
-                    evidence_summary=f"Phase '{phase.id}' timed out after {phase.timeout_seconds}s",
-                    confidence=0.0,
-                )
-                logger.warning(
-                    "Phase '%s' timed out after %ds",
-                    phase.id,
-                    phase.timeout_seconds,
-                )
-            except Exception as e:
-                output = SkillOutput(
-                    skill_id=phase.skill_name,
-                    phase_id=phase.id,
-                    status="failed",
-                    evidence_summary=f"Phase '{phase.id}' failed: {type(e).__name__}: {str(e)[:200]}",
-                    confidence=0.0,
-                )
-                logger.error("Phase '%s' failed: %s", phase.id, e, exc_info=True)
 
-            completed_outputs[phase.id] = output
-            result.phase_outputs[phase.id] = output
-            result.phases_completed += 1
+                # Stop on required phase failure
+                phase_obj = next((p for p in ready if p.id == phase_id), None)
+                if output.status == "failed" and phase_obj and phase_obj.required:
+                    result.status = "partial"
+                    logger.warning("Plan %s partial: required phase '%s' failed", plan.id, phase_id)
+                    plan_failed = True
 
-            if on_phase_complete:
-                on_phase_complete(phase.id, output)
-
-            logger.info(
-                "Phase '%s' complete: status=%s confidence=%.2f",
-                phase.id,
-                output.status,
-                output.confidence,
-            )
-
-            # Stop on required phase failure (unless runs=always)
-            if output.status == "failed" and phase.required and phase.runs != "always":
-                result.status = "partial"
-                logger.warning(
-                    "Plan %s partial: required phase '%s' failed",
-                    plan.id,
-                    phase.id,
-                )
-                break
+            remaining = not_ready
 
         # Run "always" phases even after failure
         for phase in phases:

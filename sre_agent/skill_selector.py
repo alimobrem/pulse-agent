@@ -37,12 +37,12 @@ class SelectionResult:
 
 # Default channel weights (sum to 1.0)
 DEFAULT_WEIGHTS: dict[str, float] = {
-    "keyword": 0.35,
-    "component": 0.25,
+    "keyword": 0.30,
+    "component": 0.20,
     "historical": 0.20,
-    "taxonomy": 0.15,  # added in Task 4
-    "temporal": 0.05,  # added in Task 4
-    "semantic": 0.0,  # activate via PULSE_AGENT_EMBEDDING_CHANNEL=1
+    "taxonomy": 0.10,
+    "temporal": 0.05,
+    "semantic": 0.15,  # TF-IDF cosine; activate via PULSE_AGENT_EMBEDDING_CHANNEL=1
 }
 
 # K8s resource types for component tag extraction
@@ -439,21 +439,56 @@ class SkillSelector:
         return scores
 
     def _score_semantic_embedding(self, query: str) -> dict[str, float]:
-        """Channel 6 (optional): Semantic similarity via embeddings.
+        """Channel 6 (optional): Semantic similarity via TF-IDF cosine.
 
         Requires PULSE_AGENT_EMBEDDING_CHANNEL=1 to activate.
-        Uses cached skill description embeddings for cosine similarity.
+        Compares query tokens against cached skill description + keyword tokens.
+        Lightweight — no external model needed.
         """
         if not os.environ.get("PULSE_AGENT_EMBEDDING_CHANNEL"):
             return {}
 
-        # Stub: embedding infrastructure not yet deployed.
-        # When enabled, this will:
-        # 1. Embed query using sentence-transformers or Claude API
-        # 2. Compare against pre-cached skill description embeddings
-        # 3. Return cosine similarity scores per skill
-        logger.debug("Semantic embedding channel: stub (not yet implemented)")
-        return {}
+        import math
+
+        # Build skill token sets (cached on first call)
+        if not hasattr(self, "_skill_token_cache"):
+            self._skill_token_cache: dict[str, set[str]] = {}
+            for skill_name, skill in self._skills.items():
+                tokens = set()
+                # Description tokens
+                for word in skill.description.lower().split():
+                    if len(word) >= 3:
+                        tokens.add(word)
+                # Keyword tokens
+                for kw in skill.keywords:
+                    tokens.add(kw.lower())
+                # Category tokens
+                for cat in skill.categories:
+                    tokens.add(cat.lower())
+                self._skill_token_cache[skill_name] = tokens
+
+        # Tokenize query
+        query_tokens = {w for w in query.lower().split() if len(w) >= 3}
+        if not query_tokens:
+            return {}
+
+        # Cosine-like similarity: |intersection| / sqrt(|A| * |B|)
+        scores: dict[str, float] = {}
+        for skill_name, skill_tokens in self._skill_token_cache.items():
+            if not skill_tokens:
+                continue
+            overlap = len(query_tokens & skill_tokens)
+            if overlap > 0:
+                denom = math.sqrt(len(query_tokens) * len(skill_tokens))
+                scores[skill_name] = overlap / denom if denom > 0 else 0.0
+
+        # Normalize to 0-1
+        if scores:
+            max_score = max(scores.values())
+            if max_score > 0:
+                scores = {k: v / max_score for k, v in scores.items()}
+
+        return scores
 
     def _fuse_scores(self, channel_scores: dict[str, dict[str, float]]) -> dict[str, float]:
         """Weighted sum fusion across all channels."""
