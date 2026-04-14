@@ -91,6 +91,82 @@ This diagnosis was made with {confidence:.0%} confidence.
     return content
 
 
+def scaffold_plan_template(
+    *,
+    skill_name: str,
+    plan_phases: list[str],
+    incident_type: str,
+    confidence: float,
+) -> str | None:
+    """Save an auto-scaffolded plan template YAML and hot-reload the registry.
+
+    Returns the path if saved, None on failure.
+    """
+    import re
+
+    # Validate skill_name
+    if not re.match(r"^[a-z0-9][a-z0-9_-]{0,63}$", skill_name):
+        logger.warning("Invalid skill_name for plan template: %s", skill_name[:50])
+        return None
+
+    try:
+        from pathlib import Path
+
+        import yaml
+
+        templates_dir = Path(__file__).parent / "plan_templates"
+        if not templates_dir.exists():
+            logger.warning("Plan templates directory not found")
+            return None
+
+        # Verify resolved path stays within templates directory
+        template_path = (templates_dir / f"{skill_name}.yaml").resolve()
+        if not str(template_path).startswith(str(templates_dir.resolve())):
+            logger.warning("Path traversal blocked for plan template: %s", skill_name)
+            return None
+
+        # Build phases from the provided phase IDs
+        phases = []
+        prev_id = None
+        for phase_id in plan_phases:
+            phase = {
+                "id": phase_id,
+                "skill_name": "sre",
+                "required": phase_id != "postmortem",
+                "timeout_seconds": 120,
+                "runs": "always" if phase_id == "postmortem" else "on_success",
+            }
+            if prev_id:
+                phase["depends_on"] = [prev_id]
+            phases.append(phase)
+            prev_id = phase_id
+
+        template = {
+            "id": f"auto-{skill_name}",
+            "name": skill_name.replace("-", " ").title(),
+            "incident_type": incident_type,
+            "max_total_duration": 1800,
+            "generated_by": "auto",
+            "confidence": round(confidence, 2),
+            "phases": phases,
+        }
+
+        with open(template_path, "w", encoding="utf-8") as f:
+            yaml.safe_dump(template, f, default_flow_style=False, sort_keys=False)
+
+        # Hot-reload template registry
+        from .plan_templates import load_templates
+
+        load_templates()
+
+        logger.info("Scaffolded plan template: %s (%d phases)", template_path, len(phases))
+        return str(template_path)
+
+    except Exception:
+        logger.debug("Failed to save scaffolded plan template", exc_info=True)
+        return None
+
+
 def save_scaffolded_skill(skill_content: str, skill_name: str) -> str | None:
     """Save an auto-scaffolded skill to the skills directory.
 

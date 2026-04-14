@@ -353,19 +353,36 @@ class MonitorSession:
                 except Exception:
                     logger.debug("Postmortem generation failed", exc_info=True)
 
-            # Scaffold skill from resolution
+            # Scaffold skill + plan template from resolution
             try:
-                from ..skill_scaffolder import scaffold_skill_from_resolution
+                from ..skill_scaffolder import (
+                    save_scaffolded_skill,
+                    scaffold_plan_template,
+                    scaffold_skill_from_resolution,
+                )
 
                 tools = [t for out in result.phase_outputs.values() for t in out.actions_taken]
+                conf = max((o.confidence for o in result.phase_outputs.values()), default=0)
                 if tools:
                     diagnose_out = result.phase_outputs.get("diagnose")
-                    scaffold_skill_from_resolution(
+                    skill_content = scaffold_skill_from_resolution(
                         query=finding.get("title", ""),
                         tools_called=tools,
                         investigation_summary=diagnose_out.evidence_summary if diagnose_out else "",
                         root_cause=diagnose_out.findings.get("root_cause", "unknown") if diagnose_out else "unknown",
-                        confidence=max((o.confidence for o in result.phase_outputs.values()), default=0),
+                        confidence=conf,
+                    )
+                    tokens = finding.get("title", "unknown").lower().split()[:3]
+                    skill_name = "-".join(t for t in tokens if t.isalnum())[:40] or "auto-skill"
+                    save_scaffolded_skill(skill_content, skill_name)
+
+                    # Save plan template from executed phases + hot-reload
+                    phase_ids = [p.id for p in template.phases]
+                    scaffold_plan_template(
+                        skill_name=skill_name,
+                        plan_phases=phase_ids,
+                        incident_type=finding.get("category", "unknown"),
+                        confidence=conf,
                     )
             except Exception:
                 logger.debug("Skill scaffolding failed", exc_info=True)
