@@ -181,3 +181,66 @@ class TestSkillSelectorSelect:
         with patch("sre_agent.db.get_database", side_effect=Exception("DB down")):
             scores = selector._score_historical("check pods")
             assert scores == {}
+
+
+class TestAlertTaxonomy:
+    def test_kube_alert_matches_sre(self):
+        skills = {"sre": _mock_skill("sre", ["diagnostics"]), "security": _mock_skill("security", ["security"])}
+        selector = SkillSelector(skills)
+        scores = selector._score_alert_taxonomy("KubePodCrashLooping in production")
+        assert "sre" in scores
+
+    def test_rbac_matches_security(self):
+        skills = {"sre": _mock_skill("sre", ["diagnostics"]), "security": _mock_skill("security", ["security"])}
+        selector = SkillSelector(skills)
+        scores = selector._score_alert_taxonomy("RBAC audit found issues")
+        assert "security" in scores
+
+    def test_no_alert_returns_empty(self):
+        skills = {"sre": _mock_skill("sre", ["diagnostics"])}
+        selector = SkillSelector(skills)
+        assert selector._score_alert_taxonomy("hello world") == {}
+
+
+class TestTemporalChannel:
+    def test_deploy_keyword_boosts(self):
+        skills = {"sre": _mock_skill("sre", ["diagnostics", "operations"])}
+        selector = SkillSelector(skills)
+        scores = selector._score_temporal("pods crashing after deploy")
+        assert "sre" in scores and scores["sre"] > 0
+
+    def test_no_temporal(self):
+        skills = {"sre": _mock_skill("sre", ["diagnostics"])}
+        selector = SkillSelector(skills)
+        assert selector._score_temporal("check pods") == {}
+
+
+class TestConflictDetection:
+    def test_hard_conflict(self):
+        selector = SkillSelector({"sre": _mock_skill("sre")})
+        conflicts = selector.detect_conflicts(["restart_deployment", "rollback_deployment"])
+        assert len(conflicts) == 1 and conflicts[0]["type"] == "hard"
+
+    def test_soft_conflict(self):
+        selector = SkillSelector({"sre": _mock_skill("sre")})
+        conflicts = selector.detect_conflicts(["cordon_node", "uncordon_node"])
+        assert len(conflicts) == 1 and conflicts[0]["type"] == "soft"
+
+    def test_no_conflict(self):
+        selector = SkillSelector({"sre": _mock_skill("sre")})
+        assert selector.detect_conflicts(["list_pods", "get_events"]) == []
+
+
+class TestEnhancedThresholds:
+    def test_low_signal_lowers(self):
+        selector = SkillSelector({"sre": _mock_skill("sre")})
+        assert selector._compute_threshold({"max_fused_score": 0.2}) < 0.45
+
+    def test_recent_similar_raises(self):
+        selector = SkillSelector({"sre": _mock_skill("sre")})
+        assert selector._compute_threshold({"recent_similar": True}) > 0.45
+
+    def test_p1_plus_low_signal(self):
+        selector = SkillSelector({"sre": _mock_skill("sre")})
+        t = selector._compute_threshold({"incident_priority": "P1", "max_fused_score": 0.2})
+        assert t == 0.25  # 0.35 - 0.10, clamped at 0.25

@@ -1,13 +1,14 @@
 """Multi-signal skill selector — ORCA architecture.
 
-Replaces keyword-only routing with 5-channel fusion (3 active in this task,
-2 added later). Each channel scores every skill independently, then scores
-are fused with weighted sum and re-ranked.
+Replaces keyword-only routing with 5-channel fusion. Each channel scores
+every skill independently, then scores are fused with weighted sum and re-ranked.
 
 Channels:
 1. Keyword scoring (ported from classify_query)
+2. Alert taxonomy (alert name prefixes + scanner categories)
 3. Component tags (K8s resource type matching)
 4. Historical co-occurrence (from skill_usage table)
+5. Temporal context (recent changes, deployments, updates)
 """
 
 from __future__ import annotations
@@ -107,6 +108,67 @@ _historical_cache: dict[str, dict[str, float]] | None = None
 _historical_cache_ts: float = 0
 _HISTORICAL_CACHE_TTL = 300  # 5 minutes
 
+# Alert name prefix → skill mapping
+_ALERT_TAXONOMY: dict[str, str] = {
+    "kube": "sre",
+    "pod": "sre",
+    "node": "sre",
+    "etcd": "sre",
+    "podsecurity": "security",
+    "rbac": "security",
+    "network": "security",
+    "certificate": "security",
+    "cert": "security",
+    "image": "sre",
+    "api": "sre",
+    "hpa": "sre",
+    "pvc": "sre",
+    "daemonset": "sre",
+}
+
+# Scanner category → skill
+_CATEGORY_SKILL: dict[str, str] = {
+    "crashloop": "sre",
+    "pending": "sre",
+    "workloads": "sre",
+    "nodes": "sre",
+    "alerts": "sre",
+    "oom": "sre",
+    "image_pull": "sre",
+    "operators": "sre",
+    "daemonsets": "sre",
+    "hpa": "sre",
+    "cert_expiry": "security",
+    "security": "security",
+}
+
+# Temporal keywords for detecting recent changes
+_TEMPORAL_KEYWORDS = [
+    "just deployed",
+    "after deploy",
+    "after upgrade",
+    "since restart",
+    "recent change",
+    "just changed",
+    "after update",
+    "since update",
+    "minutes ago",
+    "just now",
+    "recently",
+]
+
+# Conflict detection lists
+HARD_CONFLICTS: list[tuple[str, str]] = [
+    ("restart_deployment", "rollback_deployment"),
+    ("scale_deployment", "drain_node"),
+    ("delete_pod", "restart_deployment"),
+]
+
+SOFT_CONFLICTS: list[tuple[str, str]] = [
+    ("scale_deployment", "rollback_deployment"),
+    ("cordon_node", "uncordon_node"),
+]
+
 
 class SkillSelector:
     """Multi-signal skill retrieval engine."""
@@ -136,9 +198,11 @@ class SkillSelector:
         # Channel 4: Historical co-occurrence
         channel_scores["historical"] = self._score_historical(query)
 
-        # Channels 2 and 5 return empty for now (added in Task 4)
-        channel_scores["taxonomy"] = {}
-        channel_scores["temporal"] = {}
+        # Channel 2: Alert taxonomy
+        channel_scores["taxonomy"] = self._score_alert_taxonomy(query)
+
+        # Channel 5: Temporal context
+        channel_scores["temporal"] = self._score_temporal(query)
 
         # Fuse scores
         fused = self._fuse_scores(channel_scores)
@@ -216,6 +280,23 @@ class SkillSelector:
             return {}
         return {name: score / max_score for name, score in raw_scores.items()}
 
+    def _score_alert_taxonomy(self, query: str) -> dict[str, float]:
+        """Channel 2: Match alert names and scanner categories to skills."""
+        q = query.lower()
+        scores: dict[str, float] = {}
+
+        # Check alert taxonomy prefixes
+        for prefix, skill in _ALERT_TAXONOMY.items():
+            if prefix in q:
+                scores[skill] = max(scores.get(skill, 0), 0.8)
+
+        # Check scanner categories
+        for category, skill in _CATEGORY_SKILL.items():
+            if category in q:
+                scores[skill] = max(scores.get(skill, 0), 0.7)
+
+        return scores
+
     def _score_component_tags(self, query: str) -> dict[str, float]:
         """Channel 3: Extract K8s resource types from query, match against skill categories."""
         matches = _K8S_RESOURCES.findall(query.lower())
@@ -283,6 +364,21 @@ class SkillSelector:
             logger.debug("Historical scoring failed", exc_info=True)
             return {}
 
+    def _score_temporal(self, query: str) -> dict[str, float]:
+        """Channel 5: Detect temporal context (recent changes) and boost relevant skills."""
+        q = query.lower()
+        has_temporal = any(kw in q for kw in _TEMPORAL_KEYWORDS)
+        if not has_temporal:
+            return {}
+
+        # Boost skills with operations-related categories
+        scores: dict[str, float] = {}
+        for skill_name, skill in self._skills.items():
+            cats = set(skill.categories) if skill.categories else set()
+            if cats & {"operations", "workloads", "diagnostics"}:
+                scores[skill_name] = 0.6
+        return scores
+
     def _fuse_scores(self, channel_scores: dict[str, dict[str, float]]) -> dict[str, float]:
         """Weighted sum fusion across all channels."""
         fused: dict[str, float] = {}
@@ -303,6 +399,18 @@ class SkillSelector:
 
         return fused
 
+    def detect_conflicts(self, tools_offered: list[str]) -> list[dict]:
+        """Check for conflicting tools in the offered set."""
+        conflicts: list[dict] = []
+        tool_set = set(tools_offered)
+        for a, b in HARD_CONFLICTS:
+            if a in tool_set and b in tool_set:
+                conflicts.append({"type": "hard", "pair": [a, b], "action": "remove_lower_scored"})
+        for a, b in SOFT_CONFLICTS:
+            if a in tool_set and b in tool_set:
+                conflicts.append({"type": "soft", "pair": [a, b], "action": "warn_agent"})
+        return conflicts
+
     def _compute_threshold(self, context: dict | None) -> float:
         """Dynamic threshold based on incident context."""
         base = 0.45
@@ -311,8 +419,14 @@ class SkillSelector:
 
         priority = context.get("incident_priority")
         if priority == "P1":
-            return 0.35
+            base = 0.35
         elif priority == "P3":
-            return 0.60
+            base = 0.60
+
+        if context.get("max_fused_score", 1.0) < 0.3:
+            base = max(base - 0.10, 0.25)
+
+        if context.get("recent_similar"):
+            base = min(base + 0.10, 0.70)
 
         return base

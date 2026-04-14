@@ -45,6 +45,9 @@ class PlanRuntime:
             incident: Incident context dict (finding data, alerts, etc.)
             on_phase_start: Callback(phase_id, skill_name)
             on_phase_complete: Callback(phase_id, SkillOutput)
+
+        Returns:
+            PlanResult with phase outputs, status, and timing.
         """
         result = PlanResult(
             plan_id=plan.id,
@@ -186,12 +189,20 @@ class PlanRuntime:
         with run_agent_streaming() will be wired in a future task. The runtime's
         control flow (dependencies, branches, timeouts, always-run) is the value
         delivered by this module.
+
+        Args:
+            phase: The SkillPhase to execute.
+            incident: Incident context dict.
+            prior_outputs: Outputs from previously completed phases.
+
+        Returns:
+            SkillOutput with structured findings.
         """
         # Build compressed context from prior phases
         prior_context = self._compress_prior_outputs(prior_outputs)
 
         # Build the phase prompt (used by real agent integration in future task)
-        self._build_phase_prompt(phase, incident, prior_context)
+        _prompt = self._build_phase_prompt(phase, incident, prior_context)
 
         logger.info(
             "Executing phase '%s' with skill '%s' (%d prior outputs)",
@@ -222,8 +233,15 @@ class PlanRuntime:
     def _compress_prior_outputs(self, outputs: dict[str, SkillOutput]) -> str:
         """Progressive summarization — compress prior phase outputs.
 
-        Produces a compact summary (~120-180 tokens) of all prior phase
-        outputs to inject into the next phase's prompt.
+        Produces a compact Markdown summary of prior phase findings to inject
+        into the next phase's prompt. Targets ~120-180 tokens to keep context
+        budgets under control across long plans.
+
+        Args:
+            outputs: Map of phase_id to SkillOutput from completed phases.
+
+        Returns:
+            Markdown string summarizing prior outputs, or empty string if none.
         """
         if not outputs:
             return ""
@@ -246,11 +264,21 @@ class PlanRuntime:
 
         return "\n".join(lines)
 
-    def _build_phase_prompt(self, phase, incident: dict, prior_context: str) -> str:
+    def _build_phase_prompt(
+        self,
+        phase,
+        incident: dict,
+        prior_context: str,
+    ) -> str:
         """Build the prompt for a phase execution.
 
-        Assembles incident context, prior phase findings, and phase
-        metadata into a structured prompt for the agent.
+        Args:
+            phase: The SkillPhase to build a prompt for.
+            incident: Incident context dict.
+            prior_context: Compressed prior phase output string.
+
+        Returns:
+            Formatted prompt string for the phase.
         """
         parts = [
             f"## Current Phase: {phase.id}",
