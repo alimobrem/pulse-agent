@@ -88,6 +88,10 @@ def get_intelligence_context(mode: str = "sre", max_age_days: int = 7) -> str:
             fo = _compute_fix_outcomes(max_age_days)
             if fo:
                 sections.append(fo)
+        if "intelligence_selector_weights" not in excluded:
+            sw = _compute_selector_weights()
+            if sw:
+                sections.append(sw)
 
         if not sections:
             result = ""
@@ -626,6 +630,22 @@ def _compute_fix_outcomes(days: int) -> str:
         return "\n".join(lines)
     except Exception:
         logger.debug("Failed to compute fix outcomes", exc_info=True)
+        return ""
+
+
+def _compute_selector_weights() -> str:
+    """Report current ORCA selector channel weights from batch learning."""
+    try:
+        from .selector_learning import recompute_channel_weights
+
+        weights = recompute_channel_weights(days=7)
+        if not weights:
+            return ""
+        lines = ["### Selector Channel Weights"]
+        for ch, w in sorted(weights.items(), key=lambda x: -x[1]):
+            lines.append(f"- {ch}: {w:.3f}")
+        return "\n".join(lines)
+    except Exception:
         return ""
 
 

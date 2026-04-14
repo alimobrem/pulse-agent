@@ -32,6 +32,7 @@ Components gain an optional `layout` field:
 
 | Hint | Meaning | Maps to |
 |------|---------|---------|
+| `w: "auto"` | Engine decides based on siblings (default) | adaptive |
 | `w: "quarter"` | 1 of 4 columns | width=1 |
 | `w: "half"` | 2 of 4 columns | width=2 |
 | `w: "three_quarter"` | 3 of 4 columns | width=3 |
@@ -41,11 +42,21 @@ Components gain an optional `layout` field:
 | `group: "<name>"` | Pack together in same row | row grouping |
 | `priority: "top"` | Force to top of dashboard | role promotion |
 
+**`w: "auto"` is the default.** Components without a `w` hint (or with `w: "auto"`) use the engine's adaptive packing: 1 KPI card -> w=4, 2 cards -> w=2 each, 3+ cards -> w=1 each, etc. Explicit width hints are opt-in overrides for when Claude has a specific layout intent.
+
 ### What the engine ignores
 
 - Raw numeric values (no `w: 3`, `h: 15`)
 - Absolute positioning (no `x`, `y`)
 - Conflicting hints (two full-width items in the same group get ungrouped)
+
+### Group overflow
+
+When a group's total width exceeds 4 columns, the engine wraps to a new row. Items within the group are packed left-to-right: first row fills until full, remaining items continue on the next row. All rows belonging to the same group are placed consecutively (no interleaving with other groups).
+
+### Responsive breakpoints
+
+The backend computes layout for the 4-column (`lg`) grid only. At smaller breakpoints (`md: 2 cols`, `sm: 1 col`), `react-grid-layout` handles column clamping automatically — widgets wider than the available columns get clamped to fit. No separate layout maps per breakpoint are stored.
 
 ### Quality engine integration
 
@@ -116,27 +127,47 @@ Currently falls back to `idealHeight()` when position is missing. New behavior: 
 
 - User drags/resizes -> `handleLayoutChange` -> `PUT /views/:id` with new positions -> backend stores them
 - Backend does NOT recompute layout on position updates — user overrides preserved
-- Only `create_dashboard` and `add_widget_to_view` trigger backend `compute_layout()`
+- `create_dashboard` triggers `compute_layout()` on all components (fresh dashboard, no user positions to preserve)
+- `add_widget_to_view` does NOT trigger full `compute_layout()` — instead it uses single-widget placement:
+  1. Read existing positions from the DB (preserves user-customized positions)
+  2. Compute `max_y = max(pos.y + pos.h)` across existing positions
+  3. Classify the new widget via `_classify()` to get its default `(role, width, height)`
+  4. Place it at `{x: 0, y: max_y, w: default_w, h: default_h}`
+  5. Save the updated positions map (existing positions unchanged, new widget appended)
 
-## 4. Hint Attachment — `set_layout_hint` Tool
+This avoids the race condition where a full recompute during the 500ms drag debounce window could overwrite user drag/resize changes.
 
-New tool for annotating tool-generated components with layout hints:
+## 4. Hint Attachment — Embedded in Component Specs
+
+**No separate tool.** Layout hints are embedded directly in the component dict under a `layout` key. This eliminates extra tool calls (each costing ~1-2s latency and ~200 tokens).
+
+### How hints flow
+
+1. **Tool-generated components** (e.g., `get_prometheus_query`, `list_pods`): These tools return `(text, component)`. The component dict can include a `layout` field. The API layer's `on_component` callback passes it through to `session_components` unchanged.
+
+2. **`emit_component` tool**: Hints go directly in `spec_json` under a `layout` key. Already supported — no changes needed.
+
+3. **Claude's role**: When Claude wants to hint a chart as half-width, it includes `"layout": {"w": "half"}` in the component spec it returns from the tool. Most components won't have hints — the engine's `w: "auto"` default handles them.
+
+### Engine reads hints
+
+In `_classify()`, after determining the default `(role, width, height)` from `_KIND_MAP`, the engine reads `component.get("layout", {})` and applies overrides:
 
 ```python
-@beta_tool
-def set_layout_hint(hint_json: str, widget_index: int = -1):
-    """Set layout hints on a component. Call AFTER the data tool that created it.
+def _classify(component: dict) -> tuple[str, int, int]:
+    kind = component.get("kind", "")
+    role, default_w, default_h = _KIND_MAP.get(kind, ("container", 4, 5))
     
-    Args:
-        hint_json: JSON with layout hints. Keys: w (quarter/half/three_quarter/full),
-                   h (compact/tall), group (string), priority (top).
-        widget_index: Which component to annotate. -1 = most recent.
-    """
+    hints = component.get("layout", {})
+    w = _resolve_width(hints.get("w"), default_w)
+    h = _resolve_height(hints.get("h"), default_h, component)
+    
+    return role, w, h
 ```
 
-Uses `__SIGNAL__` to tell the API layer to merge hints onto the component in `session_components`.
+### No new tools, no new signals
 
-For `emit_component`: hints go directly in `spec_json` under a `layout` key.
+This approach requires zero new tools and zero new API layer signal handling. The only change is in `layout_engine.py` — `_classify()` reads the `layout` field that's already present in the component dict.
 
 ## 5. View Designer Skill Prompt Changes
 
@@ -155,7 +186,28 @@ Layout hints section teaching Claude the vocabulary with examples:
 
 - Drop `template` parameter entirely (already deprecated, currently ignored)
 
-## 6. Backend Cleanup — Dead Code
+## 6. Migration — Existing Dashboards
+
+### `templateId` dashboards
+
+Existing dashboards saved with `templateId` but empty `positions` will break when the frontend template system is deleted. Lazy migration in the API layer's view loading path:
+
+```python
+# In api/views.py rest_get_view or equivalent
+if view.get("templateId") and not view.get("positions"):
+    from ..layout_engine import compute_layout
+    positions = compute_layout(view.get("layout", []))
+    db.update_view(view_id, owner, positions=positions)
+    view["positions"] = positions
+```
+
+This runs once per affected view on first load. After migration, the `templateId` field is ignored (not deleted from DB — no migration needed, just unused).
+
+### User-customized positions
+
+Dashboards where the user has manually resized/dragged widgets (non-empty `positions`) are **never recomputed**. The user's positions are preserved exactly as-is. Content-aware heights only apply to new dashboards created after this change.
+
+## 7. Backend Cleanup — Dead Code
 
 | File | Action |
 |------|--------|
@@ -165,13 +217,15 @@ Layout hints section teaching Claude the vocabulary with examples:
 
 The `_DETAIL_PAIRS` dict and `_pack_details` function in `layout_engine.py` get absorbed into the group-based system (detail pairing becomes auto-grouping).
 
-## 7. Test Updates
+## 8. Test Updates
 
 ### Backend — `tests/test_layout_engine.py`
 
 - All 20 existing tests preserved (backward compatibility)
-- New `TestLayoutHints` class: `w: "half"`, `w: "full"`, `group`, `priority: "top"`, invalid hints -> defaults
+- New `TestLayoutHints` class: `w: "half"`, `w: "full"`, `w: "auto"`, `group`, `priority: "top"`, invalid hints -> defaults
 - New `TestContentAwareHeights` class: table height by row count, grid height by item count, status_list height by item count
+- New `TestGroupOverflow` class: group with total width > 4 wraps correctly, mixed widths within groups
+- New `TestSingleWidgetPlacement` class: `place_widget()` appends at `max_y` with correct sizing from `_classify`
 
 ### Frontend — `CustomView.test.ts`
 
@@ -184,7 +238,7 @@ The `_DETAIL_PAIRS` dict and `_pack_details` function in `layout_engine.py` get 
 - Remove `templateId` from `CustomView` interface in `customViewStore.ts`
 - Remove `templateId` from `agentComponents.ts` if present
 
-## 8. Eval Updates
+## 9. Eval Updates
 
 ### Existing scenarios — no changes needed
 
@@ -192,7 +246,7 @@ Current `view_designer.json` scenarios validate tool call sequences, not layout 
 
 ### New scenarios
 
-- `view_layout_hints`: validates Claude uses `set_layout_hint` to pair related charts. Expected tools: `get_prometheus_query` x2, `set_layout_hint`, `plan_dashboard`, `create_dashboard`
+- `view_layout_hints`: validates Claude embeds layout hints in component specs to pair related charts. Expected tools: `get_prometheus_query` x2, `plan_dashboard`, `create_dashboard`. Verify: resulting positions show two charts on the same row with `w: 2` each.
 - `view_complex_layout`: 8-widget dashboard, validates no overlaps. Expected tools: `namespace_summary`, `cluster_metrics`, `get_prometheus_query` x2, `list_pods`, `plan_dashboard`, `create_dashboard`
 
 ### Baseline
@@ -205,13 +259,14 @@ Regenerate after new scenarios: `--save-baseline`
 
 | File | Change |
 |------|--------|
-| `sre_agent/layout_engine.py` | Rewrite: add hint resolution, grouping, content-aware heights |
+| `sre_agent/layout_engine.py` | Rewrite: add hint resolution, grouping, content-aware heights, `place_widget()` for single-widget append |
 | `sre_agent/quality_engine.py` | Add hint validation warnings, R8 scoring rule |
-| `sre_agent/view_tools.py` | Add `set_layout_hint` tool, clean up template references |
+| `sre_agent/view_tools.py` | Clean up template references |
 | `sre_agent/view_planner.py` | Remove `template` parameter |
-| `sre_agent/api/agent_ws.py` | Handle `set_layout_hint` signal, remove templateId handling |
+| `sre_agent/api/agent_ws.py` | Update `add_widget` to use single-widget placement, remove templateId handling, add lazy templateId migration |
+| `sre_agent/api/views.py` | Add lazy templateId migration on view load |
 | `sre_agent/skills/view-designer/skill.md` | Add layout hints section, remove template/preferred_layout config |
-| `tests/test_layout_engine.py` | Add hint + content-aware height tests |
+| `tests/test_layout_engine.py` | Add hint, content-aware height, group overflow, single-widget placement tests |
 | `sre_agent/evals/scenarios_data/view_designer.json` | Add 2 new scenarios |
 
 ### Frontend (OpenshiftPulse)

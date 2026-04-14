@@ -206,6 +206,19 @@ class SkillSelector:
         # Channel 5: Temporal context
         channel_scores["temporal"] = self._score_temporal(query)
 
+        # Channel 6: Semantic embedding (stub, behind feature flag)
+        channel_scores["semantic"] = self._score_semantic_embedding(query)
+
+        # Inject SLO context if available
+        try:
+            from .slo_registry import get_slo_registry
+
+            slo_context = get_slo_registry().get_context_for_selector()
+            if slo_context and context is not None:
+                context["slo_alerts"] = slo_context
+        except Exception:
+            pass
+
         # Channel 6: Semantic embedding (optional)
         channel_scores["semantic"] = self._score_semantic_embedding(query)
 

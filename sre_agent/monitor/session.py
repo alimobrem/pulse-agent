@@ -317,6 +317,72 @@ class MonitorSession:
                 finding=finding,
             )
 
+    async def _try_plan_execution(self, finding: dict) -> bool:
+        """Try to execute a plan template for this finding. Returns True if a plan was used."""
+        try:
+            from ..plan_runtime import PlanRuntime
+            from ..plan_templates import match_template
+
+            template = match_template(category=finding.get("category", ""))
+            if not template:
+                return False
+
+            runtime = PlanRuntime()
+            result = await runtime.execute(
+                template,
+                incident=finding,
+                on_phase_start=lambda pid, sn: logger.info("Plan phase '%s' starting (skill=%s)", pid, sn),
+                on_phase_complete=lambda pid, out: logger.info("Plan phase '%s' done (status=%s)", pid, out.status),
+            )
+
+            # Generate postmortem
+            if result.phase_outputs:
+                try:
+                    from ..postmortem import Postmortem, save_postmortem
+
+                    diagnose_out = result.phase_outputs.get("diagnose") or result.phase_outputs.get("triage")
+                    pm = Postmortem(
+                        id=f"pm-{finding.get('id', 'unknown')}",
+                        incident_type=finding.get("category", ""),
+                        plan_id=template.id,
+                        root_cause=diagnose_out.evidence_summary if diagnose_out else "",
+                        confidence=max((o.confidence for o in result.phase_outputs.values()), default=0),
+                        generated_at=int(time.time() * 1000),
+                    )
+                    save_postmortem(pm)
+                except Exception:
+                    logger.debug("Postmortem generation failed", exc_info=True)
+
+            # Scaffold skill from resolution
+            try:
+                from ..skill_scaffolder import scaffold_skill_from_resolution
+
+                tools = [t for out in result.phase_outputs.values() for t in out.actions_taken]
+                if tools:
+                    diagnose_out = result.phase_outputs.get("diagnose")
+                    scaffold_skill_from_resolution(
+                        query=finding.get("title", ""),
+                        tools_called=tools,
+                        investigation_summary=diagnose_out.evidence_summary if diagnose_out else "",
+                        root_cause=diagnose_out.findings.get("root_cause", "unknown") if diagnose_out else "unknown",
+                        confidence=max((o.confidence for o in result.phase_outputs.values()), default=0),
+                    )
+            except Exception:
+                logger.debug("Skill scaffolding failed", exc_info=True)
+
+            logger.info(
+                "Plan execution complete: %s status=%s phases=%d/%d",
+                template.name,
+                result.status,
+                result.phases_completed,
+                result.phases_total,
+            )
+            return True
+
+        except Exception:
+            logger.debug("Plan execution failed", exc_info=True)
+            return False
+
     async def run_investigations(self, findings: list[dict]) -> None:
         """Run proactive read-only investigations for critical findings."""
         from ..agent import _circuit_breaker
@@ -621,6 +687,14 @@ class MonitorSession:
         logger.info("Running cluster scan...")
         scan_start = time.time()
         self._scan_counter += 1
+
+        # Refresh dependency graph at start of each scan cycle
+        try:
+            from ..dependency_graph import get_dependency_graph
+
+            get_dependency_graph().refresh_from_cluster()
+        except Exception:
+            logger.debug("Dependency graph refresh failed", exc_info=True)
 
         # Evict stale entries older than 1 hour from cooldown/investigation caches
         eviction_cutoff = scan_start - 3600

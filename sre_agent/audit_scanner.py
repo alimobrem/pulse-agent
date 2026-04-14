@@ -244,21 +244,40 @@ def scan_recent_deployments() -> list[dict]:
                             dep_events = warning_events_by_obj.get(obj_key, [])
                             event_reasons = list({e.reason for e in dep_events[:5]})
 
-                            findings.append(
-                                _make_finding(
-                                    severity=SEVERITY_WARNING if available > 0 else SEVERITY_CRITICAL,
-                                    category="audit_deployment",
-                                    title=f"Deployment '{dep.metadata.name}' rollout with issues",
-                                    summary=(
-                                        f"Deployment '{dep.metadata.name}' in {ns} is rolling out "
-                                        f"(revision {revision}): {available}/{desired} available, "
-                                        f"{unavailable} unavailable."
-                                        + (f" Events: {', '.join(event_reasons)}" if event_reasons else "")
-                                    ),
-                                    resources=[{"kind": "Deployment", "name": dep.metadata.name, "namespace": ns}],
-                                    confidence=0.85,
-                                )
+                            finding = _make_finding(
+                                severity=SEVERITY_WARNING if available > 0 else SEVERITY_CRITICAL,
+                                category="audit_deployment",
+                                title=f"Deployment '{dep.metadata.name}' rollout with issues",
+                                summary=(
+                                    f"Deployment '{dep.metadata.name}' in {ns} is rolling out "
+                                    f"(revision {revision}): {available}/{desired} available, "
+                                    f"{unavailable} unavailable."
+                                    + (f" Events: {', '.join(event_reasons)}" if event_reasons else "")
+                                ),
+                                resources=[{"kind": "Deployment", "name": dep.metadata.name, "namespace": ns}],
+                                confidence=0.85,
                             )
+
+                            # Score change risk
+                            try:
+                                from .change_risk import score_deployment_change
+
+                                new_image = ""
+                                for c in dep.spec.template.spec.containers or []:
+                                    new_image = c.image or ""
+                                    break
+                                risk = score_deployment_change(
+                                    deployment_name=dep.metadata.name,
+                                    namespace=ns,
+                                    new_image=new_image,
+                                )
+                                finding["riskScore"] = risk.score
+                                finding["riskLevel"] = risk.level
+                                finding["riskFactors"] = risk.factors
+                            except Exception:
+                                pass
+
+                            findings.append(finding)
                         break
 
     except Exception as e:
