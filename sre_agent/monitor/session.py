@@ -453,15 +453,17 @@ class MonitorSession:
             if now - last_time < cooldown_seconds:
                 continue
 
-            # Try plan-based execution first — if a template matches, skip flat investigation
+            # Try plan-based execution first — if a template matches, use plan for investigation
+            plan_ran = False
             try:
-                if await self._try_plan_execution(finding):
-                    self._recent_investigations[key] = now
-                    investigations_run += 1
-                    self._daily_investigation_count += 1
-                    continue
+                plan_ran = await self._try_plan_execution(finding)
             except Exception:
                 logger.debug("Plan execution attempt failed, falling back to flat investigation", exc_info=True)
+            # If plan ran, still let auto-fix evaluate the finding (plan investigates, auto-fix acts)
+            if plan_ran:
+                self._recent_investigations[key] = now
+                investigations_run += 1
+                self._daily_investigation_count += 1
 
             report = {
                 "type": "investigation_report",
