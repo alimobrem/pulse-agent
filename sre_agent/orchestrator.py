@@ -531,9 +531,19 @@ def classify_intent(query: str) -> tuple[AgentMode, bool]:
         if len(word) >= 7 and word.startswith("das") and ("board" in word or "bord" in word or "baord" in word):
             return "view_designer", True
 
-    # Check "both" first (explicit full-audit requests)
+    # Check "both" first (explicit full-audit requests) — before ORCA
     if any(kw in q for kw in BOTH_KEYWORDS):
         return "both", True
+
+    # ORCA: try multi-signal skill selector for non-default routing
+    try:
+        from .skill_loader import classify_query
+
+        skill = classify_query(query)
+        if skill and skill.name not in ("sre",):
+            return skill.name, True
+    except Exception:
+        pass
 
     # Check view designer (dashboard/view creation requests)
     if (
