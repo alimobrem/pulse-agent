@@ -579,6 +579,9 @@ async def add_mcp_server(body: dict, _auth=Depends(verify_token)):
 
     Expects: {"name": "my-server", "url": "http://...", "transport": "sse"}
     """
+    import ipaddress
+    import urllib.parse
+
     from ..mcp_client import add_standalone_server
 
     name = body.get("name", "").strip()
@@ -589,8 +592,36 @@ async def add_mcp_server(body: dict, _auth=Depends(verify_token)):
         raise HTTPException(status_code=400, detail="name is required")
     if not url:
         raise HTTPException(status_code=400, detail="url is required")
-    if transport not in ("sse", "stdio"):
-        raise HTTPException(status_code=400, detail="transport must be 'sse' or 'stdio'")
+
+    # Security: disable stdio transport for user-added servers (command injection risk)
+    if transport == "stdio":
+        raise HTTPException(status_code=400, detail="stdio transport is disabled for security. Use 'sse' transport.")
+    if transport != "sse":
+        raise HTTPException(status_code=400, detail="transport must be 'sse'")
+
+    # Security: validate URL to prevent SSRF
+    try:
+        parsed = urllib.parse.urlparse(url)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid URL")
+
+    if parsed.scheme not in ("http", "https"):
+        raise HTTPException(status_code=400, detail="URL must use http or https")
+
+    hostname = parsed.hostname or ""
+
+    # Block cloud metadata endpoints
+    _BLOCKED_HOSTS = {"169.254.169.254", "metadata.google.internal", "metadata.internal"}
+    if hostname in _BLOCKED_HOSTS:
+        raise HTTPException(status_code=400, detail="URL blocked: cloud metadata endpoints are not allowed")
+
+    # Block private/internal IP ranges
+    try:
+        addr = ipaddress.ip_address(hostname)
+        if addr.is_private or addr.is_loopback or addr.is_link_local:
+            raise HTTPException(status_code=400, detail="URL blocked: private/internal IP addresses are not allowed")
+    except ValueError:
+        pass  # Hostname is a DNS name, not an IP — allow it
 
     conn = add_standalone_server(name, url, transport)
 
@@ -623,6 +654,9 @@ async def test_mcp_server(body: dict, _auth=Depends(verify_token)):
     Expects: {"url": "http://...", "transport": "sse"}
     Returns: {"connected": bool, "tools_count": int, "tools": [...], "error": str}
     """
+    import ipaddress
+    import urllib.parse
+
     from ..mcp_client import test_mcp_connection
 
     url = body.get("url", "").strip()
@@ -630,8 +664,27 @@ async def test_mcp_server(body: dict, _auth=Depends(verify_token)):
 
     if not url:
         raise HTTPException(status_code=400, detail="url is required")
-    if transport not in ("sse", "stdio"):
-        raise HTTPException(status_code=400, detail="transport must be 'sse' or 'stdio'")
+    if transport == "stdio":
+        raise HTTPException(status_code=400, detail="stdio transport is disabled for security")
+    if transport != "sse":
+        raise HTTPException(status_code=400, detail="transport must be 'sse'")
+
+    # SSRF validation (same as add_mcp_server)
+    try:
+        parsed = urllib.parse.urlparse(url)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid URL")
+    if parsed.scheme not in ("http", "https"):
+        raise HTTPException(status_code=400, detail="URL must use http or https")
+    hostname = parsed.hostname or ""
+    if hostname in {"169.254.169.254", "metadata.google.internal", "metadata.internal"}:
+        raise HTTPException(status_code=400, detail="URL blocked: cloud metadata endpoints")
+    try:
+        addr = ipaddress.ip_address(hostname)
+        if addr.is_private or addr.is_loopback or addr.is_link_local:
+            raise HTTPException(status_code=400, detail="URL blocked: private/internal IP")
+    except ValueError:
+        pass
 
     return test_mcp_connection(url, transport)
 

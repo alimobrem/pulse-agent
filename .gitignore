@@ -1,11 +1,35 @@
+# Python
 __pycache__/
 *.pyc
 *.egg-info/
+*.egg
 dist/
 build/
-.env
-*.egg
 .venv/
-tmp/
-.worktrees/
+
+# Environment / secrets
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+*.p12
+
+# Caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.rspack_cache/
+.coverage
+htmlcov/
+
+# IDE / OS
+.DS_Store
+*.swp
+*.swo
+*~
+
+# Tools
 .playwright-mcp/
+.worktrees/
+tmp/
