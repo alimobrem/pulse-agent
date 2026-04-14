@@ -167,6 +167,55 @@ def scaffold_plan_template(
         return None
 
 
+def validate_scaffolded_skill(skill_content: str) -> list[str]:
+    """Validate an auto-scaffolded skill before saving.
+
+    Returns list of validation errors (empty = valid).
+    """
+    errors: list[str] = []
+
+    # Check frontmatter exists
+    if not skill_content.startswith("---"):
+        errors.append("Missing frontmatter (must start with ---)")
+        return errors
+
+    parts = skill_content.split("---", 2)
+    if len(parts) < 3:
+        errors.append("Malformed frontmatter")
+        return errors
+
+    try:
+        import yaml
+
+        meta = yaml.safe_load(parts[1])
+    except Exception as e:
+        errors.append(f"Invalid YAML frontmatter: {e}")
+        return errors
+
+    if not meta:
+        errors.append("Empty frontmatter")
+        return errors
+
+    # Required fields
+    if not meta.get("name"):
+        errors.append("Missing 'name' field")
+    if not meta.get("description"):
+        errors.append("Missing 'description' field")
+    if not meta.get("keywords"):
+        errors.append("Missing 'keywords' field")
+    elif not isinstance(meta["keywords"], list) or len(meta["keywords"]) < 1:
+        errors.append("'keywords' must be a non-empty list")
+    if not meta.get("categories"):
+        errors.append("Missing 'categories' field")
+
+    # Body must have content
+    body = parts[2].strip()
+    if len(body) < 50:
+        errors.append("Skill body too short (need at least 50 characters of instructions)")
+
+    return errors
+
+
 def save_scaffolded_skill(skill_content: str, skill_name: str) -> str | None:
     """Save an auto-scaffolded skill to the skills directory.
 
@@ -177,6 +226,12 @@ def save_scaffolded_skill(skill_content: str, skill_name: str) -> str | None:
     # Validate skill_name — prevent path traversal
     if not re.match(r"^[a-z0-9][a-z0-9_-]{0,63}$", skill_name):
         logger.warning("Invalid skill_name rejected: %s", skill_name[:50])
+        return None
+
+    # Validate skill content before saving
+    validation_errors = validate_scaffolded_skill(skill_content)
+    if validation_errors:
+        logger.warning("Scaffolded skill '%s' failed validation: %s", skill_name, validation_errors)
         return None
 
     try:

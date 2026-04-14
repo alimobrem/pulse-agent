@@ -117,6 +117,13 @@ SCANNER_REGISTRY: dict[str, dict] = {
         "checks": ["auth failures", "privilege escalation attempts"],
         "auto_fixable": False,
     },
+    "slo_burn": {
+        "displayName": "SLO Burn Rate",
+        "description": "Checks registered SLOs for error budget depletion",
+        "category": "monitoring",
+        "checks": ["burn rate > threshold", "error budget < 30%", "error budget < 10%"],
+        "auto_fixable": False,
+    },
     "security": {
         "displayName": "Security Posture",
         "description": "Comprehensive security check: pod security, resource limits, network policies, RBAC, service accounts",

@@ -477,4 +477,41 @@ def _get_all_scanners() -> list[tuple[str, Callable[..., Any]]]:
         ("audit_deployment", scan_recent_deployments),
         ("audit_events", scan_warning_events),
         ("audit_auth", scan_auth_events),
+        ("slo_burn", scan_slo_burn_rate),
     ]
+
+
+def scan_slo_burn_rate() -> list[dict]:
+    """Check registered SLOs for error budget depletion."""
+    try:
+        from ..slo_registry import get_slo_registry
+
+        registry = get_slo_registry()
+        if not registry.list_all():
+            return []
+
+        statuses = registry.evaluate_with_prometheus()
+        findings = []
+        for s in statuses:
+            if s.alert_level == "ok":
+                continue
+
+            severity = "critical" if s.alert_level == "critical" else "warning"
+            budget_pct = round(s.error_budget_remaining * 100)
+            findings.append(
+                {
+                    "severity": severity,
+                    "category": "slo_burn",
+                    "title": f"SLO {s.alert_level}: {s.definition.service_name} {s.definition.slo_type}",
+                    "summary": (
+                        f"{s.definition.service_name} {s.definition.slo_type} SLO "
+                        f"({s.definition.target:.1%} target) has {budget_pct}% error budget remaining. "
+                        f"Burn rate: {s.burn_rate:.2%}."
+                    ),
+                    "resources": [{"kind": "Service", "name": s.definition.service_name}],
+                }
+            )
+
+        return findings
+    except Exception:
+        return []
