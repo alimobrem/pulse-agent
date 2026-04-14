@@ -9,7 +9,6 @@ This module provides:
 
 import logging
 import re
-from typing import Literal
 
 logger = logging.getLogger("pulse_agent.orchestrator")
 
@@ -334,78 +333,9 @@ def fix_typos(query: str) -> str:
     return " ".join(words) if changed else result
 
 
-AgentMode = Literal["sre", "security", "both", "view_designer"]
+AgentMode = str  # Any skill name, plus "both" for merged mode
 
-SRE_KEYWORDS = [
-    "crash",
-    "restart",
-    "pod",
-    "deploy",
-    "node",
-    "scale",
-    "log",
-    "event",
-    "health",
-    "capacity",
-    "oom",
-    "pending",
-    "drain",
-    "cordon",
-    "prometheus",
-    "alert",
-    "metric",
-    "resource",
-    "quota",
-    "memory",
-    "cpu",
-    "disk",
-    "image",
-    "pull",
-    "schedule",
-    "replica",
-    "rollout",
-    "ingress",
-    "route",
-    "service",
-    "endpoint",
-    "pvc",
-    "volume",
-    "operator",
-    "certificate",
-    "cert",
-    "tls",
-    "expir",
-]
-
-SECURITY_KEYWORDS = [
-    "security",
-    "security scan",
-    "security audit",
-    "security check",
-    "rbac",
-    "role",
-    "permission",
-    "scc",
-    "network policy",
-    "networkpolicy",
-    "secret",
-    "privilege",
-    "root",
-    "audit",
-    "compliance",
-    "vulnerability",
-    "vulnerabilities",
-    "tls",
-    "certificate",
-    "access control",
-    "service account",
-    "cluster-admin",
-    "wildcard",
-    "overly permissive",
-    "security context",
-    "capability",
-]
-
+# "both" is a special merged mode (SRE + security tools) — not a skill
 BOTH_KEYWORDS = [
     "scan the cluster",
     "full assessment",
@@ -416,157 +346,39 @@ BOTH_KEYWORDS = [
     "cluster audit",
 ]
 
-VIEW_DESIGNER_KEYWORDS = [
-    "dashboard",
-    "create a view",
-    "create me view",
-    "create view",
-    "build a view",
-    "build me a view",
-    "build view",
-    "design a view",
-    "make a view",
-    "make me a view",
-    "make view",
-    "build me a dashboard",
-    "create a dashboard",
-    "customize the view",
-    "edit the view",
-    "edit view",
-    "update view",
-    "update the view",
-    "change layout",
-    "update layout",
-    "edit layout",
-    "change the layout",
-    "add widget",
-    "add a widget",
-    "remove widget",
-    "show me a dashboard",
-    "make a view",
-    "make me a view",
-    "new view",
-    "modify the view",
-    "redesign",
-    "rearrange",
-    "build me an overview",
-    "create an overview",
-    "build an overview",
-    "overview dashboard",
-    "monitoring dashboard",
-    "monitoring view",
-    "delete dashboard",
-    "delete the dashboard",
-    "delete my dashboard",
-    "clone dashboard",
-    "clone my dashboard",
-    "duplicate dashboard",
-    "copy dashboard",
-    "rebuild dashboard",
-    "rebuild the dashboard",
-    "fix the dashboard",
-    "fix my dashboard",
-    "improve the dashboard",
-    "update the dashboard",
-    "rename the chart",
-    "rename the widget",
-    "change the title",
-    "fix the title",
-    "update the title",
-]
-
-
-_VIEW_TRIGGER_WORDS = {
-    "widget",
-    "sparkline",
-    "metric card",
-    "overview",
-    "page",
-    "stat card",
-    "bar list",
-    "progress list",
-    "bar_list",
-    "progress_list",
-    "stat_card",
-}
-# Phrases that indicate view/dashboard editing intent
-_VIEW_TRIGGER_PHRASES = {
-    "a view",
-    "the view",
-    "my view",
-    "this view",
-    "new view",
-    "me view",
-    "app view",
-    "application view",
-    "the chart",
-    "my chart",
-    "the widget",
-    "my widget",
-    "the title",
-    "the description",
-}
-
-
-def _keyword_score(query_lower: str, keywords: list[str]) -> float:
-    """Score query against keywords, weighting longer (more specific) keywords higher."""
-    return sum(len(kw) for kw in keywords if kw in query_lower)
-
 
 def classify_intent(query: str) -> tuple[AgentMode, bool]:
-    """Classify a user query as sre, security, both, or view_designer.
+    """Route a user query to the best skill via ORCA multi-signal selector.
 
     Returns:
-        (mode, is_strong) — is_strong is True when the classification is based
-        on explicit keyword matches, False when it's the default sre fallback.
-        Callers should only switch session mode on strong signals.
+        (mode, is_strong) — mode is any skill name or "both".
+        is_strong is True for confident routing, False for default fallback.
     """
-    q = query.lower()
+    q = fix_typos(query).lower()
 
-    # Fuzzy match for "dashboard" — catch common typos
-    # Check if any word is within edit distance 2 of "dashboard"
+    # 1. "both" = merge SRE + security tools (not a skill, check first)
+    if any(kw in q for kw in BOTH_KEYWORDS):
+        return "both", True
+
+    # 2. Dashboard typo fuzzy matching (ORCA keywords can't catch creative typos)
     for word in q.split():
         if len(word) >= 7 and word.startswith("dash") and word not in ("dashing",):
             return "view_designer", True
         if len(word) >= 7 and word.startswith("das") and ("board" in word or "bord" in word or "baord" in word):
             return "view_designer", True
 
-    # Check "both" first (explicit full-audit requests) — before ORCA
-    if any(kw in q for kw in BOTH_KEYWORDS):
-        return "both", True
-
-    # ORCA: try multi-signal skill selector for non-default routing
+    # 3. ORCA multi-signal routing — single authority for all skills
     try:
-        from .skill_loader import classify_query
+        from .skill_loader import classify_query as _classify
 
-        skill = classify_query(query)
-        if skill and skill.name not in ("sre",):
-            return skill.name, True
+        skill = _classify(query)
+        if skill:
+            is_strong = skill.name != "sre"  # non-default = strong signal
+            return skill.name, is_strong
     except Exception:
-        pass
+        logger.debug("ORCA routing failed, falling back to sre", exc_info=True)
 
-    # Check view designer (dashboard/view creation requests)
-    if (
-        any(kw in q for kw in VIEW_DESIGNER_KEYWORDS)
-        or any(w in q for w in _VIEW_TRIGGER_WORDS)
-        or any(p in q for p in _VIEW_TRIGGER_PHRASES)
-    ):
-        return "view_designer", True
-
-    sre_score = _keyword_score(q, SRE_KEYWORDS)
-    sec_score = _keyword_score(q, SECURITY_KEYWORDS)
-
-    # If both domains match and scores are close, route to both
-    if sre_score > 0 and sec_score > 0:
-        ratio = min(sre_score, sec_score) / max(sre_score, sec_score)
-        if ratio >= 0.7:
-            return "both", True
-
-    if sec_score > sre_score and sec_score > 0:
-        return "security", True
-
-    # SRE is the default — only strong if there were actual keyword matches
-    return "sre", sre_score > 0
+    return "sre", False
 
 
 def build_orchestrated_config(mode: str, query: str = "") -> dict:

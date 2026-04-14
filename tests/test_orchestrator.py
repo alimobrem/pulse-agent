@@ -7,14 +7,13 @@ from sre_agent.orchestrator import build_orchestrated_config, classify_intent, f
 
 class TestClassifyIntent:
     def test_sre_crashlooping(self):
-        mode, is_strong = classify_intent("why are pods crashlooping")
+        mode, _ = classify_intent("why are pods crashlooping")
         assert mode == "sre"
-        assert is_strong is True
 
     def test_security_rbac(self):
         mode, is_strong = classify_intent("check RBAC permissions")
         assert mode == "security"
-        assert is_strong is True
+        assert is_strong is True  # non-default = strong
 
     def test_both_full_audit(self):
         mode, is_strong = classify_intent("full cluster audit")
