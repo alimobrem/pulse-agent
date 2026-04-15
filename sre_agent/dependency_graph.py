@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import logging
 import time
+from collections import deque
 from dataclasses import dataclass, field
 
 logger = logging.getLogger("pulse_agent.dependency_graph")
@@ -87,9 +88,9 @@ class DependencyGraph:
         key = _resource_key(kind, namespace, name)
         result: list[str] = []
         visited: set[str] = set()
-        queue = list(self._adjacency.get(key, []))
+        queue = deque(self._adjacency.get(key, []))
         while queue:
-            current = queue.pop(0)
+            current = queue.popleft()
             if current in visited:
                 continue
             visited.add(current)

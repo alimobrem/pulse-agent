@@ -184,6 +184,7 @@ class SkillSelector:
         self._skills = skills
         self._keyword_index = keyword_index or []
         self._weights = dict(DEFAULT_WEIGHTS)
+        self._skill_token_cache: dict[str, set[str]] | None = None
 
         # Load learned weights if available
         try:
@@ -229,9 +230,6 @@ class SkillSelector:
                 context["slo_alerts"] = slo_context
         except Exception:
             pass
-
-        # Channel 6: Semantic embedding (optional)
-        channel_scores["semantic"] = self._score_semantic_embedding(query)
 
         # Fuse scores
         fused = self._fuse_scores(channel_scores)
@@ -371,7 +369,7 @@ class SkillSelector:
             rows = db.fetchall(
                 "SELECT skill_name, query_summary "
                 "FROM skill_usage "
-                "WHERE feedback IS NULL OR feedback != 'negative' "
+                "WHERE (feedback IS NULL OR feedback != 'negative') "
                 "AND timestamp > NOW() - INTERVAL '7 days' "
                 "ORDER BY timestamp DESC "
                 "LIMIT 200"
@@ -451,8 +449,8 @@ class SkillSelector:
         import math
 
         # Build skill token sets (cached on first call)
-        if not hasattr(self, "_skill_token_cache"):
-            self._skill_token_cache: dict[str, set[str]] = {}
+        if self._skill_token_cache is None:
+            self._skill_token_cache = {}
             for skill_name, skill in self._skills.items():
                 tokens = set()
                 # Description tokens

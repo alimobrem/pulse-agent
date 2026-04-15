@@ -336,7 +336,7 @@ class MonitorSession:
                 for p in all_phases:
                     if p["id"] == pid:
                         p["status"] = "running"
-                await self._ws.send_json(
+                await self.websocket.send_json(
                     {
                         "type": "investigation_progress",
                         "findingId": finding_id,
@@ -354,7 +354,7 @@ class MonitorSession:
                         p["status"] = out.status
                         p["summary"] = out.evidence_summary[:100] if out.evidence_summary else ""
                         p["confidence"] = out.confidence
-                await self._ws.send_json(
+                await self.websocket.send_json(
                     {
                         "type": "investigation_progress",
                         "findingId": finding_id,
