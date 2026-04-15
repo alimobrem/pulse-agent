@@ -7,6 +7,7 @@
   <img src="https://img.shields.io/badge/scanners-18-10b981?style=for-the-badge" alt="Scanners">
   <img src="https://img.shields.io/badge/tests-1676-10b981?style=for-the-badge" alt="Tests">
   <img src="https://img.shields.io/badge/eval_suites-11_(98_scenarios)-10b981?style=for-the-badge" alt="Eval Suites">
+  <img src="https://img.shields.io/badge/release_gate-98.1%25-10b981?style=for-the-badge" alt="Release Gate">
   <img src="https://img.shields.io/badge/PromQL%20recipes-73-10b981?style=for-the-badge" alt="PromQL Recipes">
   <img src="https://img.shields.io/badge/license-MIT-6366f1?style=for-the-badge" alt="License">
 </p>
