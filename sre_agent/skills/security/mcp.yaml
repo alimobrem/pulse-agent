@@ -1,0 +1,13 @@
+# MCP server for security skill — shares connection with SRE skill
+# Only needs core + config + openshift toolsets for security context inspection
+
+server:
+  url: "${PULSE_MCP_URL:-http://pulse-openshift-sre-agent-mcp:8081}"
+  transport: sse
+  auth:
+    type: service_account
+
+toolsets:
+  - core
+  - config
+  - openshift

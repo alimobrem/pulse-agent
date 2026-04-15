@@ -540,11 +540,24 @@ def register_mcp_tools(conn: MCPConnection) -> int:
 
 
 def connect_skill_mcp(skill_name: str, skill_path: Path) -> MCPConnection | None:
-    """Connect to the MCP server defined in a skill's mcp.yaml."""
+    """Connect to the MCP server defined in a skill's mcp.yaml.
+
+    Deduplicates by server URL: if another skill already connected to the
+    same server, reuse that connection instead of opening a new one.
+    """
     mcp_yaml = skill_path / "mcp.yaml"
     config = load_mcp_config(mcp_yaml)
     if not config:
         return None
+
+    server_url = config.get("server", {}).get("url", "")
+
+    # Reuse existing connection to the same server URL
+    for existing_conn in _connections.values():
+        if existing_conn.url == server_url and existing_conn.connected:
+            _connections[skill_name] = existing_conn
+            logger.info("MCP reused existing connection for skill '%s' (same server)", skill_name)
+            return existing_conn
 
     conn = connect_mcp_server(skill_name, config)
     _connections[skill_name] = conn

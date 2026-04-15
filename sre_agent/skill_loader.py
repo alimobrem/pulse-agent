@@ -1076,7 +1076,7 @@ def select_tools(query: str, all_tools: list, all_tool_map: dict, mode: str = "s
             if t["name"] not in _MCP_NATIVE_OVERLAP:
                 mode_tool_names.update([t["name"]])
     except Exception:
-        pass
+        logger.debug("MCP tools unavailable for select_tools: %s", __import__("traceback").format_exc())
 
     filtered = [t for t in all_tools if t.name in mode_tool_names]
 
@@ -1161,12 +1161,18 @@ def build_config_from_skill(skill: Skill, query: str = "") -> dict:
     try:
         from .mcp_client import list_mcp_tools
 
+        mcp_added = 0
         for t_info in list_mcp_tools():
             mcp_name = t_info["name"]
             if mcp_name not in _MCP_NATIVE_OVERLAP and mcp_name not in tool_map and mcp_name in all_tools:
                 tool_map[mcp_name] = all_tools[mcp_name]
+                mcp_added += 1
+        if mcp_added:
+            logger.debug("Added %d MCP tools for skill '%s'", mcp_added, skill.name)
     except Exception:
-        pass
+        logger.warning(
+            "Failed to include MCP tools for skill '%s': %s", skill.name, __import__("traceback").format_exc()
+        )
 
     # Reorder deprioritized tools
     deprioritized = _get_deprioritized_tools()

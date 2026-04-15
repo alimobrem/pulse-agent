@@ -1,0 +1,12 @@
+# MCP server for capacity planner — shares connection with SRE skill
+# Needs core + observability for Prometheus queries and resource inspection
+
+server:
+  url: "${PULSE_MCP_URL:-http://pulse-openshift-sre-agent-mcp:8081}"
+  transport: sse
+  auth:
+    type: service_account
+
+toolsets:
+  - core
+  - observability
