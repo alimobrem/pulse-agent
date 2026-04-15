@@ -209,6 +209,13 @@ def _register_defaults(registry: SLORegistry) -> None:
             window_days=30,
             description="PostgreSQL must be available 99.9% over rolling 30 days",
         ),
+        SLODefinition(
+            service_name="pulse-openshift-sre-agent-mcp",
+            slo_type="availability",
+            target=0.999,
+            window_days=30,
+            description="OpenShift MCP server must be available 99.9% over rolling 30 days",
+        ),
     ]
     for slo in defaults:
         registry.register(slo)
