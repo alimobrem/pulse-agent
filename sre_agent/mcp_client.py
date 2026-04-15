@@ -101,7 +101,7 @@ def connect_mcp_server(name: str, config: dict) -> MCPConnection:
     transport = server.get("transport", "stdio")
     toolsets = config.get("toolsets", [])
     tool_renderers = config.get("tool_renderers", {})
-    display_name = config.get("name", f"OpenShift MCP ({name})")
+    display_name = config.get("name", "OpenShift MCP")
 
     conn = MCPConnection(
         name=display_name,
@@ -675,9 +675,13 @@ def test_mcp_connection(url: str, transport: str = "sse") -> dict:
 
 
 def list_mcp_connections() -> list[dict]:
-    """List all MCP connections with status."""
-    result = []
+    """List all MCP connections with status. Deduplicates by URL."""
+    seen_urls: dict[str, dict] = {}
     for key, c in _connections.items():
+        if c.url in seen_urls:
+            # Same server used by multiple skills — track which skills share it
+            seen_urls[c.url].setdefault("used_by", []).append(key)
+            continue
         entry = {
             "name": c.name,
             "url": c.url,
@@ -688,9 +692,10 @@ def list_mcp_connections() -> list[dict]:
             "toolsets": c.toolsets,
             "error": c.error,
             "standalone": key.startswith("standalone:"),
+            "used_by": [key],
         }
-        result.append(entry)
-    return result
+        seen_urls[c.url] = entry
+    return list(seen_urls.values())
 
 
 def list_mcp_tools() -> list[dict]:
