@@ -1162,9 +1162,9 @@ class MonitorSession:
                 logger.info("Weekly flywheel: invalidated embedding cache")
 
                 # Log a prompt audit for tracking
-                from ..intelligence import compute_intelligence_sections
+                from ..intelligence import get_intelligence_sections
 
-                sections = await asyncio.to_thread(compute_intelligence_sections)
+                sections = await asyncio.to_thread(get_intelligence_sections)
                 if sections:
                     logger.info("Weekly flywheel: intelligence sections computed (%d sections)", len(sections))
 

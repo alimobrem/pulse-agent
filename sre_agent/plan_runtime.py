@@ -218,6 +218,7 @@ class PlanRuntime:
                 # Store full reasoning trace to DB (compressed output goes to next phase)
                 self._store_phase_trace(plan.id, p.id, out)
 
+                assert out is not None  # loop always assigns out
                 return p.id, out
 
             if len(ready) > 1:
