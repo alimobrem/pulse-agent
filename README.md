@@ -5,7 +5,7 @@
   <img src="https://img.shields.io/badge/tools-122_(86+36_MCP)-10b981?style=for-the-badge" alt="Tools">
   <img src="https://img.shields.io/badge/skills-7-10b981?style=for-the-badge" alt="Skills">
   <img src="https://img.shields.io/badge/scanners-18-10b981?style=for-the-badge" alt="Scanners">
-  <img src="https://img.shields.io/badge/tests-1690-10b981?style=for-the-badge" alt="Tests">
+  <img src="https://img.shields.io/badge/tests-1689-10b981?style=for-the-badge" alt="Tests">
   <img src="https://img.shields.io/badge/eval_suites-11_(98_scenarios)-10b981?style=for-the-badge" alt="Eval Suites">
   <img src="https://img.shields.io/badge/release_gate-98.1%25-10b981?style=for-the-badge" alt="Release Gate">
   <img src="https://img.shields.io/badge/PromQL%20recipes-73-10b981?style=for-the-badge" alt="PromQL Recipes">
@@ -301,7 +301,7 @@ Consolidated management page with 8 tabs:
 
 ```bash
 pip install -e '.[test]'
-python3 -m pytest tests/ -v           # All 1,690 tests
+python3 -m pytest tests/ -v           # All 1,689 tests
 python3 -m pytest tests/test_foo.py   # Single file
 make verify                           # Lint + type-check + tests
 ```
@@ -401,7 +401,7 @@ All WebSocket endpoints require `?token=...` query parameter (constant-time comp
 ---
 
 <p align="center">
-  <strong>122 tools (86 native + 36 MCP)</strong> &bull; <strong>7 skills</strong> &bull; <strong>18 scanners</strong> &bull; <strong>10 runbooks</strong> &bull; <strong>73 PromQL recipes</strong> &bull; <strong>11 eval suites (98 scenarios)</strong> &bull; <strong>1,690 tests</strong> &bull; <strong>Migration v016</strong> &bull; <strong>Protocol v2</strong>
+  <strong>122 tools (86 native + 36 MCP)</strong> &bull; <strong>7 skills</strong> &bull; <strong>18 scanners</strong> &bull; <strong>10 runbooks</strong> &bull; <strong>73 PromQL recipes</strong> &bull; <strong>11 eval suites (98 scenarios)</strong> &bull; <strong>1,689 tests</strong> &bull; <strong>Migration v016</strong> &bull; <strong>Protocol v2</strong>
 </p>
 
 <p align="center">
