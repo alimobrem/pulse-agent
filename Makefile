@@ -40,6 +40,13 @@ test-all: verify evals
 test-everything: verify evals-full
 	@echo "All tests, deterministic evals, and LLM-judged evals passed."
 
+chaos-test:
+	@echo "Running chaos engineering tests against live cluster..."
+	./scripts/chaos-test.sh
+
+chaos-test-dry:
+	./scripts/chaos-test.sh --dry-run
+
 helm-lint:
 	helm lint chart/
 	helm template test chart/ --set vertexAI.projectId=test --set vertexAI.region=us-central1
