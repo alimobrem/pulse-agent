@@ -39,6 +39,7 @@ class PlanRuntime:
             client: Anthropic client (optional, created lazily)
         """
         self._client = client
+        self._write_mutex = asyncio.Lock()  # serializes write operations across parallel phases
 
     async def execute(
         self,
@@ -221,7 +222,8 @@ class PlanRuntime:
 
             if len(ready) > 1:
                 logger.info("Running %d phases in parallel: %s", len(ready), [p.id for p in ready])
-                outputs = await asyncio.gather(*[_run_one(p) for p in ready])
+                # Race parallel phases — first high-confidence result cancels siblings
+                outputs = await self._race_parallel(ready, _run_one)
             else:
                 outputs = [await _run_one(ready[0])]
 
@@ -399,6 +401,65 @@ class PlanRuntime:
             lines.append("")
 
         return "\n".join(lines)
+
+    async def _race_parallel(
+        self,
+        phases: list,
+        run_fn,
+    ) -> list[tuple[str, SkillOutput]]:
+        """Race parallel phases — first high-confidence result cancels siblings.
+
+        If any phase completes with confidence >= 0.85, cancel remaining tasks.
+        All completed results are returned (cancelled phases get 'skipped' status).
+        """
+        tasks: dict[str, asyncio.Task] = {}
+        for p in phases:
+            task = asyncio.create_task(run_fn(p))
+            tasks[p.id] = task
+
+        results: list[tuple[str, SkillOutput]] = []
+        winner_found = False
+
+        # Wait for tasks as they complete
+        pending = set(tasks.values())
+        while pending:
+            done, pending = await asyncio.wait(pending, return_when=asyncio.FIRST_COMPLETED)
+            for task in done:
+                phase_id, output = task.result()
+                results.append((phase_id, output))
+
+                # Check if this is a high-confidence winner
+                if output.confidence >= 0.85 and output.status == "complete" and not winner_found:
+                    winner_found = True
+                    logger.info(
+                        "Parallel winner: phase '%s' (confidence=%.2f) — cancelling %d siblings",
+                        phase_id,
+                        output.confidence,
+                        len(pending),
+                    )
+                    # Cancel remaining tasks
+                    for remaining in pending:
+                        remaining.cancel()
+                    # Collect cancelled results
+                    for p in phases:
+                        if p.id not in {r[0] for r in results}:
+                            results.append(
+                                (
+                                    p.id,
+                                    SkillOutput(
+                                        skill_id=p.skill_name,
+                                        phase_id=p.id,
+                                        status="skipped",
+                                        evidence_summary="Cancelled — sibling phase found answer first",
+                                        confidence=0.0,
+                                    ),
+                                )
+                            )
+                    break
+            if winner_found:
+                break
+
+        return results
 
     def _check_success_condition(self, condition: str, output: SkillOutput) -> bool:
         """Check if a phase's success condition is met.
