@@ -4,10 +4,10 @@ from sre_agent.layout_engine import compute_layout
 
 
 class TestSingleComponents:
-    def test_single_chart_full_width(self):
+    def test_single_chart_default_width(self):
         components = [{"kind": "chart"}]
         layout = compute_layout(components)
-        assert layout[0]["w"] == 4
+        assert layout[0]["w"] == 2  # charts default to half-width
         assert layout[0]["x"] == 0
 
     def test_single_table_full_width(self):
@@ -78,12 +78,12 @@ class TestChartPacking:
     def test_three_charts(self):
         components = [{"kind": "chart"}, {"kind": "chart"}, {"kind": "chart"}]
         layout = compute_layout(components)
-        # First 2 side-by-side
+        # First 2 side-by-side (w=2 each fills row)
         assert layout[0]["w"] == 2
         assert layout[1]["w"] == 2
         assert layout[0]["y"] == layout[1]["y"]
-        # 3rd full-width below
-        assert layout[2]["w"] == 4
+        # 3rd on next row (bin-packed, stays w=2)
+        assert layout[2]["w"] == 2
         assert layout[2]["y"] > layout[0]["y"]
 
     def test_node_map_full_width(self):
@@ -228,3 +228,64 @@ class TestNewComponentTypes:
         layout = compute_layout(components)
         assert layout[0]["w"] == 4
         assert layout[0]["h"] == 10
+
+
+class TestLayoutHints:
+    def test_width_hint_half(self):
+        components = [{"kind": "data_table", "layout": {"w": "half"}}]
+        layout = compute_layout(components)
+        assert layout[0]["w"] == 2
+
+    def test_width_hint_full(self):
+        components = [{"kind": "chart", "layout": {"w": "full"}}]
+        layout = compute_layout(components)
+        assert layout[0]["w"] == 4
+
+    def test_width_hint_quarter(self):
+        components = [{"kind": "chart", "layout": {"w": "quarter"}}]
+        layout = compute_layout(components)
+        assert layout[0]["w"] == 1
+
+    def test_height_hint_compact(self):
+        components = [{"kind": "chart", "layout": {"h": "compact"}}]
+        layout = compute_layout(components)
+        assert layout[0]["h"] < 12  # default chart height is 12
+
+    def test_height_hint_tall(self):
+        components = [{"kind": "chart", "layout": {"h": "tall"}}]
+        layout = compute_layout(components)
+        assert layout[0]["h"] > 12
+
+    def test_group_packing(self):
+        components = [
+            {"kind": "chart", "layout": {"w": "half", "group": "cpu"}},
+            {"kind": "chart", "layout": {"w": "half", "group": "cpu"}},
+        ]
+        layout = compute_layout(components)
+        assert layout[0]["y"] == layout[1]["y"]  # same row
+        assert layout[0]["x"] != layout[1]["x"]
+
+    def test_priority_top(self):
+        components = [
+            {"kind": "data_table"},
+            {"kind": "chart", "layout": {"priority": "top"}},
+        ]
+        layout = compute_layout(components)
+        # Chart with priority=top should be above table
+        assert layout[1]["y"] < layout[0]["y"]
+
+    def test_no_hints_uses_defaults(self):
+        components = [{"kind": "chart"}]
+        layout = compute_layout(components)
+        assert layout[0]["w"] == 2  # default for chart
+        assert layout[0]["h"] == 12
+
+    def test_content_aware_table_height(self):
+        components = [{"kind": "data_table", "rows": [{}] * 8}]
+        layout = compute_layout(components)
+        assert layout[0]["h"] == 11  # 3 + min(8, 12)
+
+    def test_content_aware_status_list_height(self):
+        components = [{"kind": "status_list", "items": [{}] * 5}]
+        layout = compute_layout(components)
+        assert layout[0]["h"] == 6  # 2 + min(ceil(5*0.8), 8) = 2 + 4
