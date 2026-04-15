@@ -1224,9 +1224,16 @@ def build_config_from_skill(skill: Skill, query: str = "") -> dict:
         ordered = _reorder_deprioritized(list(tool_map.values()), deprioritized)
         tool_map = {t.name: t for t in ordered}
 
-    # When skill doesn't allow writes, strip write tools from tool_map entirely.
-    # This prevents the agent from calling dangerous tools without confirmation.
-    if not skill.write_tools:
+    if skill.write_tools:
+        # Ensure ALL write tools from the skill's categories are included,
+        # even if the adaptive selector didn't pick them. Write tools must
+        # always be available when the skill allows writes — the agent needs
+        # to be able to act (delete pods, scale deployments, etc.)
+        for name in allowed_tool_names & WRITE_TOOL_NAMES:
+            if name in all_tools and name not in tool_map:
+                tool_map[name] = all_tools[name]
+    else:
+        # Strip write tools entirely — prevents calling dangerous tools without confirmation.
         tool_map = {n: t for n, t in tool_map.items() if n not in WRITE_TOOL_NAMES}
 
     tool_defs = [t.to_dict() for t in tool_map.values()]
