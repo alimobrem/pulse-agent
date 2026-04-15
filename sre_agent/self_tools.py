@@ -16,7 +16,7 @@ _OPENAPI_CACHE_TTL = 3600  # 1 hour
 
 
 @beta_tool
-def list_my_skills():
+def describe_agent():
     """List all available agent skills with descriptions. Call when the user asks what you can do or what skills you have."""
     from .skill_loader import list_skills
 
@@ -57,7 +57,7 @@ def list_my_skills():
 
 
 @beta_tool
-def list_my_tools():
+def describe_tools():
     """List all tools available to the agent grouped by source. Call when the user asks what tools you have."""
     from .mcp_client import list_mcp_tools
     from .tool_registry import TOOL_REGISTRY
@@ -446,7 +446,7 @@ def edit_skill(name: str, content: str):
 
     skill = get_skill(name)
     if not skill:
-        return f"Error: skill '{name}' not found. Use list_my_skills to see available skills."
+        return f"Error: skill '{name}' not found. Use describe_agent to see available skills."
 
     # Validate YAML frontmatter
     if "---" not in content:
@@ -522,7 +522,7 @@ def delete_skill(name: str):
 
     skill = get_skill(name)
     if not skill:
-        return f"Error: skill '{name}' not found. Use list_my_skills to see available skills."
+        return f"Error: skill '{name}' not found. Use describe_agent to see available skills."
 
     if name in _BUILTIN_SKILLS:
         return f"Error: '{name}' is a built-in skill and cannot be deleted. Only user-created skills can be removed."
@@ -585,7 +585,7 @@ def create_skill_from_template(
     # Validate template exists
     template_skill = get_skill(template)
     if not template_skill:
-        return f"Error: template skill '{template}' not found. Use list_my_skills to see available skills."
+        return f"Error: template skill '{template}' not found. Use describe_agent to see available skills."
 
     # Read template skill.md
     template_file = template_skill.path / "skill.md"
@@ -934,8 +934,8 @@ def list_deprecated_apis():
 from .tool_registry import register_tool as _register
 
 for _tool in [
-    list_my_skills,
-    list_my_tools,
+    describe_agent,
+    describe_tools,
     list_ui_components,
     list_promql_recipes,
     list_runbooks,

@@ -549,13 +549,13 @@ EVAL_PROMPTS: list[tuple[str, list[str], str, str]] = [
     # Self-description tools
     (
         "what can you do?",
-        ["list_my_skills"],
+        ["describe_agent"],
         "sre",
         "List agent skills",
     ),
     (
         "what tools do you have?",
-        ["list_my_tools"],
+        ["describe_tools"],
         "sre",
         "List agent tools",
     ),

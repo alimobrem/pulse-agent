@@ -62,8 +62,8 @@ ALWAYS call the self-description tools — do NOT answer from memory. Your capab
 change dynamically (skills are added, MCP tools connect). Only the tools have the current list.
 
 Required tool calls for capability questions:
-- "What can you do?" / "help" → MUST call `list_my_skills`
-- "What tools?" → MUST call `list_my_tools`
+- "What can you do?" / "help" → MUST call `describe_agent`
+- "What tools?" → MUST call `describe_tools`
 - "What components/widgets?" → MUST call `list_ui_components`
 - "What PromQL recipes?" → MUST call `list_promql_recipes`
 - "What runbooks?" → MUST call `list_runbooks`

@@ -796,8 +796,8 @@ TOOL_CATEGORIES = {
             "api resource",
         ],
         "tools": [
-            "list_my_skills",
-            "list_my_tools",
+            "describe_agent",
+            "describe_tools",
             "list_ui_components",
             "list_promql_recipes",
             "list_runbooks",
@@ -827,11 +827,11 @@ ALWAYS_INCLUDE = {
     "record_audit_entry",
     "suggest_remediation",
     "request_sre_investigation",
-    "list_my_skills",
+    "describe_agent",
 }
 
 _SELF_DESCRIBE_TOOLS = {
-    "list_my_tools",
+    "describe_tools",
     "list_ui_components",
     "list_promql_recipes",
     "list_runbooks",
