@@ -1037,6 +1037,10 @@ def build_config_from_skill(skill: Skill, query: str = "") -> dict:
             cat = TOOL_CATEGORIES.get(cat_name, {})
             tool_names.update(cat.get("tools", []))
 
+        # plan_builder always gets skill management tools
+        if skill.name == "plan_builder":
+            tool_names.update(_SELF_DESCRIBE_TOOLS)
+
         tool_map = {n: t for n, t in all_tools.items() if n in tool_names}
 
     # Include MCP tools that don't duplicate native tools
