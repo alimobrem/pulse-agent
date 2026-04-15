@@ -18,7 +18,10 @@ keywords:
   - show as chart, show as table, convert to
   - metric card, sparkline, bar chart, donut
   - monitoring view, clone dashboard
-categories: []
+categories:
+  - views
+  - diagnostics
+  - monitoring
 skip_component_hints: true
 write_tools: false
 priority: 10

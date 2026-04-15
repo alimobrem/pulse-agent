@@ -75,14 +75,21 @@ class TestSkillToolSharing:
         shared = sre_tools & sec_tools
         assert len(shared) > 0  # At least some tools shared
 
-    def test_view_designer_gets_all_tools(self):
-        """View designer (categories=[]) should get all registered tools."""
+    def test_view_designer_gets_scoped_tools(self):
+        """View designer should get view + data tools but NOT write tools."""
         from sre_agent.orchestrator import build_orchestrated_config
 
         vd = build_orchestrated_config("view_designer")
-        sre = build_orchestrated_config("sre")
-        # View designer should have at least as many tools as SRE
-        assert len(vd["tool_map"]) >= len(sre["tool_map"])
+        # Must have core view tools
+        assert "plan_dashboard" in vd["tool_map"]
+        assert "create_dashboard" in vd["tool_map"]
+        assert "get_prometheus_query" in vd["tool_map"]
+        # Must NOT have dangerous write tools
+        assert "drain_node" not in vd["tool_map"]
+        assert "delete_pod" not in vd["tool_map"]
+        assert "scale_deployment" not in vd["tool_map"]
+        # write_tools set should be empty
+        assert len(vd["write_tools"]) == 0
 
     def test_capacity_planner_gets_monitoring_tools(self):
         """Capacity planner skill should get monitoring category tools."""

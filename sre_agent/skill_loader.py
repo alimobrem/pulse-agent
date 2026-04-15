@@ -203,6 +203,7 @@ _VALID_CATEGORIES = {
     "gitops",
     "fleet",
     "self",
+    "views",
 }
 
 _VALID_CONFIGURABLE_TYPES = {"enum", "string", "boolean", "number"}
@@ -835,6 +836,44 @@ TOOL_CATEGORIES = {
             "create_skill_from_template",
         ],
     },
+    "views": {
+        "keywords": [
+            "dashboard",
+            "view",
+            "widget",
+            "chart",
+            "table",
+            "metric card",
+            "layout",
+        ],
+        "tools": [
+            "plan_dashboard",
+            "create_dashboard",
+            "namespace_summary",
+            "cluster_metrics",
+            "list_saved_views",
+            "get_view_details",
+            "update_view_widgets",
+            "add_widget_to_view",
+            "remove_widget_from_view",
+            "emit_component",
+            "undo_view_change",
+            "get_view_versions",
+            "delete_dashboard",
+            "clone_dashboard",
+            "critique_view",
+            # Data tools needed for dashboard content
+            "get_prometheus_query",
+            "discover_metrics",
+            "list_pods",
+            "list_resources",
+            "get_firing_alerts",
+            "get_events",
+            "get_node_metrics",
+            "get_pod_metrics",
+            "describe_pod",
+        ],
+    },
 }
 
 # Tools always included regardless of category — these are lightweight and
@@ -852,6 +891,7 @@ ALWAYS_INCLUDE = {
     "record_audit_entry",
     "suggest_remediation",
     "request_sre_investigation",
+    "request_security_scan",
     "describe_agent",
 }
 
@@ -1182,6 +1222,11 @@ def build_config_from_skill(skill: Skill, query: str = "") -> dict:
     if deprioritized:
         ordered = _reorder_deprioritized(list(tool_map.values()), deprioritized)
         tool_map = {t.name: t for t in ordered}
+
+    # When skill doesn't allow writes, strip write tools from tool_map entirely.
+    # This prevents the agent from calling dangerous tools without confirmation.
+    if not skill.write_tools:
+        tool_map = {n: t for n, t in tool_map.items() if n not in WRITE_TOOL_NAMES}
 
     tool_defs = [t.to_dict() for t in tool_map.values()]
     write_tools = set(WRITE_TOOL_NAMES) if skill.write_tools else set()
