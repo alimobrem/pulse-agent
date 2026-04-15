@@ -237,6 +237,24 @@ class SkillSelector:
         # Apply threshold
         threshold = self._compute_threshold(context)
 
+        # Resolve conflicts before selecting
+        # Get top skills by score
+        top_skills = sorted(fused.keys(), key=lambda k: -fused.get(k, 0))[:5] if fused else []
+        conflicts = self.detect_conflicts([], selected_skills=top_skills)
+
+        # Hard skill conflicts: drop the lower-scored skill from fused scores
+        for conflict in conflicts:
+            if conflict["type"] == "skill_conflict":
+                a, b = conflict["pair"]
+                if a in fused and b in fused:
+                    # Drop the lower-scored one
+                    if fused.get(a, 0) < fused.get(b, 0):
+                        fused[a] = 0.0
+                        logger.info("Hard conflict: dropped '%s' (lower score) vs '%s'", a, b)
+                    else:
+                        fused[b] = 0.0
+                        logger.info("Hard conflict: dropped '%s' (lower score) vs '%s'", b, a)
+
         # Find best skill
         if fused:
             best_name = max(
@@ -259,17 +277,18 @@ class SkillSelector:
                 fused_scores=fused,
                 channel_scores=channel_scores,
                 threshold_used=threshold,
+                conflicts=conflicts,
                 selection_ms=elapsed_ms,
                 source="orca",
             )
 
         # Below threshold — fallback
-        # Still return the best score even if below threshold
         return SelectionResult(
             skill_name=best_name if best_name in self._skills else "sre",
             fused_scores=fused,
             channel_scores=channel_scores,
             threshold_used=threshold,
+            conflicts=conflicts,
             selection_ms=elapsed_ms,
             source="fallback",
         )
