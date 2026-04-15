@@ -86,7 +86,7 @@ if [[ "$FORCE" != "true" ]]; then
   done
 
   # Check cluster context — warn if pointed at a production cluster
-  CLUSTER_URL=$($CMD cluster-info 2>/dev/null | head -1 | grep -oP 'https://[^ ]+' || echo "unknown")
+  CLUSTER_URL=$($CMD cluster-info 2>/dev/null | head -1 | grep -oE 'https://[^ ]+' || echo "unknown")
   if echo "$CLUSTER_URL" | grep -qiE "prod|production|prd"; then
     echo -e "${RED}SAFETY: Cluster URL contains 'prod' — refusing to run chaos tests${NC}"
     echo "URL: ${CLUSTER_URL}"
