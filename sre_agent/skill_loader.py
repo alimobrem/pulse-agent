@@ -1224,23 +1224,22 @@ def build_config_from_skill(skill: Skill, query: str = "") -> dict:
         ordered = _reorder_deprioritized(list(tool_map.values()), deprioritized)
         tool_map = {t.name: t for t in ordered}
 
+    # Guarantee required tools are present — these bypass TF-IDF prediction.
+    # The skill's requires_tools field lists tools that MUST always be available,
+    # not just validated at load time. This replaces three separate hard-coded
+    # inclusion blocks (write tools, self-describe tools, ALWAYS_INCLUDE).
+    for name in skill.requires_tools:
+        if name in all_tools and name not in tool_map:
+            tool_map[name] = all_tools[name]
+
     if skill.write_tools:
-        # Ensure ALL write tools from the skill's categories are included,
-        # even if the adaptive selector didn't pick them. Write tools must
-        # always be available when the skill allows writes — the agent needs
-        # to be able to act (delete pods, scale deployments, etc.)
+        # Write-enabled skills get ALL write tools from their categories
         for name in allowed_tool_names & WRITE_TOOL_NAMES:
             if name in all_tools and name not in tool_map:
                 tool_map[name] = all_tools[name]
     else:
         # Strip write tools entirely — prevents calling dangerous tools without confirmation.
         tool_map = {n: t for n, t in tool_map.items() if n not in WRITE_TOOL_NAMES}
-
-    # plan_builder always gets skill management tools regardless of TF-IDF prediction
-    if skill.name == "plan_builder":
-        for name in _SELF_DESCRIBE_TOOLS:
-            if name in all_tools and name not in tool_map:
-                tool_map[name] = all_tools[name]
 
     tool_defs = [t.to_dict() for t in tool_map.values()]
     write_tools = set(WRITE_TOOL_NAMES) if skill.write_tools else set()

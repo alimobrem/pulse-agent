@@ -14,8 +14,8 @@ categories:
 write_tools: false
 priority: 10
 skip_component_hints: true
-# requires_tools removed — security tools register at import time, not at startup
-# Validation at load time incorrectly marks skill as degraded in local/test mode
+requires_tools:
+  - request_sre_investigation
 handoff_to:
   sre: [fix, remediate, scale, restart, apply, patch, delete]
   view_designer: [dashboard, view, create view, security dashboard]

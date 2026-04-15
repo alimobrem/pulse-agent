@@ -19,6 +19,13 @@ categories:
   - operations
 write_tools: true
 priority: 15
+requires_tools:
+  - create_skill
+  - edit_skill
+  - delete_skill
+  - create_skill_from_template
+  - describe_agent
+  - describe_tools
 skip_component_hints: true
 trigger_patterns:
   - "build.*plan|create.*plan|make.*plan"
