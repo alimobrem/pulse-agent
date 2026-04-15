@@ -75,9 +75,9 @@ React/TypeScript frontend (OpenShift Pulse) providing the user interface.
 
 | Metric | Value |
 |--------|-------|
-| Tools | 111 (75 native + 36 MCP) across 36 modules + MCP servers |
+| Tools | 122 (86 native + 36 MCP) across 36 modules + MCP servers |
 | Scanners | 17 (12 core + 5 audit) |
-| Tests | 1,676 |
+| Tests | 1,690 |
 | PromQL Recipes | 73 across 16 categories |
 | Eval Prompts | 98 |
 | Protocol Version | 2 |
@@ -91,7 +91,7 @@ React/TypeScript frontend (OpenShift Pulse) providing the user interface.
 | Entry Point | File | Purpose |
 |-------------|------|---------|
 | CLI | `sre_agent/main.py` | Interactive Rich terminal UI |
-| API Server | `sre_agent/serve.py` -> `sre_agent/api.py` | FastAPI WebSocket server on port 8080 |
+| API Server | `sre_agent/serve.py` -> `sre_agent/api/` | FastAPI WebSocket server on port 8080 |
 
 The CLI is used for local development and debugging. In production, the agent
 runs as an API server behind the Pulse UI.
@@ -114,7 +114,7 @@ agent modes (SRE, Security, View Designer, Auto-routing). The function
 │         │ CLOSED / HALF_OPEN                                │
 │         ▼                                                   │
 │  ┌──────────────┐                                           │
-│  │ Harness:     │  111 tools -> 15-25 relevant tools        │
+│  │ Harness:     │  122 tools -> 15-50 relevant tools         │
 │  │ select_tools │  based on query keywords + agent mode     │
 │  └──────┬───────┘                                           │
 │         ▼                                                   │
@@ -229,10 +229,10 @@ its own system prompt, tool set, and write permissions:
 
 | Mode | Endpoint | System Prompt | Tools | Write Ops |
 |------|----------|---------------|-------|-----------|
-| **SRE** | `/ws/sre` | Cluster diagnostics, triage | 72+ SRE tools | Yes (confirmed) |
-| **Security** | `/ws/security` | Security scanning, compliance | 9 security tools | No |
+| **SRE** | `/ws/agent` (auto-routed) | Cluster diagnostics, triage | 72+ SRE tools | Yes (confirmed) |
+| **Security** | `/ws/agent` (auto-routed) | Security scanning, compliance | 9 security tools | No |
 | **View Designer** | `/ws/agent` (auto-routed) | Dashboard creation specialist | Data + view tools | No |
-| **Both** | `/ws/agent` (auto-routed) | SRE + security merged | All tools | Yes (confirmed) |
+| **Capacity Planner** | `/ws/agent` (auto-routed) | Resource forecasting, right-sizing | Analytics tools | No |
 
 ### Intent Classification
 
@@ -289,7 +289,7 @@ User: "Why are pods crashing in staging?"     -> sre (hard switch)
 
 ## 4. Tool System
 
-### 111 Tools Across 36 Modules
+### 122 Tools Across 36 Modules
 
 | Module | File | Tools | Description |
 |--------|------|-------|-------------|
@@ -417,8 +417,8 @@ The system prompt is built in 4 tiers, each with different caching behavior:
 
 The harness achieves a 71% reduction in prompt size through:
 
-1. **Selective tool schema injection** -- Instead of sending all 111 tool
-   schemas, the harness selects 15-25 relevant tools based on the user query
+1. **Selective tool schema injection** -- Instead of sending all 122 tool
+   schemas, the harness selects 15-50 relevant tools based on the user query
    and agent mode. Each mode maps to a set of tool categories.
 2. **Selective component schema injection** -- Only component schemas that the
    selected tools can produce are injected (e.g., if no table tools are
@@ -549,7 +549,7 @@ curated from 7 OpenShift/Kubernetes repositories:
 
 ### Overview
 
-The monitor system (`sre_agent/monitor.py`) provides continuous autonomous
+The monitor system (`sre_agent/monitor/`) provides continuous autonomous
 cluster scanning via the `/ws/monitor` WebSocket endpoint. It pushes findings,
 predictions, investigation reports, and action reports to connected UI clients
 in real time.
@@ -932,7 +932,7 @@ Server                              Client
 ```
 
 Nonces are generated via `secrets.token_urlsafe(16)` and stored in
-`_pending_nonces` keyed by session ID. Stale nonces are cleaned up after 120s.
+`_pending_nonces` keyed by session ID. Stale pending confirmations are cleaned up after 120 seconds.
 
 ### Prompt Injection Defense
 
@@ -981,10 +981,8 @@ max 3 will operate at level 3. This prevents UI-side escalation.
 
 | Path | Auth | Description |
 |------|------|-------------|
-| `/ws/sre` | token | SRE agent chat |
-| `/ws/security` | token | Security scanner chat |
-| `/ws/monitor` | token | Autonomous cluster monitoring |
-| `/ws/agent` | token | Auto-routing orchestrated agent |
+| `/ws/agent` | token | Auto-routing orchestrated agent (ORCA classifies intent per message) |
+| `/ws/monitor` | token | Autonomous cluster monitoring (18 scanners, auto-fix, investigations) |
 
 ### Chat Protocol (SRE, Security, Agent)
 
@@ -1044,7 +1042,7 @@ max 3 will operate at level 3. This prevents UI-side escalation.
 - Max 10 messages per minute per WebSocket connection
 - Max 1MB message size
 - Confirmation timeout: 120 seconds
-- Pending confirmation TTL: 5 minutes (stale entries cleaned up)
+- Pending confirmation TTL: 120 seconds (stale entries cleaned up)
 
 ### Reconnection
 
@@ -1161,8 +1159,6 @@ error if neither is set.
 │  ┌──────────────────────────────────────────────────────────────────┐    │
 │  │                     FastAPI Server (api.py)                       │    │
 │  │                                                                  │    │
-│  │  /ws/sre ──────┐                                                 │    │
-│  │  /ws/security ─┤                                                 │    │
 │  │  /ws/agent ────┤── run_agent_streaming() ──── Claude API         │    │
 │  │                │        │                    (Vertex/Anthropic)   │    │
 │  │                │        │                                        │    │
@@ -1372,7 +1368,7 @@ User: "Build me a production dashboard"
 
 ### Multi-Signal Skill Selector (`skill_selector.py`)
 
-Replaces keyword-only routing with 6-channel weighted fusion. Each channel scores every skill independently, then scores are fused and re-ranked. Learned weights persist across pod restarts.
+Replaces keyword-only routing with 6-channel weighted fusion (5 active by default, semantic opt-in). Each channel scores every skill independently, then scores are fused and re-ranked. Learned weights persist across pod restarts.
 
 **Channels (default weights, sum to 1.0):**
 1. **Keyword** (0.30) — direct keyword + skill name matching, normalized 0.0-1.0
@@ -1573,7 +1569,7 @@ interactions. MCP servers offer a standardized alternative. The strategy:
 │   • ArgoCD MCP → replace gitops_tools HTTP calls    │
 ├─────────────────────────────────────────────────────┤
 │ Layer 1: MCP Server (expose)                        │
-│   Expose Pulse Agent's 111 tools AS an MCP server   │
+│   Expose Pulse Agent's 86 native tools AS an MCP server │
 │   so other Claude-based tools can use them           │
 └─────────────────────────────────────────────────────┘
 ```
@@ -1602,7 +1598,7 @@ Key decisions made during development and the reasoning behind them.
 
 ### ADR-1: Custom Tools vs MCP
 
-**Decision:** Build 75 custom `@beta_tool` functions instead of using MCP servers.
+**Decision:** Build 86 custom `@beta_tool` functions instead of using MCP servers.
 
 **Why:** Our tools return `(text, component_spec)` tuples for rich UI rendering — interactive charts, tables, metric cards with live sparklines. MCP tools return text only. Our tools also embed domain logic (health scoring, chart type detection, PromQL title generation), feed the intelligence loop (tool_usage recording, chain hints), and integrate with the write confirmation gate. MCP was not mature for Kubernetes when we started.
 
@@ -1753,13 +1749,13 @@ Key decisions made during development and the reasoning behind them.
 |------|---------|
 | `sre_agent/main.py` | Interactive CLI with Rich UI |
 | `sre_agent/serve.py` | FastAPI server bootstrap |
-| `sre_agent/api.py` | API routes, WebSocket handlers, view management |
+| `sre_agent/api/` | API routes (15-module package), WebSocket handlers, view management |
 | `sre_agent/agent.py` | Shared agent loop, circuit breaker, tool execution |
 | `sre_agent/orchestrator.py` | Intent classification and agent routing |
 | `sre_agent/harness.py` | Prompt caching, cluster context injection, component hints |
 | `sre_agent/skill_loader.py` | Skill package loader, tool selection, query routing, MCP inclusion |
 | `sre_agent/mcp_client.py` | MCP server connections (SSE transport), tool/prompt discovery |
-| `sre_agent/monitor.py` | Autonomous scanning, auto-fix, investigations |
+| `sre_agent/monitor/` | Autonomous scanning, auto-fix, investigations (11-module package) |
 | `sre_agent/view_designer.py` | View designer agent mode |
 | `sre_agent/config.py` | Pydantic v2 Settings (`PulseAgentSettings`) |
 | `sre_agent/k8s_tools/` | 41 K8s tools (11-module package) |
@@ -1802,4 +1798,4 @@ Key decisions made during development and the reasoning behind them.
 
 ---
 
-*111 tools (75 native + 36 MCP) -- 17 scanners -- 10 runbooks -- 73 PromQL recipes -- 98 eval prompts -- 1,520 tests -- Protocol v2*
+*122 tools (86 native + 36 MCP) -- 18 scanners -- 10 runbooks -- 73 PromQL recipes -- 98 eval prompts -- 1,690 tests -- Protocol v2*

@@ -27,8 +27,7 @@ Verify every message type in API_CONTRACT.md is implemented:
 - `GET /version` — returns protocol version, agent version, tool count, features
 
 ### 3. WebSocket Endpoints
-- `ws://.../ws/sre` — SRE agent mode
-- `ws://.../ws/security` — Security agent mode
+- `ws://.../ws/agent` — Auto-routing orchestrated agent (ORCA skill selector)
 - `ws://.../ws/monitor` — Autonomous monitor mode (Protocol v2)
 
 ### 4. Constraints

@@ -5,7 +5,7 @@
   <img src="https://img.shields.io/badge/tools-122_(86+36_MCP)-10b981?style=for-the-badge" alt="Tools">
   <img src="https://img.shields.io/badge/skills-7-10b981?style=for-the-badge" alt="Skills">
   <img src="https://img.shields.io/badge/scanners-18-10b981?style=for-the-badge" alt="Scanners">
-  <img src="https://img.shields.io/badge/tests-1676-10b981?style=for-the-badge" alt="Tests">
+  <img src="https://img.shields.io/badge/tests-1690-10b981?style=for-the-badge" alt="Tests">
   <img src="https://img.shields.io/badge/eval_suites-11_(98_scenarios)-10b981?style=for-the-badge" alt="Eval Suites">
   <img src="https://img.shields.io/badge/release_gate-98.1%25-10b981?style=for-the-badge" alt="Release Gate">
   <img src="https://img.shields.io/badge/PromQL%20recipes-73-10b981?style=for-the-badge" alt="PromQL Recipes">
@@ -109,7 +109,7 @@ See [docs/SKILL_DEVELOPER_GUIDE.md](docs/SKILL_DEVELOPER_GUIDE.md) for creating 
 - **Auto-Fix** -- Trust level 3 auto-fixes safe categories (crashloop pod deletion, deployment restarts). Trust level 4 fixes everything automatically with rollback snapshots
 - **Confidence Scores** -- Every finding, investigation, and action includes a 0-100% confidence score
 - **Noise Learning** -- Tracks transient findings and assigns noise scores to suppress flaky alerts
-- **Simulation Preview** -- `POST /simulate` predicts impact, risk, and duration before execution
+- **Simulation Preview** -- Predict impact, risk, and duration before executing a fix
 
 ### MCP Integration
 - **36 MCP Tools** from the OpenShift MCP server (sidecar pod) across 11 toolsets: core, config, helm, observability, openshift, ossm, netedge, tekton, kiali, kubevirt, kcp
@@ -297,7 +297,7 @@ Consolidated management page with 8 tabs:
 
 ```bash
 pip install -e '.[test]'
-python3 -m pytest tests/ -v           # All 1,676 tests
+python3 -m pytest tests/ -v           # All 1,690 tests
 python3 -m pytest tests/test_foo.py   # Single file
 make verify                           # Lint + type-check + tests
 ```
@@ -366,7 +366,7 @@ sre_agent/
   tool_registry.py     Central registry (all tools register at import)
 
   # Monitor
-  monitor/             10 modules: session, scanners, investigations, auto-fix, ...
+  monitor/             11 modules: session, scanners, investigations, auto-fix, ...
 
   # Intelligence
   intelligence.py      Analytics feedback loop into system prompt
@@ -390,8 +390,6 @@ chart/                 Helm chart (deployment, RBAC, PostgreSQL StatefulSet, Net
 | Endpoint | Description |
 |----------|-------------|
 | `WS /ws/agent` | Auto-routing orchestrated agent (ORCA classifies each message) |
-| `WS /ws/sre` | Direct SRE agent |
-| `WS /ws/security` | Direct security scanner |
 | `WS /ws/monitor` | Autonomous monitor (18 scanners, auto-fix, predictions) |
 
 All WebSocket endpoints require `?token=...` query parameter (constant-time comparison). Protocol v2.
@@ -399,7 +397,7 @@ All WebSocket endpoints require `?token=...` query parameter (constant-time comp
 ---
 
 <p align="center">
-  <strong>122 tools (86 native + 36 MCP)</strong> &bull; <strong>7 skills</strong> &bull; <strong>18 scanners</strong> &bull; <strong>10 runbooks</strong> &bull; <strong>73 PromQL recipes</strong> &bull; <strong>11 eval suites (98 scenarios)</strong> &bull; <strong>1,676 tests</strong> &bull; <strong>Migration v016</strong> &bull; <strong>Protocol v2</strong>
+  <strong>122 tools (86 native + 36 MCP)</strong> &bull; <strong>7 skills</strong> &bull; <strong>18 scanners</strong> &bull; <strong>10 runbooks</strong> &bull; <strong>73 PromQL recipes</strong> &bull; <strong>11 eval suites (98 scenarios)</strong> &bull; <strong>1,690 tests</strong> &bull; <strong>Migration v016</strong> &bull; <strong>Protocol v2</strong>
 </p>
 
 <p align="center">

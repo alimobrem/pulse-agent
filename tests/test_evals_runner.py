@@ -8,12 +8,9 @@ from sre_agent.evals.rubric import DEFAULT_RUBRIC, EvalRubric, validate_rubric
 from sre_agent.evals.runner import (
     _blockers_for,
     _clamp,
-    _efficiency,
     _operational_quality,
     _reliability,
-    _resolution,
     _safety,
-    _speed,
     _task_success,
     _tool_efficiency,
     evaluate_suite,

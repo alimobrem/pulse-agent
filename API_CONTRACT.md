@@ -26,8 +26,6 @@ Defines the REST and WebSocket protocol between the Pulse UI and Pulse Agent. Bo
 | `GET` | `/eval/history` | token | Paginated eval run history for trend charts (query params: `suite`, `days`, `limit`) |
 | `GET` | `/eval/trend` | token | Eval score trend summary with sparkline data (query params: `suite`, `days`) |
 | `GET` | `/briefing` | token | Cluster activity summary for last N hours (greeting, actions, investigations) |
-| `GET` | `/predictions` | token | Returns empty — predictions are WebSocket-only (`/ws/monitor`) |
-| `POST` | `/simulate` | token | Predict impact of a tool action without executing it |
 | `GET` | `/memory/export` | token | Export learned runbooks and patterns as JSON |
 | `POST` | `/memory/import` | token | Import runbooks and patterns from another pod's export |
 | `GET` | `/memory/stats` | token | Memory system stats: incident count, runbook count, pattern count |
@@ -38,7 +36,6 @@ Defines the REST and WebSocket protocol between the Pulse UI and Pulse Agent. Bo
 | `POST` | `/monitor/pause` | token | Emergency kill switch — pause all auto-fix actions |
 | `POST` | `/monitor/resume` | token | Resume auto-fix actions after a pause |
 | `GET` | `/tools/usage/chains` | token | Discovered tool call chains (common sequences via bigram analysis) |
-| `GET` | `/context` | token | View recent shared context bus entries across all agents |
 | `GET` | `/views` | token | List saved views for current user |
 | `GET` | `/views/:id` | token | Get a single saved view |
 | `POST` | `/views` | token | Save a new view |
@@ -234,11 +231,10 @@ Cached quality gate snapshot. Includes all suites (`release`, `safety`, `integra
     "view_designer": {"score": 0.78, "pass": true, "scenarios": 7}
   },
   "dimension_averages": {
-    "task_success": 0.85,
+    "resolution": 0.85,
+    "efficiency": 0.79,
     "safety": 0.96,
-    "tool_efficiency": 0.79,
-    "operational_quality": 0.81,
-    "reliability": 0.88
+    "speed": 0.88
   },
   "prompt_audit": {
     "total_tokens": 4200,
@@ -271,7 +267,7 @@ Auth: Bearer token.
       "score": 0.82,
       "pass": true,
       "scenarios": 12,
-      "dimension_scores": {"task_success": 0.85, "safety": 0.96},
+      "dimension_scores": {"resolution": 0.85, "safety": 0.96},
       "timestamp": "2026-04-09T10:00:00Z"
     }
   ],
@@ -307,16 +303,14 @@ Auth: Bearer token.
 
 | Path | Auth | Description |
 |------|------|-------------|
-| `/ws/sre?token=...` | token | SRE agent chat |
-| `/ws/security?token=...` | token | Security scanner chat |
+| `/ws/agent?token=...` | token | Auto-routing orchestrated agent — classifies intent per message and routes to the appropriate skill |
 | `/ws/monitor?token=...` | token | Autonomous cluster monitoring (Protocol v2) |
-| `/ws/agent?token=...` | token | Auto-routing orchestrated agent — classifies intent per message and routes to SRE or Security |
 
 All WebSocket endpoints require `PULSE_AGENT_WS_TOKEN` via the `token` query parameter. Connections without a valid token are closed with code `4001`.
 
 ---
 
-## Chat Protocol (`/ws/sre`, `/ws/security`, `/ws/agent`)
+## Chat Protocol (`/ws/agent`)
 
 ### Client-to-Server Messages
 
@@ -665,7 +659,7 @@ Emitted when the agent calls `create_dashboard`. Contains a collection of compon
 }
 ```
 
-The UI shows a "Save Dashboard" prompt. Saved views are accessible at `/custom/:viewId` and persist in localStorage.
+The UI shows a "Save Dashboard" prompt. Saved views are accessible at `/custom/:viewId` and persist in PostgreSQL.
 
 #### `view_validation_warning` — Dashboard saved with quality issues
 
@@ -839,31 +833,6 @@ Emitted during multi-phase investigations to show real-time progress of each pha
 | `planName` | `string` | Human-readable plan name |
 | `timestamp` | `number` | Unix timestamp |
 
-#### `skill_activity` — Active skill change or handoff
-
-Emitted when the agent switches skills or a handoff occurs between agent modes.
-
-```json
-{
-  "type": "skill_activity",
-  "data": {
-    "skill_name": "sre",
-    "status": "active",
-    "timestamp": 1711540800000,
-    "handoff_from": "security",
-    "handoff_to": "sre"
-  }
-}
-```
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `skill_name` | `string` | Currently active skill |
-| `status` | `string` | Skill status (`"active"`, `"idle"`) |
-| `timestamp` | `number` | Unix epoch milliseconds |
-| `handoff_from` | `string?` | Previous skill (only on handoff) |
-| `handoff_to` | `string?` | New skill (only on handoff) |
-
 #### `error` — Rate limit or other errors
 
 ```json
@@ -877,7 +846,7 @@ Emitted when the agent switches skills or a handoff occurs between agent modes.
 
 ## Agent Protocol (`/ws/agent`)
 
-The `/ws/agent` endpoint uses the same client-to-server and server-to-client message types as the chat protocol (`/ws/sre`, `/ws/security`). The difference is that each incoming `message` is classified by an intent classifier (`orchestrator.py`) and automatically routed to the appropriate agent (SRE or Security) with the correct system prompt and tool set.
+The `/ws/agent` endpoint is the primary chat endpoint. Each incoming `message` is classified by the ORCA skill selector and automatically routed to the appropriate skill with the correct system prompt and tool set.
 
 ### Client-to-Server Messages
 
@@ -932,9 +901,9 @@ Structured UI components returned by agent tools via the `component` event. The 
 | Max message size | 1 MB | Agent |
 | Rate limit | 10 messages/minute per connection | Agent |
 | Confirmation timeout | 120 seconds | Agent |
-| Pending confirmation TTL | 5 minutes | Agent |
+| Pending confirmation TTL | 120 seconds | Agent |
 | Context field validation | `^[a-zA-Z0-9\-._/: ]{0,253}$` | Agent |
-| Reconnect attempts | 5 max, exponential backoff + jitter | UI |
+| Reconnect attempts | 5 max, linear backoff + jitter | UI |
 
 ---
 

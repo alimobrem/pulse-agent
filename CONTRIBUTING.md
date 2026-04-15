@@ -41,8 +41,7 @@
 Install: `bash scripts/install-hooks.sh`
 
 Hooks run automatically before every commit:
-- Python: ruff lint + ruff format check + pytest
-- TypeScript: tsc --noEmit + vitest
+- Python: ruff lint + ruff format check + mypy + pytest
 
 ## CI
 

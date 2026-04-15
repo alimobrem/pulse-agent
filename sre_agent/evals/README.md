@@ -24,7 +24,7 @@ Scenario fixtures live in `sre_agent/evals/scenarios_data/*.json`.
 
 ## Replay Fixtures
 
-17 replay fixtures capture real agent tool-call traces for offline evaluation. Used by the replay harness to test scoring without live cluster access.
+28 replay fixtures capture real agent tool-call traces for offline evaluation. Used by the replay harness to test scoring without live cluster access.
 
 ## 5-Dimension Rubric
 

@@ -7,7 +7,7 @@ Report security issues to [GitHub Issues](https://github.com/alimobrem/pulse-age
 ## Authentication
 
 ### WebSocket Authentication
-All WebSocket endpoints (`/ws/sre`, `/ws/security`, `/ws/monitor`, `/ws/agent`) require `PULSE_AGENT_WS_TOKEN` via the `token` query parameter. Token comparison uses `hmac.compare_digest()` for constant-time comparison, preventing timing attacks. Connections without a valid token are closed with code `4001`.
+All WebSocket endpoints (`/ws/agent`, `/ws/monitor`) require `PULSE_AGENT_WS_TOKEN` via the `token` query parameter. Token comparison uses `hmac.compare_digest()` for constant-time comparison, preventing timing attacks. Connections without a valid token are closed with code `4001`.
 
 If `PULSE_AGENT_WS_TOKEN` is not set on the server, all connections are rejected (fail-closed).
 
@@ -19,7 +19,7 @@ All REST endpoints except `/healthz` and `/version` require token authentication
 Returns 401 on invalid token, 503 if `PULSE_AGENT_WS_TOKEN` is not configured.
 
 ### Nonce-Based Confirmation Replay Prevention
-Every `confirm_request` event includes a JIT nonce (generated via `secrets.token_urlsafe(16)`). The client must echo the nonce back in `confirm_response`. Mismatched nonces are rejected and the operation is denied. Stale pending confirmations are cleaned up after 5 minutes.
+Every `confirm_request` event includes a JIT nonce (generated via `secrets.token_urlsafe(16)`). The client must echo the nonce back in `confirm_response`. Mismatched nonces are rejected and the operation is denied. Stale pending confirmations are cleaned up after 120 seconds.
 
 ## Authorization
 
@@ -66,7 +66,7 @@ Two mechanisms to halt all auto-fix actions:
 2. **Environment variable:** `PULSE_AGENT_AUTOFIX_ENABLED=false` — disables auto-fix at startup
 
 ### Confirmation Gate
-- **Interactive agent (`/ws/sre`, `/ws/security`, `/ws/agent`):** All write operations require a `confirm_request`/`confirm_response` round-trip with nonce verification before execution. This is enforced programmatically in code — the agent cannot bypass it regardless of trust level.
+- **Interactive agent (`/ws/agent`):** All write operations require a `confirm_request`/`confirm_response` round-trip with nonce verification before execution. This is enforced programmatically in code — the agent cannot bypass it regardless of trust level.
 - **Monitor auto-fix (`/ws/monitor` at trust level 3+):** Fixes execute WITHOUT the interactive confirmation gate. This is by design for autonomous remediation. Safety is enforced through rate limiting, cooldown, bare pod protection, and the emergency kill switch instead.
 
 ## Prompt Injection Defense
