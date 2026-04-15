@@ -1,0 +1,20 @@
+scenarios:
+  - id: postmortem_generate
+    prompt: "generate a postmortem for the last incident"
+    should_mention: [postmortem, root cause, timeline]
+
+  - id: postmortem_review
+    prompt: "what happened with the crashloop incident yesterday?"
+    should_mention: [incident, cause, action]
+
+  - id: postmortem_rca
+    prompt: "give me a root cause analysis of the OOM kills"
+    should_mention: [root cause, memory, oom]
+
+  - id: postmortem_lessons
+    prompt: "what lessons can we learn from the last deployment failure?"
+    should_mention: [lesson, prevention, deployment]
+
+  - id: postmortem_blast_radius
+    prompt: "what was the blast radius of the node pressure incident?"
+    should_mention: [blast radius, affected, node]

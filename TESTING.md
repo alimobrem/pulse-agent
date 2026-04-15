@@ -811,7 +811,7 @@ All eval prompts mapped to expected tool calls. Used for evaluating agent tool s
 | show me cluster KPI metrics | `cluster_metrics` | Cluster metrics |
 | give me a namespace summary for staging | `namespace_summary` | Namespace summary |
 
-### Skill-Bundled (23+ prompts across 7 skills)
+### Skill-Bundled (38 prompts across 7 skills)
 
 Defined in `sre_agent/skills/*/evals.yaml`. Auto-registered as eval suites.
 
@@ -821,9 +821,9 @@ Defined in `sre_agent/skills/*/evals.yaml`. Auto-registered as eval suites.
 | security | 5 | "scan for RBAC vulnerabilities" |
 | view_designer | 6 | "create a monitoring dashboard" |
 | capacity_planner | 6 | "will we run out of CPU in the next week?" |
-| plan-builder | — | "investigate this crashloop with a phased plan" |
-| postmortem | — | "generate a postmortem for the last incident" |
-| slo-management | — | "show me current SLO burn rates" |
+| plan-builder | 5 | "build me a skill for PostgreSQL troubleshooting" |
+| postmortem | 5 | "generate a postmortem for the last incident" |
+| slo-management | 5 | "show me current SLO burn rates" |
 
 ### Tools Excluded from Eval
 

@@ -1,0 +1,22 @@
+scenarios:
+  - id: slo_check_status
+    prompt: "show me current SLO burn rates"
+    should_use_tools: [get_prometheus_query]
+    should_mention: [slo, burn rate, budget]
+
+  - id: slo_define_new
+    prompt: "set a 99.9% availability SLO for the checkout service"
+    should_mention: [slo, 99.9, availability, checkout]
+
+  - id: slo_error_budget
+    prompt: "how much error budget do we have left?"
+    should_mention: [error budget, remaining]
+
+  - id: slo_latency
+    prompt: "check if our p99 latency SLO is being met"
+    should_use_tools: [get_prometheus_query]
+    should_mention: [latency, p99, slo]
+
+  - id: slo_alert
+    prompt: "are any SLOs in danger of breaching?"
+    should_mention: [slo, budget, alert]

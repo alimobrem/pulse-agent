@@ -1,0 +1,23 @@
+scenarios:
+  - id: plan_build_skill
+    prompt: "build me a skill for PostgreSQL troubleshooting"
+    should_use_tools: [create_skill]
+    should_mention: [skill, postgres]
+
+  - id: plan_create_investigation
+    prompt: "create an investigation plan for certificate rotation issues"
+    should_mention: [plan, certificate, phase]
+
+  - id: plan_build_runbook
+    prompt: "build a runbook for handling OOM killed pods"
+    should_use_tools: [create_skill]
+    should_mention: [oom, runbook]
+
+  - id: plan_design_workflow
+    prompt: "design a multi-step investigation for latency spikes"
+    should_mention: [triage, diagnose, phase]
+
+  - id: plan_new_skill_network
+    prompt: "create a new skill for network policy auditing"
+    should_use_tools: [create_skill]
+    should_mention: [skill, network]
