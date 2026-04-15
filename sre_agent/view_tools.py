@@ -1100,7 +1100,18 @@ def optimize_view(view_id: str, strategy: str = "group") -> str:
             'compact' — Remove empty space, pack widgets tightly.
     """
     from . import db
-    from .layout_engine import compute_positions
+    from .layout_engine import compute_layout
+
+    def _apply_positions(widgets: list[dict]) -> list[dict]:
+        """Run layout engine and merge positions back into widget dicts."""
+        positions = compute_layout(widgets)
+        result = []
+        for i, w in enumerate(widgets):
+            updated = dict(w)
+            if i in positions:
+                updated.update(positions[i])
+            result.append(updated)
+        return result
 
     owner = get_current_user()
     view = db.get_view(view_id, owner)
@@ -1116,7 +1127,7 @@ def optimize_view(view_id: str, strategy: str = "group") -> str:
 
     if strategy == "reflow":
         # Just re-run layout engine on existing widgets
-        positioned = compute_positions(layout)
+        positioned = _apply_positions(layout)
         db.update_view(view_id, owner, layout=positioned)
         return _signal(
             "view_updated",
@@ -1125,9 +1136,9 @@ def optimize_view(view_id: str, strategy: str = "group") -> str:
         )
 
     if strategy == "compact":
-        # Strip layout hints and let the engine repack from scratch
-        stripped = [{k: v for k, v in w.items() if k not in ("x", "y", "w", "h", "layout")} for w in layout]
-        positioned = compute_positions(stripped)
+        # Strip positions and let the engine repack from scratch
+        stripped = [{k: v for k, v in w.items() if k not in ("x", "y", "w", "h")} for w in layout]
+        positioned = _apply_positions(stripped)
         db.update_view(view_id, owner, layout=positioned)
         return _signal(
             "view_updated",
@@ -1187,7 +1198,7 @@ def optimize_view(view_id: str, strategy: str = "group") -> str:
                 }
             )
 
-    positioned = compute_positions(sectioned)
+    positioned = _apply_positions(sectioned)
     db.update_view(view_id, owner, layout=positioned)
 
     group_summary = ", ".join(f"{name} ({len(ws)})" for name, ws in groups.items() if ws)
