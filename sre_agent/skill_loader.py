@@ -1133,29 +1133,32 @@ def build_config_from_skill(skill: Skill, query: str = "") -> dict:
 
         all_tools = {**SRE_MAP, **SEC_MAP, **VD_MAP}
 
+    # Build the set of tools allowed by this skill's categories
+    allowed_tool_names: set[str] = set()
+    for cat_name in skill.categories:
+        cat = TOOL_CATEGORIES.get(cat_name, {})
+        allowed_tool_names.update(cat.get("tools", []))
+    allowed_tool_names.update(ALWAYS_INCLUDE)
+
+    # plan_builder always gets skill management tools
+    if skill.name == "plan_builder":
+        allowed_tool_names.update(_SELF_DESCRIBE_TOOLS)
+
     if not skill.categories:
         # No categories = all tools (like view_designer)
         tool_map = dict(all_tools)
     elif query:
         from .tool_predictor import select_tools_adaptive
 
+        # Restrict predictor to only tools in the skill's categories
+        scoped_tools = {n: t for n, t in all_tools.items() if n in allowed_tool_names}
         _defs, tool_map, _offered = select_tools_adaptive(
             query,
-            all_tool_map=all_tools,
+            all_tool_map=scoped_tools,
             fallback_categories=skill.categories,
         )
     else:
-        # Collect tools from the skill's categories + ALWAYS_INCLUDE
-        tool_names = set(ALWAYS_INCLUDE)
-        for cat_name in skill.categories:
-            cat = TOOL_CATEGORIES.get(cat_name, {})
-            tool_names.update(cat.get("tools", []))
-
-        # plan_builder always gets skill management tools
-        if skill.name == "plan_builder":
-            tool_names.update(_SELF_DESCRIBE_TOOLS)
-
-        tool_map = {n: t for n, t in all_tools.items() if n in tool_names}
+        tool_map = {n: t for n, t in all_tools.items() if n in allowed_tool_names}
 
     # Include MCP tools that don't duplicate native tools
     try:
