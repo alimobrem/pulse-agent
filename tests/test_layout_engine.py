@@ -193,13 +193,13 @@ class TestNewComponentTypes:
         components = [{"kind": "bar_list", "items": [{"label": "a", "value": 1}]}]
         layout = compute_layout(components)
         assert layout[0]["w"] == 4
-        assert layout[0]["h"] == 8
+        assert layout[0]["h"] == 3  # content-aware: 2 + min(1, 8)
 
     def test_progress_list_full_width_when_alone(self):
         components = [{"kind": "progress_list", "items": [{"label": "a", "value": 50, "max": 100}]}]
         layout = compute_layout(components)
         assert layout[0]["w"] == 4
-        assert layout[0]["h"] == 8
+        assert layout[0]["h"] == 4  # content-aware: 2 + ceil(1*1.2) = 4
 
     def test_stat_card_full_width_when_alone(self):
         """Single kpi-role component gets full width."""
@@ -252,9 +252,11 @@ class TestLayoutHints:
         assert layout[0]["h"] < 12  # default chart height is 12
 
     def test_height_hint_tall(self):
-        components = [{"kind": "chart", "layout": {"h": "tall"}}]
+        components = [
+            {"kind": "chart", "series": [{"label": "a"}, {"label": "b"}, {"label": "c"}], "layout": {"h": "tall"}}
+        ]
         layout = compute_layout(components)
-        assert layout[0]["h"] > 12
+        assert layout[0]["h"] > 12  # 12 * 1.5 = 18
 
     def test_group_packing(self):
         components = [
@@ -278,7 +280,17 @@ class TestLayoutHints:
         components = [{"kind": "chart"}]
         layout = compute_layout(components)
         assert layout[0]["w"] == 2  # default for chart
-        assert layout[0]["h"] == 12
+        assert layout[0]["h"] == 4  # empty chart — compact (no series)
+
+    def test_chart_with_series_gets_full_height(self):
+        components = [{"kind": "chart", "series": [{"label": "cpu", "data": [[1, 2]]}]}]
+        layout = compute_layout(components)
+        assert layout[0]["h"] == 8  # single series — medium
+
+    def test_chart_multi_series_gets_tall(self):
+        components = [{"kind": "chart", "series": [{"label": "a"}, {"label": "b"}, {"label": "c"}]}]
+        layout = compute_layout(components)
+        assert layout[0]["h"] == 12  # multi-series — full default
 
     def test_content_aware_table_height(self):
         components = [{"kind": "data_table", "rows": [{}] * 8}]

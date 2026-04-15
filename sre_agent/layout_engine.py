@@ -67,13 +67,28 @@ def _resolve_height(hint: str | None, default: int, component: dict) -> int:
     # Content-aware heights
     if kind == "data_table":
         rows = len(component.get("rows", []))
-        default = 3 + min(rows, 12) if rows else default
+        default = 3 + min(rows, 12) if rows else 5
     elif kind == "status_list":
         items = len(component.get("items", []))
-        default = 2 + min(math.ceil(items * 0.8), 8) if items else default
+        default = 2 + min(math.ceil(items * 0.8), 8) if items else 4
     elif kind == "key_value":
         pairs = len(component.get("pairs", component.get("items", [])))
-        default = 3 + min(pairs, 5) if pairs else default
+        default = 3 + min(pairs, 5) if pairs else 4
+    elif kind == "chart":
+        series = component.get("series", [])
+        if not series:
+            default = 4  # Empty chart — compact
+        elif len(series) <= 1:
+            default = 8  # Single series — medium
+        # else: keep default 12 for multi-series
+    elif kind in ("metric_card", "stat_card"):
+        default = 4  # Always compact — these are KPI cards
+    elif kind == "info_card_grid":
+        cards = len(component.get("cards", []))
+        default = max(4, 2 + min(math.ceil(cards * 1.5), 6))
+    elif kind == "section":
+        items = component.get("items", [])
+        default = max(6, 2 + len(items) * 4)  # Scale with child count
     elif kind == "grid":
         items = component.get("items", [])
         cols = component.get("columns", 2)
@@ -82,6 +97,12 @@ def _resolve_height(hint: str | None, default: int, component: dict) -> int:
             default = 1 + rows * 3
         else:
             default = 1 + rows * 4
+    elif kind == "bar_list":
+        items = len(component.get("items", []))
+        default = 2 + min(items, 8) if items else 4
+    elif kind == "progress_list":
+        items = len(component.get("items", []))
+        default = 2 + min(math.ceil(items * 1.2), 8) if items else 4
 
     if not hint:
         return default
