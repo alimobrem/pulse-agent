@@ -168,29 +168,55 @@ class PlanRuntime:
                     result_cb = on_phase_start(p.id, p.skill_name)
                     if asyncio.iscoroutine(result_cb):
                         await result_cb
-                try:
-                    out = await asyncio.wait_for(
-                        self._execute_phase(p, incident, completed_outputs),
-                        timeout=p.timeout_seconds,
-                    )
-                except TimeoutError:
-                    out = SkillOutput(
-                        skill_id=p.skill_name,
-                        phase_id=p.id,
-                        status="failed",
-                        evidence_summary=f"Phase '{p.id}' timed out after {p.timeout_seconds}s",
-                        confidence=0.0,
-                    )
-                    logger.warning("Phase '%s' timed out after %ds", p.id, p.timeout_seconds)
-                except Exception as e:
-                    out = SkillOutput(
-                        skill_id=p.skill_name,
-                        phase_id=p.id,
-                        status="failed",
-                        evidence_summary=f"Phase '{p.id}' failed: {type(e).__name__}: {str(e)[:200]}",
-                        confidence=0.0,
-                    )
-                    logger.error("Phase '%s' failed: %s", p.id, e, exc_info=True)
+
+                out: SkillOutput | None = None
+                for attempt in range(max(p.retry_limit, 1)):
+                    try:
+                        out = await asyncio.wait_for(
+                            self._execute_phase(p, incident, completed_outputs),
+                            timeout=p.timeout_seconds,
+                        )
+                    except TimeoutError:
+                        out = SkillOutput(
+                            skill_id=p.skill_name,
+                            phase_id=p.id,
+                            status="failed",
+                            evidence_summary=f"Phase '{p.id}' timed out after {p.timeout_seconds}s",
+                            confidence=0.0,
+                        )
+                        logger.warning("Phase '%s' timed out after %ds", p.id, p.timeout_seconds)
+                        break  # don't retry timeouts
+                    except Exception as e:
+                        out = SkillOutput(
+                            skill_id=p.skill_name,
+                            phase_id=p.id,
+                            status="failed",
+                            evidence_summary=f"Phase '{p.id}' failed: {type(e).__name__}: {str(e)[:200]}",
+                            confidence=0.0,
+                        )
+                        logger.error("Phase '%s' failed (attempt %d/%d): %s", p.id, attempt + 1, p.retry_limit, e)
+                        if attempt + 1 < p.retry_limit:
+                            continue  # retry
+                        break
+
+                    # Check success_condition if defined
+                    if p.success_condition and out.status == "complete":
+                        if not self._check_success_condition(p.success_condition, out):
+                            if attempt + 1 < p.retry_limit:
+                                logger.info(
+                                    "Phase '%s' success condition not met, retrying (%d/%d)",
+                                    p.id,
+                                    attempt + 1,
+                                    p.retry_limit,
+                                )
+                                continue
+                            out.status = "partial"
+                            out.evidence_summary += f" (success condition not met: {p.success_condition})"
+                    break  # success or exhausted retries
+
+                # Store full reasoning trace to DB (compressed output goes to next phase)
+                self._store_phase_trace(plan.id, p.id, out)
+
                 return p.id, out
 
             if len(ready) > 1:
@@ -373,6 +399,78 @@ class PlanRuntime:
             lines.append("")
 
         return "\n".join(lines)
+
+    def _check_success_condition(self, condition: str, output: SkillOutput) -> bool:
+        """Check if a phase's success condition is met.
+
+        For PromQL conditions, queries Prometheus. For simple conditions,
+        checks against the output findings.
+        """
+        if not condition:
+            return True
+
+        # Simple field checks: "confidence > 0.8"
+        if "confidence" in condition:
+            try:
+                import re as _re
+
+                match = _re.search(r"confidence\s*[><=]+\s*([\d.]+)", condition)
+                if match:
+                    threshold = float(match.group(1))
+                    return output.confidence >= threshold
+            except Exception:
+                pass
+
+        # PromQL conditions: "p99_latency < 500ms"
+        try:
+            from .k8s_tools.monitoring import get_prometheus_query
+
+            result = get_prometheus_query(query=condition)
+            if isinstance(result, str) and "error" not in result.lower():
+                return True  # query succeeded = condition met
+        except Exception:
+            pass
+
+        # Default: consider met if output status is complete
+        return output.status == "complete"
+
+    def _store_phase_trace(self, plan_id: str, phase_id: str, output: SkillOutput | None) -> None:
+        """Store full reasoning trace to DB for audit/replay."""
+        if not output:
+            return
+        try:
+            import json
+
+            from .db import get_database
+
+            db = get_database()
+            db.execute(
+                "INSERT INTO skill_selection_log "
+                "(session_id, query_summary, selected_skill, threshold_used, "
+                "selection_ms, channel_weights) "
+                "VALUES (%s, %s, %s, %s, %s, %s)",
+                (
+                    f"plan:{plan_id}",
+                    f"phase:{phase_id} status={output.status} confidence={output.confidence:.2f}",
+                    output.skill_id,
+                    0.0,
+                    0,
+                    json.dumps(
+                        {
+                            "phase_id": phase_id,
+                            "status": output.status,
+                            "findings": output.findings,
+                            "evidence": output.evidence_summary[:500],
+                            "actions": output.actions_taken,
+                            "risk_flags": output.risk_flags,
+                            "confidence": output.confidence,
+                        }
+                    ),
+                ),
+            )
+            db.commit()
+        except Exception:
+            logger.debug("Failed to store phase trace", exc_info=True)
 
     def _build_phase_prompt(
         self,

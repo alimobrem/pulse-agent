@@ -25,6 +25,8 @@ class SkillPhase:
     parallel_with: list[str] | None = None  # phase IDs to run concurrently
     approval_required: bool = False  # human gate before execution
     runs: str = "on_success"  # "on_success" | "always"
+    success_condition: str = ""  # PromQL or check expression for verify phases
+    retry_limit: int = 1  # max attempts before marking failed
 
 
 @dataclass

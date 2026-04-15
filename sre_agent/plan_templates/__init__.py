@@ -44,6 +44,8 @@ def load_templates() -> dict[str, SkillPlan]:
                         parallel_with=p.get("parallel_with"),
                         approval_required=p.get("approval_required", False),
                         runs=p.get("runs", "on_success"),
+                        success_condition=p.get("success_condition", ""),
+                        retry_limit=p.get("retry_limit", 1),
                     )
                 )
 
