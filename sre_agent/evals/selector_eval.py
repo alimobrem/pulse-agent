@@ -42,7 +42,7 @@ def run_selector_eval(suite_path: str = "selector") -> SelectorEvalResult:
 
     latencies: list[float] = []
     correct_in_top_5 = 0
-    correct_in_top_3 = 0
+    correct_in_top_3: float = 0
     got_at_least_one = 0
 
     for scenario in scenarios:

@@ -491,7 +491,7 @@ class SkillSelector:
     def _fuse_scores(self, channel_scores: dict[str, dict[str, float]]) -> dict[str, float]:
         """Weighted sum fusion across all channels."""
         fused: dict[str, float] = {}
-        all_skills = set()
+        all_skills: set[str] = set()
         for scores in channel_scores.values():
             all_skills.update(scores.keys())
 

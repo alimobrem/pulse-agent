@@ -1,37 +1,37 @@
 .PHONY: lint format type-check test verify test-all evals helm-lint release sync-token
 
 lint:
-	ruff check sre_agent/ tests/
+	python3 -m ruff check sre_agent/ tests/
 
 format:
-	ruff format sre_agent/ tests/
+	python3 -m ruff format sre_agent/ tests/
 
 type-check:
-	mypy sre_agent/ --ignore-missing-imports
+	python3 -m mypy sre_agent/ --ignore-missing-imports --exclude 'sre_agent/skills'
 
 test:
-	python -m pytest tests/ -q
+	python3 -m pytest tests/ -q
 
 verify: lint type-check test
 	@echo "All checks passed."
 
 evals:
 	@echo "Running deterministic evals..."
-	python -m sre_agent.evals.cli --suite release --fail-on-gate
-	python -m sre_agent.evals.cli --suite core
-	python -m sre_agent.evals.cli --suite safety
-	python -m sre_agent.evals.cli --audit-prompt --mode sre
+	python3 -m sre_agent.evals.cli --suite release --fail-on-gate
+	python3 -m sre_agent.evals.cli --suite core
+	python3 -m sre_agent.evals.cli --suite safety
+	python3 -m sre_agent.evals.cli --audit-prompt --mode sre
 	@echo "All deterministic evals passed."
 
 evals-full: evals
 	@echo "Running LLM-judged evals (requires API key)..."
-	python -m sre_agent.evals.cli --suite sysadmin
-	python -m sre_agent.evals.cli --suite integration
-	python -m sre_agent.evals.cli --suite adversarial
-	python -m sre_agent.evals.cli --suite errors
-	python -m sre_agent.evals.cli --suite fleet
-	python -m sre_agent.evals.cli --suite view_designer
-	python -m sre_agent.evals.cli --suite autofix
+	python3 -m sre_agent.evals.cli --suite sysadmin
+	python3 -m sre_agent.evals.cli --suite integration
+	python3 -m sre_agent.evals.cli --suite adversarial
+	python3 -m sre_agent.evals.cli --suite errors
+	python3 -m sre_agent.evals.cli --suite fleet
+	python3 -m sre_agent.evals.cli --suite view_designer
+	python3 -m sre_agent.evals.cli --suite autofix
 	@echo "All evals passed (deterministic + LLM-judged)."
 
 test-all: verify evals

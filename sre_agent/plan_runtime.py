@@ -424,7 +424,7 @@ def extract_plan_from_response(response: str) -> SkillPlan | None:
     if "phases" not in data:
         return None
 
-    phases = []
+    phases: list[SkillPhase] = []
     for p in data["phases"]:
         phases.append(
             SkillPhase(
