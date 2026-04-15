@@ -294,7 +294,7 @@ async def websocket_agent(websocket: WebSocket, mode: str):
 
 async def websocket_auto_agent(websocket: WebSocket):
     """Unified agent endpoint -- auto-routes between SRE and Security based on query intent."""
-    # Token authentication -- same pattern as /ws/sre
+    # Token authentication -- same pattern as /ws/agent
     client_token = _verify_ws_token(websocket)
     if not client_token:
         await websocket.close(4001, "Unauthorized")
@@ -673,7 +673,7 @@ async def websocket_monitor(websocket: WebSocket):
                 await websocket.send_json({"type": "error", "message": "Message too large"})
                 continue
 
-            # Rate limiting (same as /ws/sre)
+            # Rate limiting (same as /ws/agent)
             now = time.time()
             message_timestamps[:] = [t for t in message_timestamps if now - t < 60]
             if len(message_timestamps) >= MAX_MESSAGES_PER_MINUTE:

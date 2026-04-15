@@ -29,7 +29,7 @@ from .monitor_rest import router as monitor_router
 from .skill_rest import router as skill_router
 from .tools_rest import router as tools_router
 from .views import router as views_router
-from .ws_endpoints import websocket_agent, websocket_auto_agent, websocket_monitor
+from .ws_endpoints import websocket_auto_agent, websocket_monitor
 
 logger = logging.getLogger("pulse_agent.api")
 
@@ -126,7 +126,8 @@ app.include_router(analytics_router)
 app.include_router(recommendations_router)
 
 # Register WebSocket endpoints
-app.websocket("/ws/{mode}")(websocket_agent)
+# /ws/agent — ORCA-routed chat (routes to any of 7 skills)
+# /ws/monitor — background scanner push (findings, predictions, actions)
 app.websocket("/ws/agent")(websocket_auto_agent)
 app.websocket("/ws/monitor")(websocket_monitor)
 

@@ -1,4 +1,4 @@
-"""WebSocket integration tests for /ws/sre, /ws/agent, /ws/monitor endpoints."""
+"""WebSocket integration tests for /ws/agent, /ws/agent, /ws/monitor endpoints."""
 
 from __future__ import annotations
 
@@ -38,15 +38,15 @@ def ws_client(pulse_token, monkeypatch, tmp_path):
 
 class TestWebSocketAuth:
     def test_sre_rejects_no_token(self, ws_client):
-        with pytest.raises((WebSocketDisconnect, Exception)), ws_client.websocket_connect("/ws/sre"):
+        with pytest.raises((WebSocketDisconnect, Exception)), ws_client.websocket_connect("/ws/agent"):
             pass
 
     def test_sre_rejects_wrong_token(self, ws_client):
-        with pytest.raises((WebSocketDisconnect, Exception)), ws_client.websocket_connect("/ws/sre?token=wrong"):
+        with pytest.raises((WebSocketDisconnect, Exception)), ws_client.websocket_connect("/ws/agent?token=wrong"):
             pass
 
     def test_sre_accepts_valid_token(self, ws_client, pulse_token):
-        with ws_client.websocket_connect(f"/ws/sre?token={pulse_token}") as ws:
+        with ws_client.websocket_connect(f"/ws/agent?token={pulse_token}") as ws:
             ws.send_json({"type": "clear"})
             data = ws.receive_json()
             assert data["type"] == "cleared"
@@ -59,7 +59,7 @@ class TestWebSocketAuth:
             pass
 
     def test_security_mode_connects(self, ws_client, pulse_token):
-        with ws_client.websocket_connect(f"/ws/security?token={pulse_token}") as ws:
+        with ws_client.websocket_connect(f"/ws/agent?token={pulse_token}") as ws:
             ws.send_json({"type": "clear"})
             data = ws.receive_json()
             assert data["type"] == "cleared"
@@ -70,20 +70,20 @@ class TestWebSocketAuth:
 
 class TestWebSocketProtocol:
     def test_clear_resets_conversation(self, ws_client, pulse_token):
-        with ws_client.websocket_connect(f"/ws/sre?token={pulse_token}") as ws:
+        with ws_client.websocket_connect(f"/ws/agent?token={pulse_token}") as ws:
             ws.send_json({"type": "clear"})
             data = ws.receive_json()
             assert data["type"] == "cleared"
 
     def test_invalid_json_returns_error(self, ws_client, pulse_token):
-        with ws_client.websocket_connect(f"/ws/sre?token={pulse_token}") as ws:
+        with ws_client.websocket_connect(f"/ws/agent?token={pulse_token}") as ws:
             ws.send_text("not json at all")
             data = ws.receive_json()
             assert data["type"] == "error"
             assert "Invalid JSON" in data["message"]
 
     def test_feedback_returns_ack(self, ws_client, pulse_token):
-        with ws_client.websocket_connect(f"/ws/sre?token={pulse_token}") as ws:
+        with ws_client.websocket_connect(f"/ws/agent?token={pulse_token}") as ws:
             ws.send_json({"type": "feedback", "resolved": True})
             data = ws.receive_json()
             assert data["type"] == "feedback_ack"
@@ -91,7 +91,7 @@ class TestWebSocketProtocol:
             assert "score" in data
 
     def test_feedback_with_message_id(self, ws_client, pulse_token):
-        with ws_client.websocket_connect(f"/ws/sre?token={pulse_token}") as ws:
+        with ws_client.websocket_connect(f"/ws/agent?token={pulse_token}") as ws:
             ws.send_json({"type": "feedback", "resolved": False, "messageId": "msg-123"})
             data = ws.receive_json()
             assert data["type"] == "feedback_ack"
@@ -102,7 +102,7 @@ class TestWebSocketProtocol:
         with (
             patch("sre_agent.api.agent_ws.run_agent_streaming", return_value="Test response"),
             patch("sre_agent.api.agent_ws.create_client", return_value=MagicMock()),
-            ws_client.websocket_connect(f"/ws/sre?token={pulse_token}") as ws,
+            ws_client.websocket_connect(f"/ws/agent?token={pulse_token}") as ws,
         ):
             ws.send_json({"type": "message", "content": "hello"})
             events = []
