@@ -1226,6 +1226,94 @@ from .view_planner import plan_dashboard
 register_tool(critique_view)
 register_tool(plan_dashboard)
 
+
+@beta_tool
+def get_topology_graph(namespace: str = ""):
+    """Build an interactive dependency topology graph for a namespace showing resource relationships, health status, and risk levels.
+
+    Returns a visual network graph of Deployments, Services, Pods, ConfigMaps,
+    Secrets, PVCs, and their connections (owns, selects, mounts, references).
+    Each node shows health status (healthy/warning/error) and risk level.
+
+    Args:
+        namespace: Kubernetes namespace to graph. Leave empty for all namespaces.
+    """
+    from .dependency_graph import get_dependency_graph
+
+    graph = get_dependency_graph()
+    nodes: list[dict] = []
+    edges: list[dict] = []
+
+    # Health status from active findings
+    finding_status: dict[str, str] = {}
+    try:
+        from .db import get_database
+
+        db = get_database()
+        rows = db.fetchall("SELECT severity, resources FROM findings WHERE resolved = 0")
+        for f in rows or []:
+            sev = f.get("severity", "")
+            for res_str in (f.get("resources") or "").split(","):
+                res_str = res_str.strip()
+                if res_str:
+                    finding_status[res_str] = "error" if sev in ("critical", "warning") else "warning"
+    except Exception:
+        pass
+
+    for key, node in graph._nodes.items():
+        if namespace and node.namespace != namespace:
+            continue
+        resource_key = f"{node.kind}:{node.namespace}:{node.name}"
+        status = finding_status.get(resource_key, "healthy")
+        nodes.append(
+            {
+                "id": key,
+                "kind": node.kind,
+                "name": node.name,
+                "namespace": node.namespace,
+                "status": status,
+            }
+        )
+
+    node_ids = {n["id"] for n in nodes}
+    for edge in graph._edges:
+        if edge.source in node_ids and edge.target in node_ids:
+            edges.append(
+                {
+                    "source": edge.source,
+                    "target": edge.target,
+                    "relationship": edge.relationship,
+                }
+            )
+
+    if not nodes:
+        ns_label = f" in {namespace}" if namespace else ""
+        return f"No topology data available{ns_label}. The dependency graph is built during monitor scans."
+
+    ns_label = f" — {namespace}" if namespace else ""
+    kinds: dict[str, int] = {}
+    for n in nodes:
+        kinds[n["kind"]] = kinds.get(n["kind"], 0) + 1
+    summary_parts = [f"{c} {k}s" for k, c in sorted(kinds.items(), key=lambda x: -x[1])]
+
+    text = (
+        f"Topology graph{ns_label}: {len(nodes)} resources, {len(edges)} relationships. "
+        f"Resources: {', '.join(summary_parts)}."
+    )
+
+    component = {
+        "kind": "topology",
+        "title": f"Topology{ns_label}",
+        "description": f"{len(nodes)} resources, {len(edges)} relationships",
+        "nodes": nodes,
+        "edges": edges,
+    }
+
+    return (text, component)
+
+
+register_tool(get_topology_graph)
+
 VIEW_TOOLS = [
     create_dashboard,
     delete_dashboard,
@@ -1243,4 +1331,5 @@ VIEW_TOOLS = [
     critique_view,
     plan_dashboard,
     optimize_view,
+    get_topology_graph,
 ]

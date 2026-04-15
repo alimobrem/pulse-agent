@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 
 from fastapi import APIRouter, Depends, Query
@@ -68,11 +69,21 @@ async def memory_runbooks(limit: int = Query(20, ge=1, le=100), _auth=Depends(ve
     if not manager:
         return {"runbooks": []}
     runbooks = manager.store.list_runbooks()[:limit]
-    # Normalize trigger_keywords from space-separated string to array
     for rb in runbooks:
+        # Normalize trigger_keywords from space-separated string to array
         kw = rb.get("trigger_keywords", "")
         if isinstance(kw, str):
             rb["trigger_keywords"] = kw.split() if kw else []
+        # Normalize tool_sequence from JSON string to array of tool name strings
+        ts = rb.get("tool_sequence", "[]")
+        if isinstance(ts, str):
+            try:
+                parsed = json.loads(ts)
+                rb["tool_sequence"] = [t["name"] if isinstance(t, dict) else str(t) for t in parsed]
+            except (json.JSONDecodeError, TypeError):
+                rb["tool_sequence"] = []
+        elif isinstance(ts, list):
+            rb["tool_sequence"] = [t["name"] if isinstance(t, dict) else str(t) for t in ts]
     return {"runbooks": runbooks}
 
 
