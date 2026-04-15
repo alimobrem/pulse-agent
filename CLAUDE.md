@@ -40,7 +40,7 @@ pulse-agent-api                       # FastAPI on port 8080
 # Tests
 python3 -m pytest tests/ -v           # all tests (~1676 tests)
 python3 -m pytest tests/test_k8s_tools.py -v  # single file
-make verify                                    # lint + type-check + test
+make verify                                    # lint + type-check + test\nmake chaos-test                                # chaos engineering (5 scenarios, needs cluster)
 
 # Eval commands
 python -m sre_agent.evals.cli --suite release --fail-on-gate   # run release eval gate

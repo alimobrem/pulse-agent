@@ -60,6 +60,8 @@ make test-all                                         # verify + deterministic e
 make test-everything                                  # verify + ALL 11 eval suites (includes LLM judge — needs API key)
 make evals                                            # deterministic evals only
 make evals-full                                       # all evals including LLM-judged suites
+make chaos-test                                       # chaos engineering — 5 failure scenarios against live cluster
+make chaos-test-dry                                   # preview chaos scenarios without deploying
 ```
 
 ### Run Everything
@@ -70,6 +72,9 @@ make test-all
 
 # Full — unit tests + ALL eval suites including LLM judge (~5min, needs API key)
 make test-everything
+
+# Chaos engineering — deploys broken resources, scores agent response (~20min, needs cluster)
+make chaos-test
 ```
 
 ### Eval Framework
@@ -383,6 +388,43 @@ Each skill package can include an `evals.yaml` file with scenarios specific to t
 | Plan Builder | `sre_agent/skills/plan-builder/evals.yaml` | Prompt + expected tools + mentions |
 | Postmortem | `sre_agent/skills/postmortem/evals.yaml` | Prompt + expected tools + mentions |
 | SLO Management | `sre_agent/skills/slo-management/evals.yaml` | Prompt + expected tools + mentions |
+
+## Chaos Engineering
+
+Automated failure injection against a live cluster. Deploys broken resources, waits for the agent to detect and respond, scores the results.
+
+```bash
+make chaos-test                                    # all 5 scenarios (~20min)
+make chaos-test-dry                                # preview without deploying
+./scripts/chaos-test.sh --scenario crashloop       # single scenario
+./scripts/chaos-test.sh --timeout 180              # custom timeout
+```
+
+### Scenarios
+
+| Scenario | What it deploys | Agent should | Max score |
+|----------|----------------|-------------|-----------|
+| `crashloop` | Pod with `exit 1` | Detect CrashLoopBackOff, investigate | 70 |
+| `oom` | Pod exceeding 10Mi limit | Detect OOMKilled, diagnose memory | 70 |
+| `image-pull` | Deployment → bad image tag | Detect, investigate, rollback | 100 |
+| `cert-expiry` | TLS secret with expired cert | Detect expiry | 70 |
+| `resource` | Quota (1 pod) + 3 replicas | Detect pending pods | 70 |
+
+### Scoring Dimensions
+
+| Dimension | Points | Logic |
+|-----------|--------|-------|
+| Detected | 30 | Agent created a finding for this category |
+| Diagnosed | 30 | Investigation identified root cause |
+| Remediated | 30 | Auto-fix resolved the issue |
+| Speed | 10 | Detection within 2 scan cycles |
+
+### Prerequisites
+
+- Cluster with Pulse Agent deployed and monitoring enabled
+- Trust level >= 2 for auto-fix scoring
+- `oc` or `kubectl` authenticated
+- Namespace `chaos-test` will be created and cleaned up automatically
 
 ### Skill Eval Format
 
