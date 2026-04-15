@@ -77,7 +77,7 @@ React/TypeScript frontend (OpenShift Pulse) providing the user interface.
 |--------|-------|
 | Tools | 111 (75 native + 36 MCP) across 36 modules + MCP servers |
 | Scanners | 17 (12 core + 5 audit) |
-| Tests | 1,520 |
+| Tests | 1,676 |
 | PromQL Recipes | 73 across 16 categories |
 | Eval Prompts | 98 |
 | Protocol Version | 2 |

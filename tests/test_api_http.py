@@ -75,7 +75,6 @@ class TestAuthentication:
             "/briefing",
             "/memory/stats",
             "/memory/export",
-            "/context",
             "/monitor/capabilities",
         ],
     )
@@ -175,17 +174,6 @@ class TestBriefingAndSimulate:
         r = api_client.get("/briefing?hours=1", headers=api_headers)
         assert r.status_code == 200
 
-    def test_simulate(self, api_client, api_headers):
-        r = api_client.post("/simulate", headers=api_headers, json={"tool": "restart_deployment", "input": {}})
-        assert r.status_code == 200
-        data = r.json()
-        assert "tool" in data
-        assert "risk" in data
-
-    def test_predictions_501(self, api_client, api_headers):
-        r = api_client.get("/predictions", headers=api_headers)
-        assert r.status_code == 501
-
 
 # ── Monitor Control ─────────────────────────────────────────────────────────
 
@@ -244,12 +232,6 @@ class TestMemoryEndpoints:
 
 
 class TestContextAndEval:
-    def test_context(self, api_client, api_headers):
-        r = api_client.get("/context", headers=api_headers)
-        assert r.status_code == 200
-        data = r.json()
-        assert "entries" in data
-
     def test_eval_status(self, api_client, api_headers):
         r = api_client.get("/eval/status", headers=api_headers)
         assert r.status_code == 200

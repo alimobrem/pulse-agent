@@ -386,52 +386,6 @@ async def rest_list_scanners(_auth=Depends(verify_token)):
     return {"scanners": [{"id": k, **v} for k, v in SCANNER_REGISTRY.items()]}
 
 
-@router.get("/monitor/history")
-async def rest_scan_history(
-    limit: int = Query(20, ge=1, le=100),
-    offset: int = Query(0, ge=0),
-    _auth=Depends(verify_token),
-):
-    """Get paginated scan run history."""
-    from .. import db
-
-    database = db.get_database()
-    rows = database.fetchall(
-        "SELECT id, timestamp, duration_ms, total_findings, scanner_results "
-        "FROM scan_runs ORDER BY timestamp DESC LIMIT ? OFFSET ?",
-        (limit, offset),
-    )
-    total_row = database.fetchone("SELECT COUNT(*) as cnt FROM scan_runs")
-    total = total_row["cnt"] if total_row else 0
-
-    results = []
-    for row in rows:
-        entry = dict(row)
-        if isinstance(entry.get("scanner_results"), str):
-            entry["scanner_results"] = json.loads(entry["scanner_results"])
-        results.append(entry)
-
-    return {"runs": results, "total": total, "limit": limit, "offset": offset}
-
-
-@router.get("/predictions")
-async def rest_predictions(_auth=Depends(verify_token)):
-    """Active predictions -- currently only available via /ws/monitor WebSocket stream."""
-    raise HTTPException(status_code=501, detail="Predictions are only available via the /ws/monitor WebSocket stream.")
-
-
-@router.post("/simulate")
-async def rest_simulate(request: Request, _auth=Depends(verify_token)):
-    """Predict the impact of a tool action without executing it. Requires token auth."""
-    body = await request.json()
-    tool = body.get("tool", "")
-    inp = body.get("input", {})
-    from ..monitor import simulate_action
-
-    result = simulate_action(tool, inp)
-    return result
-
-
 @router.get("/monitor/capabilities")
 async def monitor_capabilities(_auth=Depends(verify_token)):
     """Expose monitor trust/capability limits so UI can align controls."""

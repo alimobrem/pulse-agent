@@ -9,7 +9,6 @@ with the OpenShift Pulse web UI. V2 adds /ws/monitor for autonomous scanning.
 from __future__ import annotations
 
 import logging
-import time
 from contextlib import asynccontextmanager
 from importlib.metadata import version as pkg_version
 
@@ -172,26 +171,4 @@ async def health(_auth=Depends(verify_token)):
         },
         "investigations": get_investigation_stats(),
         "autofix_paused": is_autofix_paused(),
-    }
-
-
-@app.get("/context")
-async def get_shared_context(_auth=Depends(verify_token)):
-    """View recent shared context entries across all agents."""
-    from ..context_bus import get_context_bus
-
-    bus = get_context_bus()
-    entries = bus.get_context_for(limit=20)
-    return {
-        "entries": [
-            {
-                "source": e.source,
-                "category": e.category,
-                "summary": e.summary,
-                "namespace": e.namespace,
-                "timestamp": e.timestamp,
-                "age_seconds": int(time.time() - e.timestamp),
-            }
-            for e in entries
-        ]
     }
