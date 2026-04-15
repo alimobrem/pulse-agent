@@ -422,6 +422,27 @@ CREATE TABLE IF NOT EXISTS slo_definitions (
 );
 """
 
+PLAN_EXECUTIONS_SCHEMA = """
+CREATE TABLE IF NOT EXISTS plan_executions (
+    id              TEXT PRIMARY KEY,
+    timestamp       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    template_id     TEXT NOT NULL,
+    template_name   TEXT NOT NULL,
+    incident_type   TEXT NOT NULL,
+    finding_id      TEXT,
+    status          TEXT NOT NULL,
+    phases_total    INTEGER NOT NULL,
+    phases_completed INTEGER NOT NULL,
+    total_duration_ms INTEGER,
+    phase_details   JSONB,
+    confidence      FLOAT DEFAULT 0.0,
+    postmortem_id   TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_plan_executions_template ON plan_executions(template_id, timestamp DESC);
+CREATE INDEX IF NOT EXISTS idx_plan_executions_ts ON plan_executions(timestamp DESC);
+CREATE INDEX IF NOT EXISTS idx_plan_executions_status ON plan_executions(status);
+"""
+
 ALL_SCHEMAS = (
     INCIDENTS_SCHEMA
     + RUNBOOKS_SCHEMA
@@ -449,4 +470,5 @@ ALL_SCHEMAS = (
     + SKILL_SELECTION_LOG_SCHEMA
     + POSTMORTEMS_SCHEMA
     + SLO_DEFINITIONS_SCHEMA
+    + PLAN_EXECUTIONS_SCHEMA
 )

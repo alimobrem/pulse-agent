@@ -267,6 +267,9 @@ class PlanRuntime:
         if result.status == "complete" and result.phases_completed < result.phases_total:
             result.status = "partial"
 
+        # Record plan execution for analytics
+        self._record_execution(plan, result, incident)
+
         return result
 
     async def _execute_phase(
@@ -494,6 +497,54 @@ class PlanRuntime:
 
         # Default: consider met if output status is complete
         return output.status == "complete"
+
+    def _record_execution(self, plan: SkillPlan, result: PlanResult, incident: dict) -> None:
+        """Record plan execution to plan_executions table for analytics."""
+        try:
+            import json
+            import uuid
+
+            from .db import get_database
+
+            db = get_database()
+
+            phase_details = []
+            for pid, out in result.phase_outputs.items():
+                phase_details.append(
+                    {
+                        "phase_id": pid,
+                        "status": out.status,
+                        "confidence": out.confidence,
+                        "tools_used": out.actions_taken[:5],
+                        "evidence_length": len(out.evidence_summary) if out.evidence_summary else 0,
+                    }
+                )
+
+            max_confidence = max((o.confidence for o in result.phase_outputs.values()), default=0)
+
+            db.execute(
+                "INSERT INTO plan_executions "
+                "(id, template_id, template_name, incident_type, finding_id, status, "
+                "phases_total, phases_completed, total_duration_ms, phase_details, confidence) "
+                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) "
+                "ON CONFLICT (id) DO NOTHING",
+                (
+                    f"pe-{uuid.uuid4().hex[:12]}",
+                    plan.id,
+                    plan.name,
+                    plan.incident_type,
+                    incident.get("id", ""),
+                    result.status,
+                    result.phases_total,
+                    result.phases_completed,
+                    result.total_duration_ms,
+                    json.dumps(phase_details),
+                    max_confidence,
+                ),
+            )
+            db.commit()
+        except Exception:
+            logger.debug("Failed to record plan execution", exc_info=True)
 
     def _store_phase_trace(self, plan_id: str, phase_id: str, output: SkillOutput | None) -> None:
         """Store full reasoning trace to DB for audit/replay."""

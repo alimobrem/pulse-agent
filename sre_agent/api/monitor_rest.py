@@ -1048,3 +1048,91 @@ async def delete_plan_template(incident_type: str, _auth=Depends(verify_token)):
     load_templates()
     logger.info("Deleted plan template: %s", incident_type)
     return {"status": "deleted", "incident_type": incident_type}
+
+
+@router.get("/analytics/plans")
+async def plan_analytics(
+    days: int = Query(30, ge=1, le=365),
+    _auth=Depends(verify_token),
+):
+    """Plan execution analytics — template usage, phase success rates, durations."""
+    try:
+        from ..db import get_database
+
+        db = get_database()
+
+        # Overall stats
+        rows = db.fetchall(
+            "SELECT template_name, incident_type, status, "
+            "COUNT(*) as count, "
+            "AVG(total_duration_ms) as avg_duration_ms, "
+            "AVG(phases_completed::float / NULLIF(phases_total, 0)) as avg_completion_rate, "
+            "AVG(confidence) as avg_confidence "
+            "FROM plan_executions "
+            "WHERE timestamp > NOW() - INTERVAL '%s days' "
+            "GROUP BY template_name, incident_type, status "
+            "ORDER BY count DESC",
+            (days,),
+        )
+
+        # Phase-level breakdown
+        phase_rows = db.fetchall(
+            "SELECT "
+            "template_name, "
+            "phase->>'phase_id' as phase_id, "
+            "phase->>'status' as phase_status, "
+            "COUNT(*) as count, "
+            "AVG((phase->>'confidence')::float) as avg_confidence "
+            "FROM plan_executions, jsonb_array_elements(phase_details) as phase "
+            "WHERE timestamp > NOW() - INTERVAL '%s days' "
+            "GROUP BY template_name, phase->>'phase_id', phase->>'status' "
+            "ORDER BY template_name, phase_id",
+            (days,),
+        )
+
+        # Build response
+        by_template: dict[str, Any] = {}
+        for r in rows or []:
+            name = r["template_name"]
+            if name not in by_template:
+                by_template[name] = {
+                    "template_name": name,
+                    "incident_type": r["incident_type"],
+                    "total_runs": 0,
+                    "by_status": {},
+                    "avg_duration_ms": 0,
+                    "avg_completion_rate": 0,
+                    "avg_confidence": 0,
+                }
+            entry = by_template[name]
+            entry["by_status"][r["status"]] = r["count"]
+            entry["total_runs"] += r["count"]
+            entry["avg_duration_ms"] = int(r["avg_duration_ms"] or 0)
+            entry["avg_completion_rate"] = round(float(r["avg_completion_rate"] or 0), 2)
+            entry["avg_confidence"] = round(float(r["avg_confidence"] or 0), 2)
+
+        # Phase breakdown per template
+        phases_by_template: dict[str, list] = {}
+        for r in phase_rows or []:
+            name = r["template_name"]
+            phases_by_template.setdefault(name, []).append(
+                {
+                    "phase_id": r["phase_id"],
+                    "status": r["phase_status"],
+                    "count": r["count"],
+                    "avg_confidence": round(float(r["avg_confidence"] or 0), 2),
+                }
+            )
+
+        for name, phases in phases_by_template.items():
+            if name in by_template:
+                by_template[name]["phases"] = phases
+
+        return {
+            "templates": list(by_template.values()),
+            "total_executions": sum(t["total_runs"] for t in by_template.values()),
+            "days": days,
+        }
+    except Exception as e:
+        logger.debug("Plan analytics failed: %s", e, exc_info=True)
+        return {"templates": [], "total_executions": 0, "days": days}

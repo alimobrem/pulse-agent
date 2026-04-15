@@ -167,6 +167,13 @@ def _migrate_016_slo_definitions(db: Database) -> None:
     db.executescript(SLO_DEFINITIONS_SCHEMA)
 
 
+def _migrate_017_plan_executions(db: Database) -> None:
+    """Add plan_executions table for plan analytics."""
+    from .db_schema import PLAN_EXECUTIONS_SCHEMA
+
+    db.executescript(PLAN_EXECUTIONS_SCHEMA)
+
+
 MIGRATIONS = [
     (1, "baseline", _migrate_001_baseline),
     (2, "tool_usage", _migrate_002_tool_usage),
@@ -184,4 +191,5 @@ MIGRATIONS = [
     (14, "skill_selection_log", _migrate_014_skill_selection_log),
     (15, "postmortems", _migrate_015_postmortems),
     (16, "slo_definitions", _migrate_016_slo_definitions),
+    (17, "plan_executions", _migrate_017_plan_executions),
 ]
