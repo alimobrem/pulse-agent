@@ -911,6 +911,54 @@ for _cat_name, _cat_config in TOOL_CATEGORIES.items():
         if _tool_name not in _TOOL_CATEGORY_MAP:
             _TOOL_CATEGORY_MAP[_tool_name] = _cat_name
 
+# Tool risk levels — derived from WRITE_TOOLS + known high-risk operations
+_TOOL_RISK_LEVELS: dict[str, str] = {}  # populated lazily
+
+MAX_TOOL_BUDGET = 15  # hard cap on tools per agent turn
+
+
+def get_tool_risk_level(tool_name: str) -> str:
+    """Return risk level for a tool: read-only, low, medium, high."""
+    if not _TOOL_RISK_LEVELS:
+        _populate_risk_levels()
+    return _TOOL_RISK_LEVELS.get(tool_name, "read-only")
+
+
+def _populate_risk_levels() -> None:
+    """Classify all tools by risk level."""
+    try:
+        from .agent import WRITE_TOOLS
+
+        high_risk = {"drain_node", "delete_pod", "rollback_deployment", "cordon_node", "uncordon_node"}
+        medium_risk = {"scale_deployment", "restart_deployment", "apply_yaml", "patch_resource"}
+
+        for tool in WRITE_TOOLS:
+            if tool in high_risk:
+                _TOOL_RISK_LEVELS[tool] = "high"
+            elif tool in medium_risk:
+                _TOOL_RISK_LEVELS[tool] = "medium"
+            else:
+                _TOOL_RISK_LEVELS[tool] = "low"
+    except Exception:
+        pass
+
+
+def get_tool_avg_latency(tool_name: str) -> int:
+    """Get average latency for a tool from usage history (ms)."""
+    try:
+        from .db import get_database
+
+        db = get_database()
+        row = db.fetchone(
+            "SELECT AVG(duration_ms) as avg_ms FROM tool_usage "
+            "WHERE tool_name = %s AND status = 'success' "
+            "AND timestamp > NOW() - INTERVAL '7 days'",
+            (tool_name,),
+        )
+        return int(row["avg_ms"]) if row and row["avg_ms"] else 0
+    except Exception:
+        return 0
+
 
 def get_tool_category(tool_name: str) -> str | None:
     """Return the primary category for a tool, or None if uncategorized."""
@@ -1034,7 +1082,23 @@ def select_tools(query: str, all_tools: list, all_tool_map: dict, mode: str = "s
         return [t.to_dict() for t in ordered], tool_map, list(tool_map.keys())
 
     ordered = _reorder_deprioritized(filtered, deprioritized)
-    logger.info("Tool selection: %d/%d tools for mode=%s", len(ordered), len(all_tools), mode)
+
+    # Enforce tool budget — keep ALWAYS_INCLUDE + top tools by relevance
+    if len(ordered) > MAX_TOOL_BUDGET:
+        always = [t for t in ordered if t.name in ALWAYS_INCLUDE]
+        rest = [t for t in ordered if t.name not in ALWAYS_INCLUDE]
+        budget_remaining = MAX_TOOL_BUDGET - len(always)
+        ordered = always + rest[:budget_remaining]
+        logger.info(
+            "Tool budget enforced: %d → %d tools (budget=%d) for mode=%s",
+            len(filtered),
+            len(ordered),
+            MAX_TOOL_BUDGET,
+            mode,
+        )
+    else:
+        logger.info("Tool selection: %d/%d tools for mode=%s", len(ordered), len(all_tools), mode)
+
     tool_map = {t.name: t for t in ordered}
     return [t.to_dict() for t in ordered], tool_map, list(tool_map.keys())
 

@@ -23,7 +23,7 @@ router = APIRouter()
 @router.get("/tools")
 async def list_tools(_auth=Depends(verify_token)):
     """List all available tools grouped by mode, with write-op flags and source."""
-    from ..skill_loader import get_tool_category, get_tool_skills
+    from ..skill_loader import get_tool_category, get_tool_risk_level, get_tool_skills
 
     result = {
         "sre": [
@@ -32,6 +32,7 @@ async def list_tools(_auth=Depends(verify_token)):
                 "description": t.description,
                 "requires_confirmation": t.name in WRITE_TOOLS,
                 "category": get_tool_category(t.name),
+                "risk_level": get_tool_risk_level(t.name),
                 "source": "native",
                 "skills": get_tool_skills(t.name),
             }
@@ -43,6 +44,7 @@ async def list_tools(_auth=Depends(verify_token)):
                 "description": t.description,
                 "requires_confirmation": False,
                 "category": get_tool_category(t.name),
+                "risk_level": "read-only",
                 "source": "native",
                 "skills": get_tool_skills(t.name),
             }
