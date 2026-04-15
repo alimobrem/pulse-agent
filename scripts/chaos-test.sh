@@ -195,16 +195,19 @@ score_scenario() {
   local speed="$5"
 
   local score=$((detected * 30 + diagnosed * 30 + remediated * 30 + speed * 10))
-  local max=100
+  local max="${6:-100}"  # optional 6th arg overrides max score
+  # Cap score at max (for non-remediable scenarios)
+  [[ $score -gt $max ]] && score=$max
   TOTAL_SCORE=$((TOTAL_SCORE + score))
   TOTAL_MAX=$((TOTAL_MAX + max))
 
+  local pct=$((score * 100 / max))
   local status="${RED}FAIL${NC}"
-  [[ $score -ge 60 ]] && status="${YELLOW}WARN${NC}"
-  [[ $score -ge 90 ]] && status="${GREEN}PASS${NC}"
+  [[ $pct -ge 60 ]] && status="${YELLOW}WARN${NC}"
+  [[ $pct -ge 90 ]] && status="${GREEN}PASS${NC}"
 
-  RESULTS+=("$(printf "  %-20s %3d/100  %b" "$name" "$score" "$status")")
-  echo -e "  Score: ${score}/100 [${status}]"
+  RESULTS+=("$(printf "  %-20s %3d/%-3d  %b" "$name" "$score" "$max" "$status")")
+  echo -e "  Score: ${score}/${max} [${status}]"
 }
 
 # ── Scenarios ──────────────────────────────────────────────────────────
@@ -258,11 +261,11 @@ spec:
   containers:
   - name: oom
     image: busybox
-    command: ["/bin/sh", "-c", "dd if=/dev/zero of=/dev/shm/fill bs=1M count=50 2>/dev/null; tail -f /dev/null"]
+    command: ["/bin/sh", "-c", "dd if=/dev/zero of=/dev/shm/fill bs=1M count=50 2>/dev/null; sleep 3600"]
     resources:
       limits:
         memory: "10Mi"
-  restartPolicy: Never
+  restartPolicy: Always
 EOF
 
   local detected=0 diagnosed=0 remediated=0 speed=0
@@ -355,7 +358,7 @@ run_cert_expiry() {
 
   $CMD delete secret chaos-expired-cert -n "$NAMESPACE" 2>/dev/null || true
 
-  score_scenario "cert-expiry" $detected $diagnosed $remediated $speed
+  score_scenario "cert-expiry" $detected $diagnosed $remediated $speed 70
 }
 
 run_resource_pressure() {
@@ -392,7 +395,7 @@ EOF
   $CMD delete deployment chaos-quota -n "$NAMESPACE" --wait=false 2>/dev/null || true
   $CMD delete resourcequota chaos-quota -n "$NAMESPACE" 2>/dev/null || true
 
-  score_scenario "resource-pressure" $detected $diagnosed $remediated $speed
+  score_scenario "resource-pressure" $detected $diagnosed $remediated $speed 70
 }
 
 # ── Main ───────────────────────────────────────────────────────────────
@@ -427,7 +430,7 @@ echo ""
 echo -e "${CYAN}════════════════════════════════════════${NC}"
 echo -e "${CYAN}  Chaos Test Results${NC}"
 echo -e "${CYAN}════════════════════════════════════════${NC}"
-for r in "${RESULTS[@]}"; do
+for r in "${RESULTS[@]+"${RESULTS[@]}"}"; do
   echo -e "$r"
 done
 echo ""

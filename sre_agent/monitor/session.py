@@ -136,8 +136,14 @@ class MonitorSession:
                 resource_key = f"{r.get('kind', '')}:{r.get('namespace', '')}:{r.get('name', '')}"
 
             # Try intelligent fix — uses investigation diagnosis
-            from .fix_planner import execute_fix as execute_targeted_fix
-            from .fix_planner import get_investigation_for_finding, plan_fix
+            from .fix_planner import (
+                default_fix_plan,
+                get_investigation_for_finding,
+                plan_fix,
+            )
+            from .fix_planner import (
+                execute_fix as execute_targeted_fix,
+            )
 
             investigation = get_investigation_for_finding(finding.get("id", ""))
             targeted_plan = None
@@ -152,9 +158,19 @@ class MonitorSession:
                         resource_key,
                     )
 
+            # Fast-path: for known categories, use a default fix strategy
+            # without waiting for the async investigation to complete
             if not targeted_plan:
-                # No intelligent fix available — skip blunt handler.
-                # Blind restarts waste cycles on issues that need real diagnosis.
+                targeted_plan = default_fix_plan(category, finding)
+                if targeted_plan:
+                    logger.info(
+                        "Fast-path fix: strategy=%s for %s (no investigation needed)",
+                        targeted_plan.strategy,
+                        resource_key,
+                    )
+
+            if not targeted_plan:
+                # No fix available — neither investigation-backed nor fast-path.
                 if investigation:
                     logger.info(
                         "Auto-fix skipped: investigation exists but no targeted strategy (confidence=%.2f) for %s",

@@ -133,6 +133,39 @@ def plan_fix(investigation: dict, finding: dict) -> FixPlan | None:
     )
 
 
+# Categories where a default fix strategy is known without investigation.
+# Allows auto-fix to act immediately instead of waiting for async LLM diagnosis.
+_FAST_PATH_STRATEGIES: dict[str, tuple[str, str]] = {
+    "crashloop": ("restart_controller", "Delete crashlooping pod — controller recreates"),
+    "image_pull": ("patch_image", "Rollback deployment to previous working image"),
+    "workloads": ("restart_controller", "Rolling restart of failed deployment"),
+}
+
+
+def default_fix_plan(category: str, finding: dict) -> FixPlan | None:
+    """Create a default fix plan for known categories without an investigation.
+
+    Used as a fast-path when the async investigation hasn't completed yet
+    but the category has a well-known remediation strategy.
+    """
+    entry = _FAST_PATH_STRATEGIES.get(category)
+    if not entry:
+        return None
+
+    strategy, description = entry
+    return FixPlan(
+        strategy=strategy,
+        cause_category=category,
+        confidence=0.6,  # lower than investigation-backed plans
+        description=description,
+        params={
+            "suspected_cause": f"Fast-path: {category} detected by scanner",
+            "recommended_fix": description,
+            "resources": finding.get("resources", []),
+        },
+    )
+
+
 def execute_fix(plan: FixPlan) -> tuple[str, str, str]:
     """Execute a targeted fix plan. Returns (tool_name, before_state, after_state).
 
@@ -278,9 +311,36 @@ def _execute_noop(plan: FixPlan) -> tuple[str, str, str]:
     return ("skip", "", f"Strategy {plan.strategy} requires manual intervention: {plan.description}")
 
 
+def _execute_restart_controller(plan: FixPlan) -> tuple[str, str, str]:
+    """Delete the pod — its controller (Deployment/RS/SS) recreates it."""
+    r, ns = _get_first_resource(plan)
+    core = get_core_client()
+
+    pod_name = r.get("name", "")
+    pod = core.read_namespaced_pod(pod_name, ns)
+
+    # Safety: only delete pods with ownerReferences (controller-managed)
+    if not pod.metadata.owner_references:
+        return (
+            "skip",
+            f"Pod {pod_name} in {ns}: no ownerReferences",
+            "Skipped — bare pod without controller (would not be recreated)",
+        )
+
+    before = f"Pod {pod_name} in {ns}: phase={pod.status.phase}, restarts={pod.status.container_statuses[0].restart_count if pod.status.container_statuses else 0}"
+    core.delete_namespaced_pod(pod_name, ns, grace_period_seconds=0)
+
+    return (
+        "delete_pod",
+        before,
+        f"Pod {pod_name} deleted — controller will recreate",
+    )
+
+
 _EXECUTORS: dict[str, Callable] = {
     "patch_image": _execute_patch_image,
     "patch_resources": _execute_patch_resources,
+    "restart_controller": _execute_restart_controller,
     "create_configmap": _execute_noop,
     "patch_probe": _execute_noop,
     "suggest_quota_increase": _execute_noop,
