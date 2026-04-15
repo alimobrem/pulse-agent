@@ -705,17 +705,80 @@ async def get_topology(
     nodes = []
     edges = []
 
+    # Build health status from active findings
+    finding_status: dict[str, str] = {}  # "Kind:ns:name" -> status
+    try:
+        from ..db import get_database
+
+        db = get_database()
+        active_findings = db.fetchall("SELECT category, severity, resources FROM findings WHERE resolved = 0")
+        for f in active_findings or []:
+            sev = f.get("severity", "")
+            for res_str in (f.get("resources") or "").split(","):
+                res_str = res_str.strip()
+                if res_str:
+                    finding_status[res_str] = "error" if sev in ("critical", "warning") else "warning"
+    except Exception:
+        pass
+
+    # Build risk scores for deployments
+    risk_scores: dict[str, int] = {}
+    try:
+        from ..change_risk import score_finding_risk
+
+        risk_findings = db.fetchall(
+            "SELECT resources, category FROM findings "
+            "WHERE category = 'audit_deployment' AND resolved = 0 "
+            "AND timestamp > EXTRACT(EPOCH FROM NOW() - INTERVAL '2 hours')::BIGINT * 1000"
+        )
+        for f in risk_findings or []:
+            risk = score_finding_risk(f)
+            for res_str in (f.get("resources") or "").split(","):
+                res_str = res_str.strip()
+                if res_str:
+                    risk_scores[res_str] = risk.get("score", 0)
+    except Exception:
+        pass
+
+    # Recent changes (deployed in last 15 min) for pulsing indicator
+    recent_changes: set[str] = set()
+    try:
+        recent = db.fetchall(
+            "SELECT resources FROM findings "
+            "WHERE category = 'audit_deployment' "
+            "AND timestamp > EXTRACT(EPOCH FROM NOW() - INTERVAL '15 minutes')::BIGINT * 1000"
+        )
+        for f in recent or []:
+            for res_str in (f.get("resources") or "").split(","):
+                if res_str.strip():
+                    recent_changes.add(res_str.strip())
+    except Exception:
+        pass
+
     for key, node in graph._nodes.items():
         if namespace and node.namespace != namespace:
             continue
-        nodes.append(
-            {
-                "id": key,
-                "kind": node.kind,
-                "name": node.name,
-                "namespace": node.namespace,
-            }
-        )
+
+        resource_key = f"{node.kind}:{node.namespace}:{node.name}"
+        status = finding_status.get(resource_key, "healthy")
+        risk = risk_scores.get(resource_key, 0)
+
+        node_data: dict[str, Any] = {
+            "id": key,
+            "kind": node.kind,
+            "name": node.name,
+            "namespace": node.namespace,
+            "status": status,
+        }
+        if risk > 0:
+            node_data["risk"] = risk
+            node_data["riskLevel"] = (
+                "critical" if risk >= 70 else "high" if risk >= 50 else "medium" if risk >= 25 else "low"
+            )
+        if resource_key in recent_changes:
+            node_data["recentlyChanged"] = True
+
+        nodes.append(node_data)
 
     node_ids = {n["id"] for n in nodes}
     for edge in graph._edges:
@@ -742,6 +805,49 @@ async def get_topology(
             "kinds": kinds,
             "last_refresh": graph._last_refresh,
         },
+    }
+
+
+@router.get("/topology/blast-radius")
+async def get_blast_radius(
+    node_id: str = Query(..., description="Node ID from topology graph"),
+    _auth=Depends(verify_token),
+):
+    """Compute blast radius tree for a selected node — 'What if this goes down?'"""
+    from ..dependency_graph import get_dependency_graph
+
+    graph = get_dependency_graph()
+    downstream = graph.downstream_blast_radius(node_id)
+
+    # Build tree structure grouped by impact type
+    tree: list[dict] = []
+    for dep_id in downstream:
+        dep_node = graph._nodes.get(dep_id)
+        if not dep_node:
+            continue
+        # Find the edge connecting to this node
+        edge_label = ""
+        for e in graph._edges:
+            if e.source == node_id and e.target == dep_id:
+                edge_label = e.relationship
+                break
+            if e.target == node_id and e.source == dep_id:
+                edge_label = e.relationship
+                break
+        tree.append(
+            {
+                "id": dep_id,
+                "kind": dep_node.kind,
+                "name": dep_node.name,
+                "namespace": dep_node.namespace,
+                "relationship": edge_label,
+            }
+        )
+
+    return {
+        "source": node_id,
+        "affected": len(tree),
+        "resources": tree,
     }
 
 
