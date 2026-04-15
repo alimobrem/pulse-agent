@@ -583,7 +583,7 @@ class SkillSelector:
         return scores
 
     def _fuse_scores(self, channel_scores: dict[str, dict[str, float]]) -> dict[str, float]:
-        """Weighted sum fusion across all channels."""
+        """Weighted sum fusion across all channels, with post-fusion multipliers."""
         fused: dict[str, float] = {}
         all_skills: set[str] = set()
         for scores in channel_scores.values():
@@ -597,10 +597,47 @@ class SkillSelector:
                 total += weight * score
             fused[skill_name] = round(total, 4)
 
-        # Re-rank by skill priority (tiebreaker)
-        # Already handled in select() via the max() key function
+        # Post-fusion multipliers
+        for skill_name in list(fused.keys()):
+            skill = self._skills.get(skill_name)
+            if not skill:
+                continue
+
+            # 1. success_boost — historical success rate from skill_usage
+            success_rate = self._get_skill_success_rate(skill_name)
+            if success_rate is not None:
+                fused[skill_name] *= success_rate**2  # squared for stronger signal
+
+            # 2. review_boost — reviewed skills get a 20% boost over unreviewed
+            if not skill.reviewed:
+                fused[skill_name] *= 0.8  # 20% penalty for unreviewed AI-generated skills
+
+            fused[skill_name] = round(fused[skill_name], 4)
 
         return fused
+
+    def _get_skill_success_rate(self, skill_name: str) -> float | None:
+        """Get historical success rate for a skill from skill_usage table.
+
+        Returns None if insufficient data (<5 invocations).
+        """
+        try:
+            from .db import get_database
+
+            db = get_database()
+            row = db.fetchone(
+                "SELECT COUNT(*) FILTER (WHERE feedback IS NULL OR feedback != 'negative') AS good, "
+                "COUNT(*) AS total "
+                "FROM skill_usage "
+                "WHERE skill_name = %s "
+                "AND timestamp > NOW() - INTERVAL '30 days'",
+                (skill_name,),
+            )
+            if not row or row["total"] < 5:
+                return None
+            return row["good"] / max(row["total"], 1)
+        except Exception:
+            return None
 
     def detect_conflicts(self, tools_offered: list[str], selected_skills: list[str] | None = None) -> list[dict]:
         """Check for conflicting tools and skills."""
