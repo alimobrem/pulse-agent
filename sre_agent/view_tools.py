@@ -1170,42 +1170,36 @@ def optimize_view(view_id: str, strategy: str = "group") -> str:
         if not assigned:
             groups.setdefault("Overview", []).append(widget)
 
-    # Build sectioned layout — KPI groups first, then sections in order
-    sectioned: list[dict] = []
-    # Pull out metric_cards and info_card_grids as top-level KPIs
-    kpis = [w for ws in groups.values() for w in ws if w.get("kind") in ("metric_card", "info_card_grid", "stat_card")]
+    # Reorder widgets flat — KPIs first, then grouped by topic.
+    # No section wrappers: the grid layout system expects flat components.
+    reordered: list[dict] = []
+    kpi_kinds = {"metric_card", "info_card_grid", "stat_card"}
+    kpis = [w for ws in groups.values() for w in ws if w.get("kind") in kpi_kinds]
     non_kpis = {id(w) for w in kpis}
 
-    # Add KPIs first (no section wrapper needed)
-    sectioned.extend(kpis)
+    # KPIs pinned to top row
+    reordered.extend(kpis)
 
-    # Add each group as a section if it has 2+ non-KPI widgets
+    # Then each topic group in order (charts before tables within each group)
+    chart_kinds = {"chart", "donut_chart", "node_map"}
     for group_name in ["Overview", "Compute", "Memory", "Workloads", "Network", "Storage", "Alerts", "Security"]:
         group_widgets = [w for w in groups.get(group_name, []) if id(w) not in non_kpis]
         if not group_widgets:
             continue
-        if len(group_widgets) == 1:
-            # Single widget — don't wrap in section
-            sectioned.append(group_widgets[0])
-        else:
-            # Wrap in a section
-            sectioned.append(
-                {
-                    "kind": "section",
-                    "title": group_name,
-                    "items": group_widgets,
-                    "layout": {"w": "full"},
-                }
-            )
+        # Sort: charts first, then status/detail, then tables
+        group_widgets.sort(
+            key=lambda w: 0 if w.get("kind") in chart_kinds else 2 if w.get("kind") == "data_table" else 1
+        )
+        reordered.extend(group_widgets)
 
-    positioned = _apply_positions(sectioned)
+    positioned = _apply_positions(reordered)
     db.update_view(view_id, owner, layout=positioned)
 
     group_summary = ", ".join(f"{name} ({len(ws)})" for name, ws in groups.items() if ws)
     return _signal(
         "view_updated",
         f"Reorganized {len(layout)} widgets into {len(groups)} groups: {group_summary}. "
-        f"KPIs moved to top, related widgets grouped into sections.",
+        f"KPIs pinned to top, charts before tables within each group.",
         view_id=view_id,
     )
 
