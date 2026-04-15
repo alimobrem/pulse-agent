@@ -490,6 +490,21 @@ class MonitorSession:
             if now - last_time < cooldown_seconds:
                 continue
 
+            # Pre-classify log fingerprints for routing context
+            try:
+                from ..log_fingerprinter import fingerprint_finding
+
+                fps = fingerprint_finding(finding)
+                if fps:
+                    finding["_log_fingerprints"] = fps
+                    logger.info(
+                        "Log fingerprints for %s: %s",
+                        finding.get("title", "")[:40],
+                        ", ".join(f"{fp['category']}({fp['count']})" for fp in fps[:3]),
+                    )
+            except Exception:
+                pass
+
             # Try plan-based execution first — if a template matches, use plan for investigation
             plan_ran = False
             try:

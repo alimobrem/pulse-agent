@@ -75,6 +75,21 @@ def _build_investigation_prompt(finding: dict) -> str:
     except Exception:
         pass
 
+    # Inject log fingerprints — classified error patterns from pod logs
+    try:
+        from ..log_fingerprinter import fingerprint_finding
+
+        fingerprints = fingerprint_finding(finding)
+        if fingerprints:
+            fp_lines = ["Log error fingerprints:"]
+            for fp in fingerprints[:5]:
+                fp_lines.append(
+                    f'  - {fp["category"]}: "{fp["pattern"]}" ({fp["count"]}x) → suggests {fp["skill_hint"]}'
+                )
+            prompt += "\n" + "\n".join(fp_lines) + "\n"
+    except Exception:
+        pass
+
     return prompt
 
 
