@@ -11,7 +11,7 @@ from typing import Any
 
 from ..decorators import beta_tool
 from ..tool_registry import register_tool
-from .generic import _fetch_table_rows
+from .generic import _fetch_table_rows, _resolve_short_name
 
 
 @beta_tool
@@ -71,6 +71,11 @@ def create_live_table(
         if ds_type == "k8s":
             if not ds.get("resource"):
                 return f"K8s datasource '{ds['id']}' missing required 'resource'."
+            # Resolve short names and auto-detect API group
+            resolved_resource, resolved_group = _resolve_short_name(ds["resource"], ds.get("group", ""))
+            ds["resource"] = resolved_resource
+            if resolved_group:
+                ds["group"] = resolved_group
             if not ds.get("label"):
                 ds["label"] = ds["id"]
             k8s_sources.append(ds)
