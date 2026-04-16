@@ -418,3 +418,21 @@ register_component(
         prompt_hint="section — Collapsible section for grouping.",
     )
 )
+
+register_component(
+    ComponentKind(
+        name="topology",
+        description="Interactive resource dependency graph with health status",
+        category="visualization",
+        required_fields=["nodes", "edges"],
+        optional_fields=["title", "description"],
+        title_required=False,
+        example={
+            "kind": "topology",
+            "title": "Namespace Topology",
+            "nodes": [{"id": "1", "kind": "Pod", "name": "web", "namespace": "default", "status": "healthy"}],
+            "edges": [{"source": "1", "target": "2", "relationship": "owns"}],
+        },
+        prompt_hint="topology — Interactive dependency graph. Use get_topology_graph() to create.",
+    )
+)
