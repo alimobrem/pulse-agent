@@ -76,6 +76,9 @@ def create_live_table(
             ds["resource"] = resolved_resource
             if resolved_group:
                 ds["group"] = resolved_group
+            # Normalize "ALL" namespace to empty for frontend watches
+            if ds.get("namespace", "").upper() == "ALL":
+                ds["namespace"] = ""
             if not ds.get("label"):
                 ds["label"] = ds["id"]
             k8s_sources.append(ds)

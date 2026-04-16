@@ -165,10 +165,13 @@ def _build_k8s_datasource(
 ) -> dict[str, Any]:
     """Build a K8s datasource entry for live table frontend watches."""
     resource, group = _resolve_short_name(resource, group)
+    # Normalize "ALL" to empty — frontend treats empty as cluster-wide
+    if namespace and namespace.upper() == "ALL":
+        namespace = ""
     ds: dict[str, Any] = {
         "type": "k8s",
         "id": f"{resource}-{namespace or 'cluster'}",
-        "label": f"{resource.title()} in {namespace or 'cluster'}",
+        "label": f"{resource.title()} in {namespace or 'all namespaces'}",
         "resource": resource,
     }
     if group:
