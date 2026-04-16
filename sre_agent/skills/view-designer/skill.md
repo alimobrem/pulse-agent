@@ -34,6 +34,14 @@ requires_tools:
   - namespace_summary
   - cluster_metrics
   - get_prometheus_query
+  - update_view_widgets
+  - get_view_details
+  - add_widget_to_view
+  - remove_widget_from_view
+  - list_saved_views
+  - create_live_table
+  - emit_component
+  - optimize_view
 handoff_to:
   sre: [remediate, scale, restart, drain, cordon, apply, delete, fix pod, fix deployment, fix node]
   security: [scan rbac, scan security, vulnerability, compliance, audit security]

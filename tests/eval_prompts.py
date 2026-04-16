@@ -643,6 +643,18 @@ EVAL_PROMPTS: list[tuple[str, list[str], str, str]] = [
         "sre",
         "Multi-datasource live table with enrichment",
     ),
+    (
+        "remove the namespace column from the table",
+        ["update_view_widgets"],
+        "view_designer",
+        "View widget column editing",
+    ),
+    (
+        "add a resource kind column to the dashboard",
+        ["update_view_widgets"],
+        "view_designer",
+        "View widget column addition",
+    ),
 ]
 
 # Tools that are internal/meta and don't need user-facing eval prompts
