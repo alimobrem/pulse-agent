@@ -10,6 +10,7 @@ get_tool_category, select_tools) that was previously in harness.py.
 from __future__ import annotations
 
 import logging
+import re
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -56,6 +57,7 @@ class Skill:
     examples: list[dict] = field(default_factory=list)  # few-shot [{scenario, correct, wrong}]
     success_criteria: str = ""  # measurable resolution condition
     risk_level: str = "low"  # low | medium | high — high triggers approval gate
+    trigger_patterns: list[str] = field(default_factory=list)  # regex patterns for hard pre-route
     conflicts_with: list[str] = field(default_factory=list)  # conflicting skill names
     supported_components: list[str] = field(default_factory=list)  # UI component types this skill renders
     generated_by: str = ""
@@ -185,6 +187,7 @@ def _parse_skill_md(path: Path) -> Skill | None:
         examples=meta.get("examples", []),
         success_criteria=meta.get("success_criteria", ""),
         risk_level=meta.get("risk_level", "low"),
+        trigger_patterns=meta.get("trigger_patterns", []),
         conflicts_with=meta.get("conflicts_with", []),
         supported_components=meta.get("supported_components", []),
         generated_by=meta.get("generated_by", ""),
@@ -430,6 +433,65 @@ def _get_selector():
     return _selector
 
 
+# Hard pre-route patterns: (compiled_regex, skill_name)
+# These override ORCA when the query unambiguously matches a skill.
+_HARD_PRE_ROUTE: list[tuple[re.Pattern, str]] = []
+
+
+def _init_hard_pre_route() -> None:
+    """Build hard pre-route rules from skill trigger_patterns."""
+    global _HARD_PRE_ROUTE
+    if _HARD_PRE_ROUTE:
+        return
+    # High-priority deterministic rules checked FIRST (order matters).
+    # View/dashboard queries must match before skill-specific patterns
+    # because queries like "make me a security dashboard" contain both
+    # view keywords ("make...dashboard") and skill keywords ("security").
+    _HARD_PRE_ROUTE.extend(
+        [
+            (
+                re.compile(
+                    r"(create|build|make|design)\s+(me\s+)?(a\s+)?(\w+\s+)?(dashboard|view|live\s+table)", re.IGNORECASE
+                ),
+                "view_designer",
+            ),
+            (
+                re.compile(
+                    r"(edit|update|modify|fix|optimize)\s+(the\s+)?(dashboard|view|layout|widget)", re.IGNORECASE
+                ),
+                "view_designer",
+            ),
+            (re.compile(r"add\s+(a\s+)?(chart|table|widget|metric)", re.IGNORECASE), "view_designer"),
+            (
+                re.compile(r"(postmortem|post.mortem|incident\s+review|root\s+cause\s+report)\b", re.IGNORECASE),
+                "postmortem",
+            ),
+            (re.compile(r"(slo\b|service\s+level|error\s+budget|burn\s+rate)", re.IGNORECASE), "slo_management"),
+            (re.compile(r"(capacity\s+plan|forecast|projection|right.?siz)", re.IGNORECASE), "capacity_planner"),
+        ]
+    )
+    # Then skill-defined trigger_patterns (lower priority)
+    for skill in _skills.values():
+        for pattern in skill.trigger_patterns:
+            try:
+                _HARD_PRE_ROUTE.append((re.compile(pattern, re.IGNORECASE), skill.name))
+            except re.error:
+                pass
+
+
+def _hard_pre_route(query: str) -> Skill | None:
+    """Check deterministic pre-route rules before ORCA."""
+    if not _HARD_PRE_ROUTE:
+        _init_hard_pre_route()
+    for pattern, skill_name in _HARD_PRE_ROUTE:
+        if pattern.search(query):
+            skill = _skills.get(skill_name)
+            if skill:
+                logger.info("Hard pre-route: '%s' → %s (pattern: %s)", query[:60], skill_name, pattern.pattern)
+                return skill
+    return None
+
+
 def classify_query(query: str, *, context: dict | None = None) -> Skill:
     """Route a query to the best matching skill.
 
@@ -446,6 +508,13 @@ def classify_query(query: str, *, context: dict | None = None) -> Skill:
         q = fix_typos(query)
     except ImportError:
         q = query
+
+    # Hard pre-route: deterministic regex rules for unambiguous queries.
+    # Runs before ORCA to avoid misrouting when historical/learned weights
+    # bias the statistical model toward the wrong skill.
+    pre_route = _hard_pre_route(q)
+    if pre_route:
+        return pre_route
 
     selector = _get_selector()
     result = selector.select(q, context=context)

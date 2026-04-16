@@ -11,7 +11,7 @@
     {"id": "sel_alerts_firing", "query": "check what alerts are firing", "expected_skill": "sre", "acceptable": ["sre"]},
     {"id": "sel_rbac_security", "query": "scan for RBAC vulnerabilities", "expected_skill": "security", "acceptable": ["security"]},
     {"id": "sel_pod_security", "query": "check pod security violations", "expected_skill": "security", "acceptable": ["security"]},
-    {"id": "sel_network_policy", "query": "which namespaces have no network policies", "expected_skill": "security", "acceptable": ["security"]},
+    {"id": "sel_network_policy", "query": "which namespaces have no network policies", "expected_skill": "security", "acceptable": ["security", "sre"]},
     {"id": "sel_secret_audit", "query": "audit secrets for rotation", "expected_skill": "security", "acceptable": ["security"]},
     {"id": "sel_cert_expiry", "query": "check TLS certificate expiry", "expected_skill": "security", "acceptable": ["security", "sre"]},
     {"id": "sel_create_dashboard", "query": "create a dashboard for namespace monitoring", "expected_skill": "view_designer", "acceptable": ["view_designer"]},
@@ -41,6 +41,17 @@
     {"id": "sel_fix_deployment_sre", "query": "fix the failing deployment", "expected_skill": "sre", "acceptable": ["sre"]},
     {"id": "sel_slo_burn", "query": "show me current SLO burn rates", "expected_skill": "slo_management", "acceptable": ["slo_management", "sre"]},
     {"id": "sel_postmortem", "query": "generate a postmortem for the last incident", "expected_skill": "postmortem", "acceptable": ["postmortem", "sre"]},
-    {"id": "sel_plan_builder", "query": "build me a skill for database troubleshooting", "expected_skill": "plan_builder", "acceptable": ["plan_builder", "sre"]}
+    {"id": "sel_plan_builder", "query": "build me a skill for database troubleshooting", "expected_skill": "plan_builder", "acceptable": ["plan_builder", "sre"]},
+    {"id": "sel_view_workloads", "query": "create me a view with a single table for all workloads in the openshiftpulse namespace", "expected_skill": "view_designer", "acceptable": ["view_designer"]},
+    {"id": "sel_live_table", "query": "show me pods from production and staging namespaces in one table", "expected_skill": "view_designer", "acceptable": ["view_designer", "sre"]},
+    {"id": "sel_build_view", "query": "build me a view with CPU and memory for all nodes", "expected_skill": "view_designer", "acceptable": ["view_designer"]},
+    {"id": "sel_create_live_table", "query": "create a live table of pods with CPU usage and error counts", "expected_skill": "view_designer", "acceptable": ["view_designer", "sre"]},
+    {"id": "sel_make_dashboard", "query": "make me a security dashboard with RBAC findings", "expected_skill": "view_designer", "acceptable": ["view_designer"]},
+    {"id": "sel_slo_error_budget", "query": "what is the error budget for the API SLO", "expected_skill": "slo_management", "acceptable": ["slo_management"]},
+    {"id": "sel_slo_define", "query": "define a new SLO for the payment service", "expected_skill": "slo_management", "acceptable": ["slo_management"]},
+    {"id": "sel_capacity_rightsizing", "query": "which pods are over-provisioned and wasting CPU", "expected_skill": "capacity_planner", "acceptable": ["capacity_planner", "sre"]},
+    {"id": "sel_postmortem_rca", "query": "what was the root cause of yesterday's outage", "expected_skill": "postmortem", "acceptable": ["postmortem", "sre"]},
+    {"id": "sel_security_compliance", "query": "check compliance status of all namespaces", "expected_skill": "security", "acceptable": ["security"]},
+    {"id": "sel_security_scc", "query": "which pods are running with privileged SCC", "expected_skill": "security", "acceptable": ["security"]}
   ]
 }

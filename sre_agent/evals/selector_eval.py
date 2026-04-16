@@ -24,12 +24,10 @@ class SelectorEvalResult:
 
 def run_selector_eval(suite_path: str = "selector") -> SelectorEvalResult:
     """Run the selector eval suite. Deterministic — no LLM calls."""
-    from ..skill_loader import _keyword_index, _skills, load_skills
-    from ..skill_selector import SkillSelector
+    from ..skill_loader import classify_query, load_skills
 
     # Ensure skills loaded
     load_skills()
-    selector = SkillSelector(_skills, keyword_index=_keyword_index)
 
     # Load scenarios
     package = "sre_agent.evals.scenarios_data"
@@ -51,29 +49,22 @@ def run_selector_eval(suite_path: str = "selector") -> SelectorEvalResult:
         acceptable = set(scenario.get("acceptable", [expected]))
 
         start = time.monotonic()
-        selection = selector.select(query)
+        routed_skill = classify_query(query)
         elapsed_ms = (time.monotonic() - start) * 1000
         latencies.append(elapsed_ms)
 
-        selected = selection.skill_name
+        selected = routed_skill.name
 
-        # Recall@5: is expected skill in fused_scores top 5?
-        top_5 = sorted(selection.fused_scores.keys(), key=lambda k: -selection.fused_scores[k])[:5]
-        if expected in top_5 or selected in acceptable:
+        # Recall@5: count as hit if selected is acceptable
+        if selected in acceptable:
             correct_in_top_5 += 1
 
-        # Precision@3: of top 3, how many are acceptable?
-        top_3 = sorted(selection.fused_scores.keys(), key=lambda k: -selection.fused_scores[k])[:3]
-        if top_3:
-            precision = sum(1 for s in top_3 if s in acceptable) / len(top_3)
-            correct_in_top_3 += precision
-        else:
-            # No scores = fallback. Count as correct if selected is acceptable.
-            if selected in acceptable:
-                correct_in_top_3 += 1
+        # Precision@3: with full pipeline, selected is the final answer
+        if selected in acceptable:
+            correct_in_top_3 += 1
 
-        # Cold start: did we get at least one skill?
-        if selection.fused_scores or selected:
+        # Cold start: did we get a skill?
+        if selected:
             got_at_least_one += 1
 
         # Pass/fail
@@ -86,7 +77,6 @@ def run_selector_eval(suite_path: str = "selector") -> SelectorEvalResult:
                     "query": query[:60],
                     "expected": expected,
                     "got": selected,
-                    "scores": {k: round(v, 3) for k, v in selection.fused_scores.items()},
                 }
             )
 

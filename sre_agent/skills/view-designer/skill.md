@@ -38,7 +38,7 @@ handoff_to:
   sre: [remediate, scale, restart, drain, cordon, apply, delete, fix pod, fix deployment, fix node]
   security: [scan rbac, scan security, vulnerability, compliance, audit security]
 trigger_patterns:
-  - "dashboard|view|widget|chart|table"
+  - "dashboard|\\bview\\b|widget|chart|\\btable\\b"
   - "build.*dashboard|create.*dashboard|make.*dashboard"
   - "build.*view|create.*view|make.*view"
   - "show.*as.*chart|add.*widget|layout"
