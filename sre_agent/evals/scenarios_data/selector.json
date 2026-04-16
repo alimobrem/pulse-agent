@@ -52,6 +52,10 @@
     {"id": "sel_capacity_rightsizing", "query": "which pods are over-provisioned and wasting CPU", "expected_skill": "capacity_planner", "acceptable": ["capacity_planner", "sre"]},
     {"id": "sel_postmortem_rca", "query": "what was the root cause of yesterday's outage", "expected_skill": "postmortem", "acceptable": ["postmortem", "sre"]},
     {"id": "sel_security_compliance", "query": "check compliance status of all namespaces", "expected_skill": "security", "acceptable": ["security"]},
-    {"id": "sel_security_scc", "query": "which pods are running with privileged SCC", "expected_skill": "security", "acceptable": ["security"]}
+    {"id": "sel_security_scc", "query": "which pods are running with privileged SCC", "expected_skill": "security", "acceptable": ["security"]},
+    {"id": "sel_remove_column", "query": "remove the namespace column and add the resource kind column", "expected_skill": "view_designer", "acceptable": ["view_designer"]},
+    {"id": "sel_hide_column", "query": "hide the labels column from the table", "expected_skill": "view_designer", "acceptable": ["view_designer"]},
+    {"id": "sel_sort_table", "query": "sort by restarts descending", "expected_skill": "view_designer", "acceptable": ["view_designer", "sre"]},
+    {"id": "sel_custom_view_context", "query": "Context: custom_view / rename the first widget", "expected_skill": "view_designer", "acceptable": ["view_designer"]}
   ]
 }

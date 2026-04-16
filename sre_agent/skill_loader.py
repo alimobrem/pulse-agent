@@ -461,7 +461,13 @@ def _init_hard_pre_route() -> None:
                 ),
                 "view_designer",
             ),
-            (re.compile(r"add\s+(a\s+)?(chart|table|widget|metric)", re.IGNORECASE), "view_designer"),
+            (re.compile(r"add\s+(a\s+)?(chart|table|widget|metric|column)", re.IGNORECASE), "view_designer"),
+            (
+                re.compile(r"(remove|hide|show|rename|reorder)\s+.{0,30}(column|widget|chart)", re.IGNORECASE),
+                "view_designer",
+            ),
+            (re.compile(r"(sort|filter)\s+(by|the)\s+", re.IGNORECASE), "view_designer"),
+            (re.compile(r"custom_view|/custom/", re.IGNORECASE), "view_designer"),
             (
                 re.compile(r"(postmortem|post.mortem|incident\s+review|root\s+cause\s+report)\b", re.IGNORECASE),
                 "postmortem",
@@ -501,20 +507,20 @@ def classify_query(query: str, *, context: dict | None = None) -> Skill:
     if not _skills:
         load_skills()
 
-    # Apply typo correction
+    # Hard pre-route: deterministic regex rules for unambiguous queries.
+    # Runs on the ORIGINAL query before typo correction, because the typo
+    # corrector can mangle non-K8s terms (e.g. "column" → "volume").
+    pre_route = _hard_pre_route(query)
+    if pre_route:
+        return pre_route
+
+    # Apply typo correction (for ORCA, not for pre-route)
     try:
         from .orchestrator import fix_typos
 
         q = fix_typos(query)
     except ImportError:
         q = query
-
-    # Hard pre-route: deterministic regex rules for unambiguous queries.
-    # Runs before ORCA to avoid misrouting when historical/learned weights
-    # bias the statistical model toward the wrong skill.
-    pre_route = _hard_pre_route(q)
-    if pre_route:
-        return pre_route
 
     selector = _get_selector()
     result = selector.select(q, context=context)
