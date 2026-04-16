@@ -66,11 +66,13 @@ def _resolve_height(hint: str | None, default: int, component: dict) -> int:
 
     # Content-aware heights
     if kind == "data_table":
-        if component.get("datasources"):
-            default = 14  # Live tables — generous default since row count grows via watch
+        rows = len(component.get("rows", []))
+        if rows:
+            default = 3 + min(rows, 15)  # header + footer + 1 grid unit per row, capped at pageSize
+        elif component.get("datasources"):
+            default = 10  # live table with no initial snapshot — moderate default
         else:
-            rows = len(component.get("rows", []))
-            default = max(6, 3 + min(rows, 12)) if rows else 6
+            default = 5
     elif kind == "status_list":
         items = len(component.get("items", []))
         default = 2 + min(math.ceil(items * 0.8), 8) if items else 4

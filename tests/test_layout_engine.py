@@ -295,7 +295,32 @@ class TestLayoutHints:
     def test_content_aware_table_height(self):
         components = [{"kind": "data_table", "rows": [{}] * 8}]
         layout = compute_layout(components)
-        assert layout[0]["h"] == 11  # 3 + min(8, 12)
+        assert layout[0]["h"] == 11  # 3 + min(8, 15)
+
+    def test_table_height_2_rows(self):
+        components = [{"kind": "data_table", "rows": [{}] * 2}]
+        layout = compute_layout(components)
+        assert layout[0]["h"] == 5  # 3 + 2
+
+    def test_table_height_15_rows_capped(self):
+        components = [{"kind": "data_table", "rows": [{}] * 30}]
+        layout = compute_layout(components)
+        assert layout[0]["h"] == 18  # 3 + min(30, 15) = 18
+
+    def test_table_height_empty(self):
+        components = [{"kind": "data_table", "rows": []}]
+        layout = compute_layout(components)
+        assert layout[0]["h"] == 5  # empty static table
+
+    def test_table_height_live_no_rows(self):
+        components = [{"kind": "data_table", "datasources": [{"type": "k8s", "id": "x"}]}]
+        layout = compute_layout(components)
+        assert layout[0]["h"] == 10  # live table with no initial snapshot
+
+    def test_table_height_live_with_rows(self):
+        components = [{"kind": "data_table", "rows": [{}] * 5, "datasources": [{"type": "k8s", "id": "x"}]}]
+        layout = compute_layout(components)
+        assert layout[0]["h"] == 8  # 3 + 5, uses actual row count
 
     def test_content_aware_status_list_height(self):
         components = [{"kind": "status_list", "items": [{}] * 5}]
