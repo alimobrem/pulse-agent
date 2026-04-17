@@ -73,14 +73,16 @@ React/TypeScript frontend (OpenShift Pulse) providing the user interface.
 
 ### Key Statistics
 
-| Metric | Value |
-|--------|-------|
-| Tools | 122 (86 native + 36 MCP) across 36 modules + MCP servers |
-| Scanners | 17 (12 core + 5 audit) |
-| Tests | See badge in README |
-| PromQL Recipes | 73 across 16 categories |
-| Eval Prompts | 98 |
-| Protocol Version | 2 |
+
+| Metric           | Value                                                    |
+| ---------------- | -------------------------------------------------------- |
+| Tools            | 122 (86 native + 36 MCP) across 36 modules + MCP servers |
+| Scanners         | 17 (12 core + 5 audit)                                   |
+| Tests            | 1,690                                                    |
+| PromQL Recipes   | 73 across 16 categories                                  |
+| Eval Prompts     | 98                                                       |
+| Protocol Version | 2                                                        |
+
 
 ---
 
@@ -88,10 +90,12 @@ React/TypeScript frontend (OpenShift Pulse) providing the user interface.
 
 ### Entry Points
 
-| Entry Point | File | Purpose |
-|-------------|------|---------|
-| CLI | `sre_agent/main.py` | Interactive Rich terminal UI |
-| API Server | `sre_agent/serve.py` -> `sre_agent/api/` | FastAPI WebSocket server on port 8080 |
+
+| Entry Point | File                                     | Purpose                               |
+| ----------- | ---------------------------------------- | ------------------------------------- |
+| CLI         | `sre_agent/main.py`                      | Interactive Rich terminal UI          |
+| API Server  | `sre_agent/serve.py` -> `sre_agent/api/` | FastAPI WebSocket server on port 8080 |
+
 
 The CLI is used for local development and debugging. In production, the agent
 runs as an API server behind the Pulse UI.
@@ -197,22 +201,24 @@ Tools return structured UI component specs alongside text. The agent emits
 these as `component` WebSocket events. The Pulse UI renders 14 component types
 inline in the chat or assembled into dashboards:
 
-| Component Kind | Description | Example Tool |
-|----------------|-------------|--------------|
-| `data_table` | Sortable, filterable table with smart columns | `list_pods` |
-| `info_card_grid` | Summary metric cards in a row | `namespace_summary` |
-| `chart` | Time-series (line, bar, area, pie, etc.) | `get_prometheus_query` |
-| `status_list` | Colored status indicators | `get_firing_alerts` |
-| `badge_list` | Colored tags/badges | Various |
-| `key_value` | Key-value pair display | `describe_pod` |
-| `relationship_tree` | Visual resource hierarchy | `get_resource_relationships` |
-| `tabs` | Tabbed container grouping components | `create_dashboard` |
-| `grid` | Multi-column layout | `create_dashboard` |
-| `section` | Collapsible titled section | `create_dashboard` |
-| `log_viewer` | Searchable log output | `get_pod_logs` |
-| `yaml_viewer` | Formatted YAML/JSON with copy button | Various |
-| `metric_card` | Single metric with live sparkline | `cluster_metrics` |
-| `node_map` | Visual cluster node topology | `visualize_nodes` |
+
+| Component Kind      | Description                                   | Example Tool                 |
+| ------------------- | --------------------------------------------- | ---------------------------- |
+| `data_table`        | Sortable, filterable table with smart columns | `list_pods`                  |
+| `info_card_grid`    | Summary metric cards in a row                 | `namespace_summary`          |
+| `chart`             | Time-series (line, bar, area, pie, etc.)      | `get_prometheus_query`       |
+| `status_list`       | Colored status indicators                     | `get_firing_alerts`          |
+| `badge_list`        | Colored tags/badges                           | Various                      |
+| `key_value`         | Key-value pair display                        | `describe_pod`               |
+| `relationship_tree` | Visual resource hierarchy                     | `get_resource_relationships` |
+| `tabs`              | Tabbed container grouping components          | `create_dashboard`           |
+| `grid`              | Multi-column layout                           | `create_dashboard`           |
+| `section`           | Collapsible titled section                    | `create_dashboard`           |
+| `log_viewer`        | Searchable log output                         | `get_pod_logs`               |
+| `yaml_viewer`       | Formatted YAML/JSON with copy button          | Various                      |
+| `metric_card`       | Single metric with live sparkline             | `cluster_metrics`            |
+| `node_map`          | Visual cluster node topology                  | `visualize_nodes`            |
+
 
 Data tables support 14 smart column renderers: `resource_name`, `namespace`,
 `node`, `status`, `age`, `cpu`, `memory`, `replicas`, `progress`, `sparkline`,
@@ -227,12 +233,14 @@ Data tables support 14 smart column renderers: `resource_name`, `namespace`,
 The orchestrator (`sre_agent/orchestrator.py`) supports four modes, each with
 its own system prompt, tool set, and write permissions:
 
-| Mode | Endpoint | System Prompt | Tools | Write Ops |
-|------|----------|---------------|-------|-----------|
-| **SRE** | `/ws/agent` (auto-routed) | Cluster diagnostics, triage | 72+ SRE tools | Yes (confirmed) |
-| **Security** | `/ws/agent` (auto-routed) | Security scanning, compliance | 9 security tools | No |
-| **View Designer** | `/ws/agent` (auto-routed) | Dashboard creation specialist | Data + view tools | No |
-| **Capacity Planner** | `/ws/agent` (auto-routed) | Resource forecasting, right-sizing | Analytics tools | No |
+
+| Mode                 | Endpoint                  | System Prompt                      | Tools             | Write Ops       |
+| -------------------- | ------------------------- | ---------------------------------- | ----------------- | --------------- |
+| **SRE**              | `/ws/agent` (auto-routed) | Cluster diagnostics, triage        | 72+ SRE tools     | Yes (confirmed) |
+| **Security**         | `/ws/agent` (auto-routed) | Security scanning, compliance      | 9 security tools  | No              |
+| **View Designer**    | `/ws/agent` (auto-routed) | Dashboard creation specialist      | Data + view tools | No              |
+| **Capacity Planner** | `/ws/agent` (auto-routed) | Resource forecasting, right-sizing | Analytics tools   | No              |
+
 
 ### Intent Classification
 
@@ -248,6 +256,7 @@ def classify_intent(query: str) -> tuple[AgentMode, bool]:
 ```
 
 Classification priority:
+
 1. **View Designer** -- "dashboard", "create a view", "add widget", etc. (50+ trigger phrases)
 2. **Both** -- "scan the cluster", "full audit", "production readiness"
 3. **Security** -- "rbac", "scc", "privilege", "vulnerability", etc.
@@ -262,6 +271,7 @@ thrashing (e.g., "update the chart" routing to SRE when the user is building a
 dashboard).
 
 Hard-switch keywords override sticky mode:
+
 - **SRE hard switch**: `crash`, `oom`, `pending`, `drain`, `cordon`, `crashloop`, `why are`
 - **Security hard switch**: `rbac`, `scc`, `vulnerability`, `compliance`, `privilege`
 
@@ -291,17 +301,19 @@ User: "Why are pods crashing in staging?"     -> sre (hard switch)
 
 ### 122 Tools Across 36 Modules
 
-| Module | File | Tools | Description |
-|--------|------|-------|-------------|
-| K8s Core | `sre_agent/k8s_tools/` | 41 | 11-module package: pods, deployments, nodes, events, metrics, write ops |
-| Security | `sre_agent/security_tools.py` | 9 | Pod security, RBAC, network policies, SCCs, secrets |
-| Fleet | `sre_agent/fleet_tools.py` | 5 | Multi-cluster tools via ACM |
-| GitOps | `sre_agent/gitops_tools.py` | 6 | ArgoCD integration |
-| Predict | `sre_agent/predict_tools.py` | 3 | Quota forecasting, HPA analysis, right-sizing |
-| Timeline | `sre_agent/timeline_tools.py` | 1 | Incident event correlation |
-| Git | `sre_agent/git_tools.py` | 1 | PR proposal generation |
-| Handoff | `sre_agent/handoff_tools.py` | 2 | Cross-agent handoff (SRE <-> Security) |
-| Views | `sre_agent/view_tools.py` | 20+ | Dashboard CRUD, namespace_summary, cluster_metrics |
+
+| Module   | File                          | Tools | Description                                                             |
+| -------- | ----------------------------- | ----- | ----------------------------------------------------------------------- |
+| K8s Core | `sre_agent/k8s_tools/`        | 41    | 11-module package: pods, deployments, nodes, events, metrics, write ops |
+| Security | `sre_agent/security_tools.py` | 9     | Pod security, RBAC, network policies, SCCs, secrets                     |
+| Fleet    | `sre_agent/fleet_tools.py`    | 5     | Multi-cluster tools via ACM                                             |
+| GitOps   | `sre_agent/gitops_tools.py`   | 6     | ArgoCD integration                                                      |
+| Predict  | `sre_agent/predict_tools.py`  | 3     | Quota forecasting, HPA analysis, right-sizing                           |
+| Timeline | `sre_agent/timeline_tools.py` | 1     | Incident event correlation                                              |
+| Git      | `sre_agent/git_tools.py`      | 1     | PR proposal generation                                                  |
+| Handoff  | `sre_agent/handoff_tools.py`  | 2     | Cross-agent handoff (SRE <-> Security)                                  |
+| Views    | `sre_agent/view_tools.py`     | 20+   | Dashboard CRUD, namespace_summary, cluster_metrics                      |
+
 
 ### The `@beta_tool` Pattern
 
@@ -326,6 +338,7 @@ def tool_name(param: str, namespace: str = "") -> str:
 ```
 
 Rules enforced across all tools:
+
 - Input validation via `_validate_k8s_name()` / `_validate_k8s_namespace()`
 - K8s API calls wrapped in `safe()` for error classification
 - Write tools registered in the `WRITE_TOOLS` set
@@ -362,17 +375,19 @@ Agent calls write tool (e.g., scale_deployment)
 
 The harness groups tools into 8 categories for dynamic selection:
 
-| Category | Keywords | Example Tools |
-|----------|----------|---------------|
-| diagnostics | health, crash, error, events | `list_pods`, `get_events`, `get_firing_alerts` |
-| workloads | deploy, scale, rollback, job | `list_deployments`, `scale_deployment` |
-| networking | service, route, dns, ingress | `describe_service`, `list_routes` |
-| security | rbac, scc, audit, privilege | `scan_pod_security`, `scan_rbac_risks` |
-| storage | pvc, volume, disk, capacity | `list_resources` |
-| monitoring | metric, prometheus, alert, cpu | `get_prometheus_query`, `get_pod_metrics` |
-| operations | drain, cordon, apply, yaml | `drain_node`, `apply_yaml` |
-| gitops | git, argo, drift, pr | `detect_gitops_drift`, `propose_git_change` |
-| fleet | fleet, all clusters, multi-cluster | `fleet_list_pods`, `fleet_compare_resource` |
+
+| Category    | Keywords                           | Example Tools                                  |
+| ----------- | ---------------------------------- | ---------------------------------------------- |
+| diagnostics | health, crash, error, events       | `list_pods`, `get_events`, `get_firing_alerts` |
+| workloads   | deploy, scale, rollback, job       | `list_deployments`, `scale_deployment`         |
+| networking  | service, route, dns, ingress       | `describe_service`, `list_routes`              |
+| security    | rbac, scc, audit, privilege        | `scan_pod_security`, `scan_rbac_risks`         |
+| storage     | pvc, volume, disk, capacity        | `list_resources`                               |
+| monitoring  | metric, prometheus, alert, cpu     | `get_prometheus_query`, `get_pod_metrics`      |
+| operations  | drain, cordon, apply, yaml         | `drain_node`, `apply_yaml`                     |
+| gitops      | git, argo, drift, pr               | `detect_gitops_drift`, `propose_git_change`    |
+| fleet       | fleet, all clusters, multi-cluster | `fleet_list_pods`, `fleet_compare_resource`    |
+
 
 ---
 
@@ -556,25 +571,27 @@ in real time.
 
 ### 17 Scanners
 
-| Scanner | Category | Severity | Auto-fixable |
-|---------|----------|----------|--------------|
-| Crashlooping pods | `crashloop` | WARN/CRIT | Yes |
-| Pending pods | `scheduling` | WARN/CRIT | No |
-| Failed deployments | `workloads` | WARN/CRIT | Yes |
-| Node pressure | `nodes` | CRITICAL | No |
-| Expiring certs | `cert_expiry` | WARN/CRIT | No |
-| Firing alerts | `alerts` | INFO/WARN/CRIT | No |
-| OOM-killed pods | `oom` | CRITICAL | No |
-| Image pull errors | `image_pull` | WARNING | Yes |
-| Degraded operators | `operators` | CRITICAL | No |
-| DaemonSet gaps | `daemonsets` | WARN/CRIT | No |
-| HPA saturation | `hpa` | WARNING | No |
-| Security posture | `security` | WARNING | No |
-| Config changes (audit) | `audit_config` | INFO | No |
-| RBAC changes (audit) | `audit_rbac` | WARNING | No |
-| Deployment rollouts (audit) | `audit_deployment` | INFO | No |
-| Warning events (audit) | `audit_events` | WARNING | No |
-| Auth anomalies (audit) | `audit_auth` | WARNING | No |
+
+| Scanner                     | Category           | Severity       | Auto-fixable |
+| --------------------------- | ------------------ | -------------- | ------------ |
+| Crashlooping pods           | `crashloop`        | WARN/CRIT      | Yes          |
+| Pending pods                | `scheduling`       | WARN/CRIT      | No           |
+| Failed deployments          | `workloads`        | WARN/CRIT      | Yes          |
+| Node pressure               | `nodes`            | CRITICAL       | No           |
+| Expiring certs              | `cert_expiry`      | WARN/CRIT      | No           |
+| Firing alerts               | `alerts`           | INFO/WARN/CRIT | No           |
+| OOM-killed pods             | `oom`              | CRITICAL       | No           |
+| Image pull errors           | `image_pull`       | WARNING        | Yes          |
+| Degraded operators          | `operators`        | CRITICAL       | No           |
+| DaemonSet gaps              | `daemonsets`       | WARN/CRIT      | No           |
+| HPA saturation              | `hpa`              | WARNING        | No           |
+| Security posture            | `security`         | WARNING        | No           |
+| Config changes (audit)      | `audit_config`     | INFO           | No           |
+| RBAC changes (audit)        | `audit_rbac`       | WARNING        | No           |
+| Deployment rollouts (audit) | `audit_deployment` | INFO           | No           |
+| Warning events (audit)      | `audit_events`     | WARNING        | No           |
+| Auth anomalies (audit)      | `audit_auth`       | WARNING        | No           |
+
 
 Pod-based scanners (crashloop, oom, image_pull) share a single pod list fetch
 to reduce API calls.
@@ -612,13 +629,15 @@ to reduce API calls.
 
 ### Trust Levels (0-4)
 
-| Level | Name | Behavior |
-|-------|------|----------|
-| 0 | Monitor only | Observe and report findings. No action taken. |
-| 1 | Suggest fixes | Propose remediations in text. No action taken. |
-| 2 | Ask before applying | Emit `action_report` with `status: "proposed"`. Wait for `action_response`. |
-| 3 | Auto-fix safe categories | Fix categories in `autoFixCategories` automatically. Others require approval. |
-| 4 | Full autonomous | Fix ALL auto-fixable findings. Requires `PULSE_AGENT_MAX_TRUST_LEVEL >= 4`. |
+
+| Level | Name                     | Behavior                                                                      |
+| ----- | ------------------------ | ----------------------------------------------------------------------------- |
+| 0     | Monitor only             | Observe and report findings. No action taken.                                 |
+| 1     | Suggest fixes            | Propose remediations in text. No action taken.                                |
+| 2     | Ask before applying      | Emit `action_report` with `status: "proposed"`. Wait for `action_response`.   |
+| 3     | Auto-fix safe categories | Fix categories in `autoFixCategories` automatically. Others require approval. |
+| 4     | Full autonomous          | Fix ALL auto-fixable findings. Requires `PULSE_AGENT_MAX_TRUST_LEVEL >= 4`.   |
+
 
 Trust level is set by the UI via `subscribe_monitor` and clamped server-side to
 `PULSE_AGENT_MAX_TRUST_LEVEL` (default 3).
@@ -634,15 +653,18 @@ Trust level is set by the UI via `subscribe_monitor` and clamped server-side to
 
 ### Auto-Fix Handlers
 
-| Category | Handler | Action |
-|----------|---------|--------|
-| `crashloop` | `_fix_crashloop` | Delete pod (controller recreates) |
-| `workloads` | `_fix_workloads` | Rolling restart via annotation patch |
+
+| Category     | Handler           | Action                                                       |
+| ------------ | ----------------- | ------------------------------------------------------------ |
+| `crashloop`  | `_fix_crashloop`  | Delete pod (controller recreates)                            |
+| `workloads`  | `_fix_workloads`  | Rolling restart via annotation patch                         |
 | `image_pull` | `_fix_image_pull` | Restart owning controller (Deployment/StatefulSet/DaemonSet) |
+
 
 ### Confidence Scores
 
 Every finding receives two scores:
+
 - **Confidence** (0.0-1.0): How confident the scanner is that this is real.
   Based on category baseline + severity boost (e.g., crashloop=0.95, hpa=0.75).
 - **Noise Score** (0.0-1.0): How likely this finding is transient noise.
@@ -660,6 +682,7 @@ alerts like pods that briefly enter CrashLoopBackOff then self-recover.
 
 For critical and warning findings, the monitor runs read-only LLM-powered
 investigations:
+
 - Uses the SRE agent loop with write tools stripped out
 - Returns structured JSON: `{summary, suspected_cause, recommended_fix, confidence, evidence, alternatives_considered}`
 - Rate-limited: max 2 per scan, 20 per day, 5-minute cooldown per finding
@@ -674,33 +697,37 @@ investigations:
 Every tool invocation is recorded to PostgreSQL (`tool_usage` table) via
 fire-and-forget writes in `sre_agent/tool_usage.py`:
 
-| Field | Description |
-|-------|-------------|
-| `tool_name` | Tool that was called |
-| `agent_mode` | sre, security, view_designer, orchestrated |
-| `tool_category` | Harness category (diagnostics, monitoring, etc.) |
-| `status` | success, error, denied |
-| `duration_ms` | Execution time |
-| `result_bytes` | Response size before truncation |
-| `session_id` | WebSocket session UUID |
-| `turn_number` | Which iteration of the agent loop |
-| `was_confirmed` | Whether write tool was approved |
+
+| Field           | Description                                            |
+| --------------- | ------------------------------------------------------ |
+| `tool_name`     | Tool that was called                                   |
+| `agent_mode`    | sre, security, view_designer, orchestrated             |
+| `tool_category` | Harness category (diagnostics, monitoring, etc.)       |
+| `status`        | success, error, denied                                 |
+| `duration_ms`   | Execution time                                         |
+| `result_bytes`  | Response size before truncation                        |
+| `session_id`    | WebSocket session UUID                                 |
+| `turn_number`   | Which iteration of the agent loop                      |
+| `was_confirmed` | Whether write tool was approved                        |
 | `input_summary` | Sanitized tool input (secrets redacted, capped at 1KB) |
+
 
 ### Turn-Level Tracking
 
 The `tool_turns` table records per-turn metadata:
 
-| Field | Description |
-|-------|-------------|
-| `query_summary` | User's message text |
-| `tools_offered` | Tool schemas sent to Claude |
-| `tools_called` | Tools actually invoked |
-| `feedback` | User feedback (positive/negative) |
-| `input_tokens` | Claude API input tokens |
-| `output_tokens` | Claude API output tokens |
-| `cache_read_tokens` | Prompt cache hits |
-| `cache_creation_tokens` | New cache entries |
+
+| Field                   | Description                       |
+| ----------------------- | --------------------------------- |
+| `query_summary`         | User's message text               |
+| `tools_offered`         | Tool schemas sent to Claude       |
+| `tools_called`          | Tools actually invoked            |
+| `feedback`              | User feedback (positive/negative) |
+| `input_tokens`          | Claude API input tokens           |
+| `output_tokens`         | Claude API output tokens          |
+| `cache_read_tokens`     | Prompt cache hits                 |
+| `cache_creation_tokens` | New cache entries                 |
+
 
 ### Chain Discovery (Bigrams)
 
@@ -730,6 +757,7 @@ configurable via `PULSE_AGENT_CHAIN_MIN_PROBABILITY` (default 0.6) and
 ### Learned PromQL Queries
 
 The `promql_queries` table tracks success/failure rates per PromQL query:
+
 - Auto-detected category from query content
 - Success/failure counts updated on each execution
 - Feeds into `discover_metrics` tool for query selection
@@ -751,6 +779,7 @@ harness, making the agent self-aware of its own performance.
 ### Token Tracking
 
 Token usage is captured per turn from the Claude API response:
+
 - `input_tokens`, `output_tokens`: Actual token consumption
 - `cache_read_input_tokens`: Tokens served from prompt cache
 - `cache_creation_input_tokens`: Tokens used to create new cache entries
@@ -820,12 +849,14 @@ interaction and improve over time. Enabled via `PULSE_AGENT_MEMORY=1` (default).
 
 ### Self-Evaluation Scoring Rubric
 
-| Factor | Weight | Perfect Score |
-|--------|--------|---------------|
-| Resolution | 40% | User confirmed resolved |
-| Efficiency | 30% | 2-5 tool calls |
-| Safety | 20% | 0 rejected tool calls |
-| Speed | 10% | Under 60 seconds |
+
+| Factor     | Weight | Perfect Score           |
+| ---------- | ------ | ----------------------- |
+| Resolution | 40%    | User confirmed resolved |
+| Efficiency | 30%    | 2-5 tool calls          |
+| Safety     | 20%    | 0 rejected tool calls   |
+| Speed      | 10%    | Under 60 seconds        |
+
 
 ### Prompt Augmentation
 
@@ -853,29 +884,31 @@ Memory context injected into the system prompt follows this structure:
 All data is stored in PostgreSQL, configured via `PULSE_AGENT_DATABASE_URL`.
 The schema is defined in `sre_agent/db_schema.py`.
 
-| Table | Purpose | Key Fields |
-|-------|---------|------------|
-| `incidents` | Past interaction history | query, tool_sequence, resolution, score |
-| `runbooks` | Learned diagnostic runbooks | trigger_keywords, tool_sequence, success_count |
-| `patterns` | Recurring issue patterns | pattern_type, keywords, frequency |
-| `actions` | Fix history (auto-fix + manual) | tool, status, before_state, rollback_action |
-| `investigations` | Proactive investigation reports | suspected_cause, confidence, evidence |
-| `context_entries` | Cross-agent context bus | source, category, summary, namespace |
-| `findings` | Scanner findings | severity, message, resolved |
-| `views` | User-scoped custom dashboards | owner, title, layout (JSON), positions |
-| `view_versions` | Dashboard version history | view_id, version, layout snapshot |
-| `tool_usage` | Tool invocation audit log | tool_name, status, duration_ms, session_id |
-| `tool_turns` | Turn-level metadata | tools_offered, tools_called, token usage |
-| `promql_queries` | PromQL reliability tracking | query_hash, success_count, failure_count |
-| `metrics` | Agent performance metrics | metric_name, value, time_window |
-| `scan_runs` | Monitor scan history | session_id, duration_ms, findings_count |
-| `eval_runs` | Eval suite run history | suite, score, pass, dimension_scores |
-| `chat_sessions` | Chat session metadata | session_id, agent_mode, start_time |
-| `chat_messages` | Chat message history | session_id, role, content |
-| `skill_usage` | Skill routing analytics | skill_name, query, routed_from |
-| `prompt_log` | Prompt version tracking | hash, sections, tokens |
-| `tool_predictions` | Adaptive tool selection predictions | query_hash, predicted_tools, actual_tools |
-| `tool_cooccurrence` | Tool co-occurrence matrix | tool_a, tool_b, frequency |
+
+| Table               | Purpose                             | Key Fields                                     |
+| ------------------- | ----------------------------------- | ---------------------------------------------- |
+| `incidents`         | Past interaction history            | query, tool_sequence, resolution, score        |
+| `runbooks`          | Learned diagnostic runbooks         | trigger_keywords, tool_sequence, success_count |
+| `patterns`          | Recurring issue patterns            | pattern_type, keywords, frequency              |
+| `actions`           | Fix history (auto-fix + manual)     | tool, status, before_state, rollback_action    |
+| `investigations`    | Proactive investigation reports     | suspected_cause, confidence, evidence          |
+| `context_entries`   | Cross-agent context bus             | source, category, summary, namespace           |
+| `findings`          | Scanner findings                    | severity, message, resolved                    |
+| `views`             | User-scoped custom dashboards       | owner, title, layout (JSON), positions         |
+| `view_versions`     | Dashboard version history           | view_id, version, layout snapshot              |
+| `tool_usage`        | Tool invocation audit log           | tool_name, status, duration_ms, session_id     |
+| `tool_turns`        | Turn-level metadata                 | tools_offered, tools_called, token usage       |
+| `promql_queries`    | PromQL reliability tracking         | query_hash, success_count, failure_count       |
+| `metrics`           | Agent performance metrics           | metric_name, value, time_window                |
+| `scan_runs`         | Monitor scan history                | session_id, duration_ms, findings_count        |
+| `eval_runs`         | Eval suite run history              | suite, score, pass, dimension_scores           |
+| `chat_sessions`     | Chat session metadata               | session_id, agent_mode, start_time             |
+| `chat_messages`     | Chat message history                | session_id, role, content                      |
+| `skill_usage`       | Skill routing analytics             | skill_name, query, routed_from                 |
+| `prompt_log`        | Prompt version tracking             | hash, sections, tokens                         |
+| `tool_predictions`  | Adaptive tool selection predictions | query_hash, predicted_tools, actual_tools      |
+| `tool_cooccurrence` | Tool co-occurrence matrix           | tool_a, tool_b, frequency                      |
+
 
 ### Connection Pooling
 
@@ -954,11 +987,13 @@ Multiple layers protect against prompt injection from cluster data:
 
 The Helm chart's ClusterRole has three levels:
 
-| Level | Verbs | Use Case |
-|-------|-------|----------|
-| Default (read-only) | `get`, `list`, `watch` | Safe diagnostics |
-| `rbac.allowWriteOperations=true` | + `delete`, `patch`, `update`, `create` | Remediation |
-| `rbac.allowSecretAccess=true` | + `get`, `list` on secrets | Security scanning |
+
+| Level                            | Verbs                                   | Use Case          |
+| -------------------------------- | --------------------------------------- | ----------------- |
+| Default (read-only)              | `get`, `list`, `watch`                  | Safe diagnostics  |
+| `rbac.allowWriteOperations=true` | + `delete`, `patch`, `update`, `create` | Remediation       |
+| `rbac.allowSecretAccess=true`    | + `get`, `list` on secrets              | Security scanning |
+
 
 ### Trust Level Clamping
 
@@ -979,63 +1014,73 @@ max 3 will operate at level 3. This prevents UI-side escalation.
 
 ### Endpoints
 
-| Path | Auth | Description |
-|------|------|-------------|
-| `/ws/agent` | token | Auto-routing orchestrated agent (ORCA classifies intent per message) |
+
+| Path          | Auth  | Description                                                           |
+| ------------- | ----- | --------------------------------------------------------------------- |
+| `/ws/agent`   | token | Auto-routing orchestrated agent (ORCA classifies intent per message)  |
 | `/ws/monitor` | token | Autonomous cluster monitoring (18 scanners, auto-fix, investigations) |
+
 
 ### Chat Protocol (SRE, Security, Agent)
 
 **Client -> Server:**
 
-| Type | Fields | Description |
-|------|--------|-------------|
-| `message` | `content`, `context?`, `fleet?`, `preferences?` | User message |
-| `confirm_response` | `approved`, `nonce` | Write tool approval |
-| `clear` | -- | Clear conversation history |
-| `feedback` | `resolved` | Rate last response |
+
+| Type               | Fields                                          | Description                |
+| ------------------ | ----------------------------------------------- | -------------------------- |
+| `message`          | `content`, `context?`, `fleet?`, `preferences?` | User message               |
+| `confirm_response` | `approved`, `nonce`                             | Write tool approval        |
+| `clear`            | --                                              | Clear conversation history |
+| `feedback`         | `resolved`                                      | Rate last response         |
+
 
 **Server -> Client:**
 
-| Type | Fields | Description |
-|------|--------|-------------|
-| `text_delta` | `text` | Streaming text chunk |
-| `thinking_delta` | `thinking` | Agent reasoning chunk |
-| `tool_use` | `tool` | Tool execution started |
-| `component` | `spec`, `tool` | Structured UI component |
-| `confirm_request` | `tool`, `input`, `nonce` | Write confirmation prompt |
-| `done` | `full_response` | Turn complete |
-| `error` | `message`, `category?`, `suggestions?` | Error with context |
-| `cleared` | -- | History cleared acknowledgment |
-| `view_spec` | `spec` | AI-generated dashboard saved |
-| `view_validation_warning` | `errors`, `warnings`, `deduped_count` | Quality issues in saved view |
-| `view_updated` | `viewId` | View was modified |
-| `feedback_ack` | `resolved`, `score`, `runbookExtracted` | Feedback recorded |
+
+| Type                      | Fields                                  | Description                    |
+| ------------------------- | --------------------------------------- | ------------------------------ |
+| `text_delta`              | `text`                                  | Streaming text chunk           |
+| `thinking_delta`          | `thinking`                              | Agent reasoning chunk          |
+| `tool_use`                | `tool`                                  | Tool execution started         |
+| `component`               | `spec`, `tool`                          | Structured UI component        |
+| `confirm_request`         | `tool`, `input`, `nonce`                | Write confirmation prompt      |
+| `done`                    | `full_response`                         | Turn complete                  |
+| `error`                   | `message`, `category?`, `suggestions?`  | Error with context             |
+| `cleared`                 | --                                      | History cleared acknowledgment |
+| `view_spec`               | `spec`                                  | AI-generated dashboard saved   |
+| `view_validation_warning` | `errors`, `warnings`, `deduped_count`   | Quality issues in saved view   |
+| `view_updated`            | `viewId`                                | View was modified              |
+| `feedback_ack`            | `resolved`, `score`, `runbookExtracted` | Feedback recorded              |
+
 
 ### Monitor Protocol
 
 **Client -> Server:**
 
-| Type | Fields | Description |
-|------|--------|-------------|
-| `subscribe_monitor` | `trustLevel`, `autoFixCategories` | Configure monitoring session |
-| `trigger_scan` | -- | Trigger immediate scan |
-| `action_response` | `actionId`, `approved` | Approve/reject proposed action |
-| `get_fix_history` | `page?`, `filters?` | Request fix history |
+
+| Type                | Fields                            | Description                    |
+| ------------------- | --------------------------------- | ------------------------------ |
+| `subscribe_monitor` | `trustLevel`, `autoFixCategories` | Configure monitoring session   |
+| `trigger_scan`      | --                                | Trigger immediate scan         |
+| `action_response`   | `actionId`, `approved`            | Approve/reject proposed action |
+| `get_fix_history`   | `page?`, `filters?`               | Request fix history            |
+
 
 **Server -> Client:**
 
-| Type | Fields | Description |
-|------|--------|-------------|
-| `finding` | `id`, `severity`, `category`, `summary`, `confidence?`, `noiseScore?` | Issue detected |
-| `prediction` | `id`, `category`, `summary`, `confidence`, `horizon` | Predicted future issue |
-| `action_report` | `actionId`, `status`, `tool`, `beforeState`, `afterState`, `confidence?` | Fix result |
-| `investigation_report` | `id`, `summary`, `suspectedCause`, `confidence`, `evidence?` | Root cause analysis |
-| `verification_report` | `id`, `actionId`, `status`, `evidence` | Post-fix validation |
-| `resolution` | `findingId`, `resolvedBy` | Issue resolved |
-| `findings_snapshot` | `activeIds` | Stale finding cleanup |
-| `monitor_status` | `activeWatches`, `findingsCount`, `nextScan` | Scan cycle status |
-| `fix_history` | `items`, `total`, `page` | Fix history response |
+
+| Type                   | Fields                                                                   | Description            |
+| ---------------------- | ------------------------------------------------------------------------ | ---------------------- |
+| `finding`              | `id`, `severity`, `category`, `summary`, `confidence?`, `noiseScore?`    | Issue detected         |
+| `prediction`           | `id`, `category`, `summary`, `confidence`, `horizon`                     | Predicted future issue |
+| `action_report`        | `actionId`, `status`, `tool`, `beforeState`, `afterState`, `confidence?` | Fix result             |
+| `investigation_report` | `id`, `summary`, `suspectedCause`, `confidence`, `evidence?`             | Root cause analysis    |
+| `verification_report`  | `id`, `actionId`, `status`, `evidence`                                   | Post-fix validation    |
+| `resolution`           | `findingId`, `resolvedBy`                                                | Issue resolved         |
+| `findings_snapshot`    | `activeIds`                                                              | Stale finding cleanup  |
+| `monitor_status`       | `activeWatches`, `findingsCount`, `nextScan`                             | Scan cycle status      |
+| `fix_history`          | `items`, `total`, `page`                                                 | Fix history response   |
+
 
 ### Rate Limiting
 
@@ -1129,14 +1174,16 @@ The Helm template uses `lookup()` to preserve existing values on upgrade.
 
 ### Helm Values
 
-| Key | Description | Default |
-|-----|-------------|---------|
-| `vertexAI.projectId` | GCP project for Vertex AI | required* |
-| `anthropicApiKey.existingSecret` | Anthropic API key Secret | required* |
-| `rbac.allowWriteOperations` | Enable cluster write ops | `false` |
-| `rbac.allowSecretAccess` | Enable secret reading | `false` |
-| `memory.enabled` | Enable self-improving memory | `true` |
-| `database.postgresql.enabled` | Deploy PostgreSQL StatefulSet | `true` |
+
+| Key                              | Description                   | Default   |
+| -------------------------------- | ----------------------------- | --------- |
+| `vertexAI.projectId`             | GCP project for Vertex AI     | required* |
+| `anthropicApiKey.existingSecret` | Anthropic API key Secret      | required* |
+| `rbac.allowWriteOperations`      | Enable cluster write ops      | `false`   |
+| `rbac.allowSecretAccess`         | Enable secret reading         | `false`   |
+| `memory.enabled`                 | Enable self-improving memory  | `true`    |
+| `database.postgresql.enabled`    | Deploy PostgreSQL StatefulSet | `true`    |
+
 
 *One of Vertex AI or Anthropic API key is required. Install fails with a clear
 error if neither is set.
@@ -1371,6 +1418,7 @@ User: "Build me a production dashboard"
 Replaces keyword-only routing with 6-channel weighted fusion (5 active by default, semantic opt-in). Each channel scores every skill independently, then scores are fused and re-ranked. Learned weights persist across pod restarts.
 
 **Channels (default weights, sum to 1.0):**
+
 1. **Keyword** (0.30) — direct keyword + skill name matching, normalized 0.0-1.0
 2. **Component Tags** (0.20) — regex-extract K8s resource types (Pod, Deployment, Service, etc.), match against skill categories
 3. **Historical** (0.20) — token→skill frequency from `skill_usage` table, 5-min cache
@@ -1395,12 +1443,14 @@ triage → diagnose → [branch: db/pod/network] → remediate → verify → po
 ```
 
 **Data Model:**
+
 - `SkillPhase` — id, skill_name, required, depends_on, timeout_seconds, produces, branch_on, branches, parallel_with, approval_required, runs ("on_success" | "always")
 - `SkillPlan` — id, name, phases (DAG), incident_type, max_total_duration, generated_by
 - `SkillOutput` — status, findings, evidence_summary (~120-180 tokens), actions_taken, open_questions, risk_flags, confidence, branch_signal
 - `PlanResult` — phase_outputs, total_duration_ms, phases_completed/total, status
 
 **Execution (`PlanRuntime.execute()`):**
+
 1. Topological sort phases by dependencies
 2. Group phases with same dependencies → run in parallel via `asyncio.gather()`
 3. Apply branch conditions (e.g., branch_on="source" → db/pod/network)
@@ -1412,7 +1462,8 @@ triage → diagnose → [branch: db/pod/network] → remediate → verify → po
 **Live WebSocket updates:** During plan execution, `investigation_progress` events emitted per phase via monitor WebSocket. UI shows inline phase progress on active findings (triage ✓ → diagnose ● → remediate ○).
 
 **Plan Templates (`plan_templates/*.yaml`):**
-10 pre-defined + auto-generated. Loaded at startup, hot-reloaded on change.
+6 pre-defined + auto-generated. Loaded at startup, hot-reloaded on change.
+
 - `crashloop-resolution` — triage → diagnose → remediate → verify
 - `oom-investigation` — triage → memory analysis → patch → verify
 - `node-pressure` — triage → node diagnostics → drain/cordon → verify
@@ -1428,6 +1479,7 @@ triage → diagnose → [branch: db/pod/network] → remediate → verify → po
 
 **Dependency Graph (`dependency_graph.py`):**
 Live K8s resource graph, refreshed each scan cycle.
+
 - **Nodes:** Pods, Deployments, Services, PVCs, ConfigMaps, Secrets, Nodes, ReplicaSets, StatefulSets, DaemonSets, Jobs
 - **Edges:** ownerReferences ("owns"), service selectors ("selects"), volume mounts ("mounts"), configmap/secret refs ("references"), pod→node scheduling ("schedules")
 - **Queries:** `upstream_dependencies()`, `downstream_blast_radius()` (BFS traversal), `related_resources()`
@@ -1436,6 +1488,7 @@ Live K8s resource graph, refreshed each scan cycle.
 
 **Auto-Postmortems (`postmortem.py`):**
 Generated after every plan execution (even if plan fails). Stored in `postmortems` table. Includes:
+
 - Timeline reconstruction from phase outputs
 - Root cause from diagnostic evidence
 - Contributing factors, blast radius, actions taken
@@ -1444,6 +1497,7 @@ Generated after every plan execution (even if plan fails). Stored in `postmortem
 
 **Change Risk Scoring (`change_risk.py`):**
 Pre-deploy risk analysis on every `audit_deployment` scanner finding:
+
 - Image change magnitude (new image +30, tag change +10)
 - Resource request/limit changes (+15)
 - ConfigMap/Secret changes (+10)
@@ -1455,6 +1509,7 @@ Pre-deploy risk analysis on every `audit_deployment` scanner finding:
 
 **SLO Registry (`slo_registry.py`):**
 Per-service SLO tracking with live Prometheus burn rate monitoring.
+
 - Define via REST API (`POST /slo`) or agent chat ("set a 99.9% availability SLO for checkout")
 - Types: availability, latency (p99), error_rate
 - `query_prometheus_values()` builds PromQL per SLO type
@@ -1465,12 +1520,14 @@ Per-service SLO tracking with live Prometheus burn rate monitoring.
 - REST: `GET/POST/DELETE /slo`
 
 **Selector Learning (`selector_learning.py`):**
+
 - `recompute_channel_weights(days=7)` — analyzes `skill_selection_log`, computes precision per channel, adjusts via learning rate 0.1
 - `identify_skill_gaps(days=30)` — finds recurring query patterns with no good skill match
 - `prune_low_performers(days=30)` — flags skills with >30% override rate
 - Weights persisted to DB, loaded on SkillSelector init
 
 **Skill Scaffolding (`skill_scaffolder.py`):**
+
 - `scaffold_skill_from_resolution()` — auto-draft skill.md with keywords, tool sequence, root cause pattern
 - `scaffold_plan_template()` — save plan YAML from executed phases, hot-reload registry
 - `save_scaffolded_skill()` — write to disk with path traversal protection
@@ -1481,63 +1538,73 @@ Per-service SLO tracking with live Prometheus burn rate monitoring.
 
 All ORCA data surfaced in the UI:
 
-| Surface | Location | Data Source |
-|---------|----------|-------------|
-| Investigation Phases | Incident Center > Active (inline) | `investigation_progress` WebSocket events |
-| Postmortems | Incident Center > Postmortems tab | `GET /postmortems` |
-| Impact Analysis | `/topology` route | `GET /topology` (dependency graph) |
-| Plans | Toolbox > Plans tab | `GET /plan-templates` |
-| SLOs | Toolbox > SLOs tab | `GET /slo` |
-| Agent Intelligence | Toolbox > Analytics | Multiple endpoints |
-| Routing Decisions | Analytics > Recent Routing | `GET /analytics/learning` |
-| Fix Outcomes | Analytics > Fix Outcomes | `GET /fix-history/summary` |
-| Fix Strategies | Analytics > Fix Strategy Effectiveness | `GET /analytics/fix-strategies` |
-| Agent Learning | Analytics > Agent Learning | `GET /analytics/learning` |
-| Deploy Risk | Active findings badge | Findings with `category: change_risk` |
-| Dependency Graph | Analytics > Dependency Graph | `GET /topology` (summary) |
-| Service Health | Analytics > Service Health Targets | `GET /slo` |
-| Skill Routing | Analytics > Skill Routing | `GET /skills/usage` |
+
+| Surface              | Location                               | Data Source                               |
+| -------------------- | -------------------------------------- | ----------------------------------------- |
+| Investigation Phases | Incident Center > Active (inline)      | `investigation_progress` WebSocket events |
+| Postmortems          | Incident Center > Postmortems tab      | `GET /postmortems`                        |
+| Impact Analysis      | `/topology` route                      | `GET /topology` (dependency graph)        |
+| Plans                | Toolbox > Plans tab                    | `GET /plan-templates`                     |
+| SLOs                 | Toolbox > SLOs tab                     | `GET /slo`                                |
+| Agent Intelligence   | Toolbox > Analytics                    | Multiple endpoints                        |
+| Routing Decisions    | Analytics > Recent Routing             | `GET /analytics/learning`                 |
+| Fix Outcomes         | Analytics > Fix Outcomes               | `GET /fix-history/summary`                |
+| Fix Strategies       | Analytics > Fix Strategy Effectiveness | `GET /analytics/fix-strategies`           |
+| Agent Learning       | Analytics > Agent Learning             | `GET /analytics/learning`                 |
+| Deploy Risk          | Active findings badge                  | Findings with `category: change_risk`     |
+| Dependency Graph     | Analytics > Dependency Graph           | `GET /topology` (summary)                 |
+| Service Health       | Analytics > Service Health Targets     | `GET /slo`                                |
+| Skill Routing        | Analytics > Skill Routing              | `GET /skills/usage`                       |
+
 
 ## 16. Future Roadmap
 
 ### Progressive Rendering
+
 Components rendered incrementally as tools complete, rather than waiting for
 the full agent turn to finish. Would enable real-time dashboard building where
 each widget appears as its data tool completes.
 
 ### Natural Language View Refinement
+
 Allow users to modify dashboards via natural language in real time:
 "Move the CPU chart to the top", "Add a memory sparkline next to the pod
 table", "Group the alerts by severity". The view designer already handles
 widget addition/removal; this extends to spatial layout commands.
 
 ### Self-Healing Dashboards
+
 Dashboards that detect when their PromQL queries return no data (metric
 renamed, label changed) and automatically discover replacement queries via the
 `discover_metrics` tool. The `promql_queries` reliability tracking already
 provides the data needed to detect stale queries.
 
 ### Grafana Dashboard Import
+
 Import existing Grafana JSON models and convert them to Pulse views. The
 PromQL recipes and layout engine provide the foundation. Would enable teams to
 migrate existing monitoring without rebuilding from scratch.
 
 ### Cost Metrics and Budget Tracking
+
 Integrate cloud provider billing APIs (AWS Cost Explorer, GCP Billing) to
 show per-namespace cost attribution. The dashboard system and metric_card
 component already support arbitrary numeric KPIs.
 
 ### eBPF-Based Observability
+
 Integrate with eBPF-based tools (Cilium Hubble, Pixie, Tetragon) for deep
 network flow visibility, syscall tracing, and runtime security enforcement.
 Would feed into both the monitor scanners and the security agent tools.
 
 ### Multi-Cluster Fleet Dashboards
+
 Extend the view designer to create cross-cluster dashboards using fleet tools.
 The fleet_tools module already supports multi-cluster queries via ACM; this
 would add visual comparison views and fleet-wide KPI aggregation.
 
 ### Predictive Auto-Scaling
+
 Use the predict_tools module's forecasting capabilities to proactively scale
 workloads before resource pressure occurs. Would combine HPA analysis with
 Prometheus trend data to recommend or apply scaling changes ahead of demand.
@@ -1548,6 +1615,7 @@ Pulse Agent currently uses custom `@beta_tool` functions for all cluster
 interactions. MCP servers offer a standardized alternative. The strategy:
 
 **Why we built custom tools instead of using MCP:**
+
 - Our tools return `(text, component_spec)` tuples for rich UI rendering — MCP tools return text only
 - Domain logic (health scoring, chart type detection, title generation) is embedded in tools
 - Integrated feedback loop (tool_usage recording, chain hints, learned queries)
@@ -1575,16 +1643,19 @@ interactions. MCP servers offer a standardized alternative. The strategy:
 ```
 
 **Layer 2 benefits (adopt MCP clients):**
+
 - Shared Prometheus MCP server eliminates 4 copies of urllib+SSL+token code
 - K8s MCP server handles auth, retries, pagination — our `safe()` wrapper becomes thinner
 - Community-maintained MCP servers get bug fixes and new features without our effort
 
 **Layer 1 benefits (expose as MCP server):**
+
 - Other AI tools (Cursor, Claude Desktop, Copilot) could use Pulse Agent's SRE tools
 - Fleet operations across multiple clusters via MCP federation
 - Composable with other MCP servers (Git, Slack, PagerDuty)
 
 **What stays custom (never MCP):**
+
 - Component rendering (`(text, component_spec)` tuples)
 - View designer tools (create_dashboard, critique_view, layout_engine)
 - Intelligence loop (tool_usage recording, chain hints)
@@ -1711,6 +1782,7 @@ Key decisions made during development and the reasoning behind them.
 **Deployment:** The MCP server is deployed as a sidecar pod. Image: `quay.io/amobrem/pulse-agent:mcp-server` (built from the openshift/openshift-mcp-server fork). Health probes added (readiness + liveness on `/healthz`). CI (`build-push.yml`) builds the MCP image alongside the agent image on release tags.
 
 **3-tier rendering model:**
+
 - **Tier 1 (native tools):** Return `(text, component_spec)` tuples for rich UI rendering
 - **Tier 2 (MCP tools with transform):** MCP tool results pass through a transformation engine that converts structured output into component specs
 - **Tier 3 (MCP tools raw):** Plain text results rendered inline in chat
@@ -1745,57 +1817,59 @@ Key decisions made during development and the reasoning behind them.
 
 ## File Reference
 
-| File | Purpose |
-|------|---------|
-| `sre_agent/main.py` | Interactive CLI with Rich UI |
-| `sre_agent/serve.py` | FastAPI server bootstrap |
-| `sre_agent/api/` | API routes (15-module package), WebSocket handlers, view management |
-| `sre_agent/agent.py` | Shared agent loop, circuit breaker, tool execution |
-| `sre_agent/orchestrator.py` | Intent classification and agent routing |
-| `sre_agent/harness.py` | Prompt caching, cluster context injection, component hints |
-| `sre_agent/skill_loader.py` | Skill package loader, tool selection, query routing, MCP inclusion |
-| `sre_agent/mcp_client.py` | MCP server connections (SSE transport), tool/prompt discovery |
-| `sre_agent/monitor/` | Autonomous scanning, auto-fix, investigations (11-module package) |
-| `sre_agent/view_designer.py` | View designer agent mode |
-| `sre_agent/config.py` | Pydantic v2 Settings (`PulseAgentSettings`) |
-| `sre_agent/k8s_tools/` | 41 K8s tools (11-module package) |
-| `sre_agent/security_tools.py` | 9 security tools |
-| `sre_agent/view_tools.py` | View/dashboard CRUD tools |
-| `sre_agent/fleet_tools.py` | 5 multi-cluster tools |
-| `sre_agent/gitops_tools.py` | 6 ArgoCD tools |
-| `sre_agent/predict_tools.py` | 3 predictive analytics tools |
-| `sre_agent/timeline_tools.py` | Incident correlation tool |
-| `sre_agent/git_tools.py` | PR proposal tool |
-| `sre_agent/handoff_tools.py` | 2 cross-agent handoff tools |
-| `sre_agent/tool_registry.py` | Central tool registry |
-| `sre_agent/k8s_client.py` | Lazy K8s client with `safe()` wrapper |
-| `sre_agent/db.py` | Database abstraction, connection pooling |
-| `sre_agent/db_schema.py` | PostgreSQL table definitions (21 tables) |
-| `sre_agent/db_migrations.py` | Forward-only schema migrations |
-| `sre_agent/errors.py` | ToolError classification (7 categories) |
-| `sre_agent/error_tracker.py` | Thread-safe ring buffer for error aggregation |
-| `sre_agent/runbooks.py` | 10 built-in SRE runbooks |
-| `sre_agent/promql_recipes.py` | 73 PromQL recipes across 16 categories |
-| `sre_agent/prometheus.py` | Shared Prometheus client |
-| `sre_agent/layout_engine.py` | Semantic auto-layout for dashboards |
-| `sre_agent/quality_engine.py` | Unified dashboard validation + quality scoring |
-| `sre_agent/view_validator.py` | Backward-compatible wrapper around quality_engine |
-| `sre_agent/view_critic.py` | Backward-compatible wrapper around quality_engine |
-| `sre_agent/intelligence.py` | Analytics feedback loop |
-| `sre_agent/tool_usage.py` | Tool invocation audit log |
-| `sre_agent/tool_predictor.py` | Adaptive tool selection (TF-IDF + LLM fallback + co-occurrence) |
-| `sre_agent/decorators.py` | Typed `beta_tool` wrapper (centralizes SDK type mismatch) |
-| `sre_agent/tool_chains.py` | Bigram chain discovery and hints |
-| `sre_agent/context_bus.py` | Cross-agent shared context (DB-backed) |
-| `sre_agent/memory/__init__.py` | MemoryManager orchestrator |
-| `sre_agent/memory/store.py` | Database persistence for memory |
-| `sre_agent/memory/evaluation.py` | Self-evaluation scoring |
-| `sre_agent/memory/retrieval.py` | Context assembly for prompt augmentation |
-| `sre_agent/memory/runbooks.py` | Runbook extraction from resolutions |
-| `sre_agent/memory/patterns.py` | Recurring pattern detection |
-| `sre_agent/memory/memory_tools.py` | 3 agent-callable memory tools |
-| `chart/` | Helm chart (deployment, RBAC, PostgreSQL, NetworkPolicy) |
+
+| File                               | Purpose                                                             |
+| ---------------------------------- | ------------------------------------------------------------------- |
+| `sre_agent/main.py`                | Interactive CLI with Rich UI                                        |
+| `sre_agent/serve.py`               | FastAPI server bootstrap                                            |
+| `sre_agent/api/`                   | API routes (15-module package), WebSocket handlers, view management |
+| `sre_agent/agent.py`               | Shared agent loop, circuit breaker, tool execution                  |
+| `sre_agent/orchestrator.py`        | Intent classification and agent routing                             |
+| `sre_agent/harness.py`             | Prompt caching, cluster context injection, component hints          |
+| `sre_agent/skill_loader.py`        | Skill package loader, tool selection, query routing, MCP inclusion  |
+| `sre_agent/mcp_client.py`          | MCP server connections (SSE transport), tool/prompt discovery       |
+| `sre_agent/monitor/`               | Autonomous scanning, auto-fix, investigations (11-module package)   |
+| `sre_agent/view_designer.py`       | View designer agent mode                                            |
+| `sre_agent/config.py`              | Pydantic v2 Settings (`PulseAgentSettings`)                         |
+| `sre_agent/k8s_tools/`             | 41 K8s tools (11-module package)                                    |
+| `sre_agent/security_tools.py`      | 9 security tools                                                    |
+| `sre_agent/view_tools.py`          | View/dashboard CRUD tools                                           |
+| `sre_agent/fleet_tools.py`         | 5 multi-cluster tools                                               |
+| `sre_agent/gitops_tools.py`        | 6 ArgoCD tools                                                      |
+| `sre_agent/predict_tools.py`       | 3 predictive analytics tools                                        |
+| `sre_agent/timeline_tools.py`      | Incident correlation tool                                           |
+| `sre_agent/git_tools.py`           | PR proposal tool                                                    |
+| `sre_agent/handoff_tools.py`       | 2 cross-agent handoff tools                                         |
+| `sre_agent/tool_registry.py`       | Central tool registry                                               |
+| `sre_agent/k8s_client.py`          | Lazy K8s client with `safe()` wrapper                               |
+| `sre_agent/db.py`                  | Database abstraction, connection pooling                            |
+| `sre_agent/db_schema.py`           | PostgreSQL table definitions (21 tables)                            |
+| `sre_agent/db_migrations.py`       | Forward-only schema migrations                                      |
+| `sre_agent/errors.py`              | ToolError classification (7 categories)                             |
+| `sre_agent/error_tracker.py`       | Thread-safe ring buffer for error aggregation                       |
+| `sre_agent/runbooks.py`            | 10 built-in SRE runbooks                                            |
+| `sre_agent/promql_recipes.py`      | 73 PromQL recipes across 16 categories                              |
+| `sre_agent/prometheus.py`          | Shared Prometheus client                                            |
+| `sre_agent/layout_engine.py`       | Semantic auto-layout for dashboards                                 |
+| `sre_agent/quality_engine.py`      | Unified dashboard validation + quality scoring                      |
+| `sre_agent/view_validator.py`      | Backward-compatible wrapper around quality_engine                   |
+| `sre_agent/view_critic.py`         | Backward-compatible wrapper around quality_engine                   |
+| `sre_agent/intelligence.py`        | Analytics feedback loop                                             |
+| `sre_agent/tool_usage.py`          | Tool invocation audit log                                           |
+| `sre_agent/tool_predictor.py`      | Adaptive tool selection (TF-IDF + LLM fallback + co-occurrence)     |
+| `sre_agent/decorators.py`          | Typed `beta_tool` wrapper (centralizes SDK type mismatch)           |
+| `sre_agent/tool_chains.py`         | Bigram chain discovery and hints                                    |
+| `sre_agent/context_bus.py`         | Cross-agent shared context (DB-backed)                              |
+| `sre_agent/memory/__init__.py`     | MemoryManager orchestrator                                          |
+| `sre_agent/memory/store.py`        | Database persistence for memory                                     |
+| `sre_agent/memory/evaluation.py`   | Self-evaluation scoring                                             |
+| `sre_agent/memory/retrieval.py`    | Context assembly for prompt augmentation                            |
+| `sre_agent/memory/runbooks.py`     | Runbook extraction from resolutions                                 |
+| `sre_agent/memory/patterns.py`     | Recurring pattern detection                                         |
+| `sre_agent/memory/memory_tools.py` | 3 agent-callable memory tools                                       |
+| `chart/`                           | Helm chart (deployment, RBAC, PostgreSQL, NetworkPolicy)            |
+
 
 ---
 
-*122 tools (86 native + 36 MCP) -- 18 scanners -- 10 runbooks -- 73 PromQL recipes -- 98 eval prompts -- tests -- Protocol v2*
+*122 tools (86 native + 36 MCP) -- 18 scanners -- 10 runbooks -- 73 PromQL recipes -- 98 eval prompts -- 1,690 tests -- Protocol v2*
