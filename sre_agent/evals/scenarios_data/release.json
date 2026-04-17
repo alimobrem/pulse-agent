@@ -297,6 +297,27 @@
       "rollback_available": true,
       "retry_attempts": 0,
       "transient_failures": 0
+    },
+    {
+      "scenario_id": "release_multi_turn_rollback_verify",
+      "category": "sre",
+      "description": "Multi-turn: diagnose broken deploy, rollback, then verify healthy — tests context retention across turns.",
+      "tool_calls": [
+        "list_deployments",
+        "describe_deployment",
+        "get_pod_logs",
+        "rollback_deployment",
+        "list_pods",
+        "describe_deployment"
+      ],
+      "rejected_tools": 0,
+      "duration_seconds": 120,
+      "user_confirmed_resolution": true,
+      "final_response": "Checkout service v5.0.0 failed because the payments-v2 API endpoint was removed. Rolled back to revision 7 (v4.9.0). All 3 replicas are now running and healthy.",
+      "verification_passed": true,
+      "rollback_available": true,
+      "retry_attempts": 0,
+      "transient_failures": 0
     }
   ],
   "description": "End-to-end SRE and security scenarios that must pass before shipping a release"
