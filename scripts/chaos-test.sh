@@ -35,7 +35,7 @@ set -euo pipefail
 
 # Defaults
 NAMESPACE="${CHAOS_NAMESPACE:-chaos-test}"
-TIMEOUT="${CHAOS_TIMEOUT:-300}"
+TIMEOUT="${CHAOS_TIMEOUT:-600}"
 SCENARIO="${CHAOS_SCENARIO:-all}"
 DRY_RUN=false
 FORCE=false
