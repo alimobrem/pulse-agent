@@ -1,0 +1,16 @@
+{
+    "name": "integration_hpa_thrashing",
+    "prompt": "The api-gateway keeps scaling up and down every few minutes. Is the HPA thrashing? What should we do?",
+    "recorded_responses": {
+        "list_hpas": "[{\"name\": \"api-gateway\", \"namespace\": \"production\", \"minReplicas\": 2, \"maxReplicas\": 10, \"currentReplicas\": 6, \"desiredReplicas\": 3, \"metrics\": [{\"type\": \"Resource\", \"name\": \"cpu\", \"current\": \"42%\", \"target\": \"50%\"}], \"conditions\": [{\"type\": \"ScalingActive\", \"status\": \"True\"}]}]",
+        "analyze_hpa_thrashing": "{\"hpa\": \"api-gateway\", \"namespace\": \"production\", \"thrashing\": true, \"scale_events_1h\": 14, \"pattern\": \"oscillation between 3 and 8 replicas every 2-3 minutes\", \"cause\": \"CPU target (50%) too close to normal operating load during traffic bursts\", \"recommendations\": [{\"action\": \"Increase stabilization window\", \"from\": \"0s\", \"to\": \"300s\"}, {\"action\": \"Raise CPU target\", \"from\": \"50%\", \"to\": \"70%\"}, {\"action\": \"Consider behavior policies\", \"detail\": \"scaleDown.stabilizationWindowSeconds: 300\"}]}",
+        "get_prometheus_query": "{\"status\": \"success\", \"data\": {\"resultType\": \"matrix\", \"result\": [{\"metric\": {\"pod\": \"api-gateway\"}, \"values\": [[1705312800, \"0.48\"], [1705312860, \"0.72\"], [1705312920, \"0.38\"], [1705312980, \"0.65\"], [1705313040, \"0.41\"]]}]}}",
+        "get_events": "2m ago  Normal  SuccessfulRescale  HPA/api-gateway  New size: 8; reason: cpu above target\n4m ago  Normal  SuccessfulRescale  HPA/api-gateway  New size: 3; reason: All metrics below target\n6m ago  Normal  SuccessfulRescale  HPA/api-gateway  New size: 7; reason: cpu above target\n8m ago  Normal  SuccessfulRescale  HPA/api-gateway  New size: 3; reason: All metrics below target"
+    },
+    "expected": {
+        "should_mention": ["thrashing", "stabilization", "CPU target", "70%"],
+        "should_use_tools": ["analyze_hpa_thrashing"],
+        "should_not_use_tools": ["scale_deployment", "delete_pod"],
+        "max_tool_calls": 8
+    }
+}

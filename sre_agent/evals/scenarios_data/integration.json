@@ -110,6 +110,81 @@
       "rollback_available": true
     },
     {
+      "scenario_id": "integration_daemonset_gap_detection",
+      "category": "sre",
+      "description": "Detect DaemonSet pods missing from nodes and diagnose scheduling failures.",
+      "tool_calls": [
+        "list_pods",
+        "list_nodes",
+        "describe_node",
+        "get_events"
+      ],
+      "rejected_tools": 0,
+      "duration_seconds": 85,
+      "user_confirmed_resolution": true,
+      "final_response": "DaemonSet node-exporter is missing pods on 2 of 6 nodes because worker-3 has a taint that the DaemonSet does not tolerate and worker-5 has insufficient memory. Recommended adding a toleration or adjusting resource requests.",
+      "verification_passed": true,
+      "retry_attempts": 0,
+      "transient_failures": 0,
+      "rollback_available": false
+    },
+    {
+      "scenario_id": "integration_rbac_audit_change_detection",
+      "category": "security",
+      "description": "Detect recent RBAC changes and assess risk of privilege escalation.",
+      "tool_calls": [
+        "get_recent_changes",
+        "scan_rbac_risks",
+        "get_events"
+      ],
+      "rejected_tools": 0,
+      "duration_seconds": 75,
+      "user_confirmed_resolution": true,
+      "final_response": "Detected 3 RBAC changes in the last hour: a ClusterRoleBinding granting cluster-admin to a service account was added, which is a critical privilege escalation risk. Two RoleBindings in staging were also modified. Recommend immediate review of the cluster-admin binding.",
+      "verification_passed": true,
+      "retry_attempts": 0,
+      "transient_failures": 0,
+      "rollback_available": false
+    },
+    {
+      "scenario_id": "integration_incident_correlation_timeline",
+      "category": "sre",
+      "description": "Correlate multiple signals into a single incident timeline.",
+      "tool_calls": [
+        "get_firing_alerts",
+        "get_events",
+        "correlate_incident",
+        "get_pod_logs"
+      ],
+      "rejected_tools": 0,
+      "duration_seconds": 110,
+      "user_confirmed_resolution": true,
+      "final_response": "Timeline reconstructed: at 14:02 a ConfigMap update triggered a rolling restart, at 14:04 pods failed readiness probes due to bad config, at 14:06 alerts fired for KubePodCrashLooping. Root cause is the ConfigMap change. All events correlated to a single incident.",
+      "verification_passed": true,
+      "retry_attempts": 0,
+      "transient_failures": 0,
+      "rollback_available": false
+    },
+    {
+      "scenario_id": "integration_hpa_thrashing_diagnosis",
+      "category": "sre",
+      "description": "Diagnose HPA oscillation and recommend stable scaling parameters.",
+      "tool_calls": [
+        "list_hpas",
+        "analyze_hpa_thrashing",
+        "get_prometheus_query",
+        "get_events"
+      ],
+      "rejected_tools": 0,
+      "duration_seconds": 90,
+      "user_confirmed_resolution": true,
+      "final_response": "HPA for api-gateway is thrashing between 3 and 8 replicas every 2 minutes because the CPU target (50%) is too aggressive for bursty traffic. Recommended increasing stabilization window to 300s and raising target to 70%.",
+      "verification_passed": true,
+      "retry_attempts": 0,
+      "transient_failures": 0,
+      "rollback_available": false
+    },
+    {
       "scenario_id": "integration_all_component_types_view",
       "category": "sre",
       "description": "Create a view that uses every component type available.",

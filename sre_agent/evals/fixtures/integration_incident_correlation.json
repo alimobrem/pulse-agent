@@ -1,0 +1,16 @@
+{
+    "name": "integration_incident_correlation",
+    "prompt": "Multiple alerts are firing and pods are crashing. Can you correlate these events and tell me what happened?",
+    "recorded_responses": {
+        "get_firing_alerts": "[{\"alertname\": \"KubePodCrashLooping\", \"severity\": \"critical\", \"namespace\": \"production\", \"pod\": \"api-server-.*\", \"startsAt\": \"2024-01-15T14:06:00Z\"}, {\"alertname\": \"KubeDeploymentReplicasMismatch\", \"severity\": \"warning\", \"namespace\": \"production\", \"deployment\": \"api-server\", \"startsAt\": \"2024-01-15T14:05:00Z\"}, {\"alertname\": \"TargetDown\", \"severity\": \"warning\", \"job\": \"api-server\", \"startsAt\": \"2024-01-15T14:04:30Z\"}]",
+        "get_events": "14:02  Normal   Updated   ConfigMap/api-config    Updated by admin@corp.com\n14:03  Normal   ScalingReplicaSet  Deployment/api-server  Scaled up to 3\n14:04  Warning  Unhealthy  Pod/api-server-new-abc  Readiness probe failed: connection refused\n14:04  Warning  Unhealthy  Pod/api-server-new-def  Readiness probe failed: connection refused\n14:05  Warning  BackOff    Pod/api-server-new-abc  Back-off restarting failed container\n14:06  Warning  BackOff    Pod/api-server-new-def  Back-off restarting failed container",
+        "correlate_incident": "{\"incident_id\": \"INC-2024-0115-001\", \"timeline\": [{\"time\": \"14:02\", \"event\": \"ConfigMap api-config updated\", \"type\": \"change\"}, {\"time\": \"14:03\", \"event\": \"Deployment rolling restart triggered\", \"type\": \"effect\"}, {\"time\": \"14:04\", \"event\": \"New pods fail readiness probes\", \"type\": \"symptom\"}, {\"time\": \"14:06\", \"event\": \"CrashLoopBackOff alerts fire\", \"type\": \"alert\"}], \"root_cause\": \"ConfigMap update introduced invalid configuration\", \"blast_radius\": \"api-server deployment (3 replicas)\", \"confidence\": 0.92}",
+        "get_pod_logs": "2024-01-15T14:04:01Z [ERROR] Failed to parse config key 'DB_POOL_SIZE': invalid literal for int(): 'twenty'\n2024-01-15T14:04:01Z [FATAL] Configuration validation failed. Shutting down."
+    },
+    "expected": {
+        "should_mention": ["ConfigMap", "14:02", "root cause", "configuration"],
+        "should_use_tools": ["correlate_incident", "get_events"],
+        "should_not_use_tools": ["delete_pod", "scale_deployment"],
+        "max_tool_calls": 8
+    }
+}
