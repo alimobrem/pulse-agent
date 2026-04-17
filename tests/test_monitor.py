@@ -1115,3 +1115,156 @@ class TestCreateDashboard:
         s1 = json.loads(r1.split(SIGNAL_PREFIX, 1)[1])
         s2 = json.loads(r2.split(SIGNAL_PREFIX, 1)[1])
         assert s1["view_id"] != s2["view_id"]
+
+
+class TestEvalScaffoldingIntegration:
+    """Integration tests verifying monitor session calls eval scaffolder."""
+
+    def test_plan_execution_calls_scaffold_eval_from_plan(self, monkeypatch):
+        """After plan execution with tools, scaffold_eval_from_plan is called."""
+        monkeypatch.setenv("PULSE_AGENT_INVESTIGATIONS_MAX_PER_SCAN", "1")
+        monkeypatch.setenv("PULSE_AGENT_INVESTIGATION_TIMEOUT", "30")
+
+        from sre_agent.skill_plan import PlanResult, SkillOutput, SkillPhase, SkillPlan
+
+        sent_messages = []
+
+        class FakeSocket:
+            async def send_json(self, data):
+                sent_messages.append(data)
+
+        session = MonitorSession(FakeSocket(), trust_level=1)
+
+        finding = _make_finding(
+            severity="critical",
+            category="oom",
+            title="OOM killed pods",
+            summary="Pods being OOM killed",
+            resources=[{"kind": "Pod", "name": "api-1", "namespace": "prod"}],
+        )
+
+        template = SkillPlan(
+            id="test-oom",
+            name="OOM Resolution",
+            incident_type="oom",
+            phases=[
+                SkillPhase(id="triage", skill_name="sre"),
+                SkillPhase(id="diagnose", skill_name="sre", depends_on=["triage"]),
+                SkillPhase(id="verify", skill_name="sre", depends_on=["diagnose"]),
+            ],
+        )
+
+        diagnose_output = SkillOutput(
+            skill_id="sre",
+            phase_id="diagnose",
+            status="complete",
+            evidence_summary="Container exceeded 256Mi memory limit",
+            findings={"root_cause": "OOM kill due to memory leak"},
+            actions_taken=["describe_pod", "get_pod_logs"],
+            confidence=0.9,
+        )
+        verify_output = SkillOutput(
+            skill_id="sre",
+            phase_id="verify",
+            status="completed",
+            evidence_summary="Pod stable after patch",
+            actions_taken=["list_pods"],
+            confidence=0.95,
+        )
+        plan_result = PlanResult(
+            plan_id="test-oom",
+            plan_name="OOM Resolution",
+            status="complete",
+            phase_outputs={"diagnose": diagnose_output, "verify": verify_output},
+            total_duration_ms=45000,
+            phases_completed=3,
+            phases_total=3,
+        )
+
+        async def _fake_execute(tmpl, incident, on_phase_start=None, on_phase_complete=None):
+            return plan_result
+
+        eval_mock = MagicMock()
+        with (
+            patch("sre_agent.monitor.session.MonitorSession._try_plan_execution", wraps=session._try_plan_execution),
+            patch("sre_agent.plan_runtime.PlanRuntime.execute", side_effect=_fake_execute),
+            patch("sre_agent.plan_templates.match_template", return_value=template),
+            patch("sre_agent.postmortem.save_postmortem"),
+            patch("sre_agent.skill_scaffolder.save_scaffolded_skill"),
+            patch(
+                "sre_agent.skill_scaffolder.scaffold_skill_from_resolution", return_value="---\nname: test\n---\ntest"
+            ),
+            patch("sre_agent.skill_scaffolder.scaffold_plan_template"),
+            patch("sre_agent.eval_scaffolder.scaffold_eval_from_plan", side_effect=eval_mock) as mock_eval,
+        ):
+            loop = asyncio.new_event_loop()
+            try:
+                result = loop.run_until_complete(session._try_plan_execution(finding))
+            finally:
+                loop.close()
+
+        assert result is True
+        mock_eval.assert_called_once()
+        call_kwargs = mock_eval.call_args[1]
+        assert call_kwargs["skill_name"] is not None
+        assert call_kwargs["finding"] is finding
+        assert call_kwargs["plan_result"] is plan_result
+        assert "describe_pod" in call_kwargs["tools_called"]
+        assert call_kwargs["duration_seconds"] == 45.0
+
+    def test_flat_investigation_calls_scaffold_eval_from_investigation(self, monkeypatch):
+        """After flat investigation with high confidence and no template, scaffold_eval_from_investigation is called."""
+        monkeypatch.setenv("PULSE_AGENT_INVESTIGATIONS_MAX_PER_SCAN", "1")
+        monkeypatch.setenv("PULSE_AGENT_INVESTIGATION_TIMEOUT", "30")
+        monkeypatch.setenv("PULSE_AGENT_MEMORY", "0")
+
+        sent_messages = []
+
+        class FakeSocket:
+            async def send_json(self, data):
+                sent_messages.append(data)
+
+        session = MonitorSession(FakeSocket(), trust_level=1)
+
+        finding = _make_finding(
+            severity="critical",
+            category="nodes",
+            title="Unknown pressure detected",
+            summary="Something unusual",
+            resources=[{"kind": "Pod", "name": "web-1", "namespace": "prod"}],
+        )
+
+        mock_inv_result = {
+            "summary": "Novel pressure pattern detected",
+            "suspectedCause": "Resource contention from new workload",
+            "recommendedFix": "Investigate resource allocation",
+            "confidence": 0.85,
+        }
+
+        eval_mock = MagicMock()
+        fake_bus = MagicMock()
+        with (
+            patch("sre_agent.monitor.session._run_proactive_investigation_sync", return_value=mock_inv_result),
+            patch("sre_agent.agent._circuit_breaker") as mock_cb,
+            patch.object(session, "_try_plan_execution", return_value=False),
+            patch("sre_agent.context_bus.get_context_bus", return_value=fake_bus),
+            patch("sre_agent.plan_templates.match_template", return_value=None),
+            patch("sre_agent.skill_scaffolder.save_scaffolded_skill"),
+            patch(
+                "sre_agent.skill_scaffolder.scaffold_skill_from_resolution", return_value="---\nname: test\n---\ntest"
+            ),
+            patch("sre_agent.skill_scaffolder.scaffold_plan_template"),
+            patch("sre_agent.eval_scaffolder.scaffold_eval_from_investigation", side_effect=eval_mock) as mock_eval,
+        ):
+            mock_cb.is_open = False
+            loop = asyncio.new_event_loop()
+            try:
+                loop.run_until_complete(session.run_investigations([finding]))
+            finally:
+                loop.close()
+
+        mock_eval.assert_called_once()
+        call_kwargs = mock_eval.call_args[1]
+        assert call_kwargs["skill_name"] is not None
+        assert call_kwargs["finding"] is finding
+        assert call_kwargs["investigation_result"] is mock_inv_result
