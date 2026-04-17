@@ -907,10 +907,12 @@ class MonitorSession:
         except Exception as e:
             logger.error("Failed to fetch shared pod list: %s", e)
 
-        # Run all standard scanners with timing (skip client-disabled scanners)
-        for category, scanner in _get_all_scanners():
-            if category in self.disabled_scanners:
-                continue
+        # Run all standard scanners in parallel (skip client-disabled scanners)
+        active_scanners = [
+            (category, scanner) for category, scanner in _get_all_scanners() if category not in self.disabled_scanners
+        ]
+
+        async def _run_scanner(category: str, scanner):
             scanner_start = time.monotonic()
             try:
                 if category in _POD_SCANNERS and shared_pods is not None:
@@ -919,8 +921,8 @@ class MonitorSession:
                     findings = await asyncio.to_thread(scanner)
                 elapsed_ms = int((time.monotonic() - scanner_start) * 1000)
                 registry = SCANNER_REGISTRY.get(category, {})
-                scanner_results.append(
-                    {
+                return {
+                    "result": {
                         "name": category,
                         "displayName": registry.get("displayName", category),
                         "description": registry.get("description", ""),
@@ -928,14 +930,14 @@ class MonitorSession:
                         "findings_count": len(findings) if isinstance(findings, list) else 0,
                         "checks": registry.get("checks", []),
                         "status": "warning" if findings else "clean",
-                    }
-                )
-                all_findings.extend(findings)
+                    },
+                    "findings": findings if isinstance(findings, list) else [],
+                }
             except Exception as e:
                 elapsed_ms = int((time.monotonic() - scanner_start) * 1000)
                 logger.error("Scanner %s failed: %s", category, e)
-                scanner_results.append(
-                    {
+                return {
+                    "result": {
                         "name": category,
                         "displayName": SCANNER_REGISTRY.get(category, {}).get("displayName", category),
                         "description": SCANNER_REGISTRY.get(category, {}).get("description", ""),
@@ -944,8 +946,14 @@ class MonitorSession:
                         "status": "error",
                         "error": str(e)[:100],
                         "checks": SCANNER_REGISTRY.get(category, {}).get("checks", []),
-                    }
-                )
+                    },
+                    "findings": [],
+                }
+
+        parallel_results = await asyncio.gather(*[_run_scanner(cat, scanner) for cat, scanner in active_scanners])
+        for pr in parallel_results:
+            scanner_results.append(pr["result"])
+            all_findings.extend(pr["findings"])
 
         # Run security posture check every 3rd scan
         if self._scan_counter % 3 == 0:
