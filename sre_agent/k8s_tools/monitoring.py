@@ -10,6 +10,7 @@ from kubernetes.client.rest import ApiException
 from .. import k8s_client as _kc
 from ..decorators import beta_tool
 from ..errors import ToolError
+from ..prometheus import prometheus_request
 from .validators import MAX_RESULTS
 
 # Metrics API uses the CustomObjectsApi to query metrics.k8s.io
@@ -107,10 +108,7 @@ def discover_metrics(category: str = "all"):
         category: One of: 'cpu', 'memory', 'network', 'storage', 'pods',
                   'nodes', 'api_server', 'etcd', 'alerts', 'all'.
     """
-    import os
-    import ssl
     import time as _time
-    import urllib.request
 
     from ..promql_recipes import RECIPES, get_recipe
 
@@ -122,31 +120,8 @@ def discover_metrics(category: str = "all"):
     if _metric_names_cache["data"] is not None and now - _metric_names_cache["ts"] < 300:
         all_metrics = _metric_names_cache["data"]
     else:
-        base_url = os.environ.get(
-            "THANOS_URL",
-            "https://thanos-querier.openshift-monitoring.svc:9091",
-        )
-        url = f"{base_url}/api/v1/label/__name__/values"
-
         try:
-            token = ""
-            try:
-                with open("/var/run/secrets/kubernetes.io/serviceaccount/token") as f:
-                    token = f.read().strip()
-            except FileNotFoundError:
-                pass
-
-            ctx = ssl.create_default_context()
-            ctx.check_hostname = False
-            ctx.verify_mode = ssl.CERT_NONE
-
-            headers = {}
-            if token:
-                headers["Authorization"] = f"Bearer {token}"
-
-            req = urllib.request.Request(url, headers=headers)
-            resp = urllib.request.urlopen(req, context=ctx, timeout=15)
-            data = json.loads(resp.read())
+            data = prometheus_request("api/v1/label/__name__/values", timeout=15)
 
             if data.get("status") != "success":
                 return f"Prometheus error: {data.get('error', 'unknown')}"
@@ -195,45 +170,16 @@ def verify_query(query: str):
     Args:
         query: PromQL query to test.
     """
-    import os
-    import ssl
-    import urllib.parse
-    import urllib.request
-
     if not query or not query.strip():
         return "Error: query is empty."
 
     if any(c in query for c in [";", "\\", "\n", "\r"]):
         return "Error: Invalid characters in query."
 
-    base_url = os.environ.get(
-        "THANOS_URL",
-        "https://thanos-querier.openshift-monitoring.svc:9091",
-    )
-    params = urllib.parse.urlencode({"query": query})
-    url = f"{base_url}/api/v1/query?{params}"
-
     try:
-        token = ""
-        try:
-            with open("/var/run/secrets/kubernetes.io/serviceaccount/token") as f:
-                token = f.read().strip()
-        except FileNotFoundError:
-            pass
-
-        ctx = ssl.create_default_context()
-        ctx.check_hostname = False
-        ctx.verify_mode = ssl.CERT_NONE
-
-        headers = {}
-        if token:
-            headers["Authorization"] = f"Bearer {token}"
-
-        req = urllib.request.Request(url, headers=headers)
-        resp = urllib.request.urlopen(req, context=ctx, timeout=15)
-        data = json.loads(resp.read())
+        data = prometheus_request("api/v1/query", params={"query": query}, timeout=15)
     except Exception as e:
-        return f"FAIL_UNREACHABLE: Cannot reach Prometheus at {base_url}: {e}"
+        return f"FAIL_UNREACHABLE: Cannot reach Prometheus: {e}"
 
     if data.get("status") != "success":
         error_msg = data.get("error", "unknown error")
@@ -281,26 +227,15 @@ def get_prometheus_query(query: str, time_range: str = "1h", title: str = "", de
         title: Human-readable title for the chart (e.g. 'CPU Usage by Namespace'). If empty, auto-generated from the query.
         description: Description of what to watch for (e.g. 'Spikes above 80% indicate resource pressure').
     """
-    import os
-    import urllib.error
-    import urllib.parse
-    import urllib.request
-
-    # Sanitize query
     if any(c in query for c in [";", "\\", "\n", "\r"]):
         return "Error: Invalid characters in query."
 
-    # Default to range query — instant queries produce tables, not charts
     if not time_range:
         time_range = "1h"
 
-    base_url = os.environ.get("THANOS_URL", "")
-    if not base_url:
-        # Try OpenShift Thanos
-        base_url = "https://thanos-querier.openshift-monitoring.svc:9091"
+    query_params: dict[str, str] = {"query": query}
 
     if time_range:
-        # Range query — convert relative time to unix timestamps
         import time as _time
 
         _UNITS = {"s": 1, "m": 60, "h": 3600, "d": 86400}
@@ -309,53 +244,24 @@ def get_prometheus_query(query: str, time_range: str = "1h", title: str = "", de
             amount = int(time_range[:-1])
             seconds = amount * _UNITS.get(unit, 3600)
         except (ValueError, IndexError):
-            seconds = 3600  # default 1h
+            seconds = 3600
 
         now = int(_time.time())
-        # Auto-adjust step based on range to keep ~60-120 data points
         step = max(60, seconds // 120)
-        params = urllib.parse.urlencode(
+        query_params.update(
             {
-                "query": query,
                 "start": str(now - seconds),
                 "end": str(now),
                 "step": str(step),
             }
         )
-    else:
-        # Instant query
-        params = urllib.parse.urlencode({"query": query})
 
-    # Connect to Thanos/Prometheus using direct HTTPS with SA bearer token
-    import ssl
-
-    endpoint = f"api/v1/query?{params}" if not time_range else f"api/v1/query_range?{params}"
-    thanos_url = f"{base_url}/{endpoint}"
+    endpoint = "api/v1/query_range" if time_range else "api/v1/query"
 
     try:
-        # Read service account token for in-cluster auth
-        token = ""
-        try:
-            with open("/var/run/secrets/kubernetes.io/serviceaccount/token") as f:
-                token = f.read().strip()
-        except FileNotFoundError:
-            pass
-
-        # Skip TLS verification for in-cluster Thanos (uses service-serving CA
-        # which differs from the SA CA cert). This is safe — it's internal traffic.
-        ctx = ssl.create_default_context()
-        ctx.check_hostname = False
-        ctx.verify_mode = ssl.CERT_NONE
-
-        headers = {}
-        if token:
-            headers["Authorization"] = f"Bearer {token}"
-
-        req = urllib.request.Request(thanos_url, headers=headers)
-        resp = urllib.request.urlopen(req, context=ctx, timeout=15)
-        data = json.loads(resp.read())
+        data = prometheus_request(endpoint, params=query_params, timeout=15)
     except Exception as e:
-        return f"Cannot reach Prometheus/Thanos at {base_url}: {e}"
+        return f"Cannot reach Prometheus/Thanos: {e}"
 
     if data.get("status") != "success":
         try:
