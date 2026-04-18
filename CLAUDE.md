@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-Pulse Agent — AI-powered OpenShift/Kubernetes SRE and Security agent built on Claude. Connects to live clusters via the K8s API and uses Claude Opus for diagnostics, incident triage, and automated remediation. v2.4.0, Protocol v2, 135 tools (99 native + 36 MCP), 7 skills (built-in: sre, security, view_designer, capacity_planner, plan-builder, postmortem, slo-management), 18 scanners, tests, 73 PromQL recipes, 16 eval suites, 160 scenarios, 130 eval prompts. 40 modules (k8s_tools/12, monitor/11, api/15, plus decorators.py, tool_predictor.py) — no file over 910 lines. Python 3.11+, Mypy clean (0 errors), ruff clean. Migration version 017 (slo_definitions). Auto-routing orchestrator with typo auto-correction (~130 K8s misspellings), hard pre-route regex rules, and pre-route handoff in skill classifier. Centralized Pydantic config (no raw os.environ). Generative views: tools return component specs for rich UI rendering, user-scoped custom dashboards with share/clone. Multi-datasource live tables with K8s watches + PromQL/log enrichment. Tool usage tracking: full audit log with chain intelligence. Adaptive tool selection: TF-IDF + LLM fallback + chain expansion. ORCA multi-signal skill selector (6-channel fusion, 5 active by default), phased plan execution, dependency graph, auto-postmortems, SLO registry. ALWAYS_INCLUDE trimmed from 12 to 5. Release gate: 99.6% (release suite avg).
+Pulse Agent — AI-powered OpenShift/Kubernetes SRE and Security agent built on Claude. Connects to live clusters via the K8s API and uses Claude Opus for diagnostics, incident triage, and automated remediation. v2.4.1, Protocol v2, 135 tools (99 native + 36 MCP), 7 skills (built-in: sre, security, view_designer, capacity_planner, plan-builder, postmortem, slo-management), 18 scanners, tests, 73 PromQL recipes, 15 eval suites, 161 scenarios, 104 eval prompts. 40 modules (k8s_tools/12, monitor/11, api/15, plus decorators.py, tool_predictor.py) — no file over 910 lines. Python 3.11+, Mypy clean (0 errors), ruff clean. Migration version 017 (slo_definitions). Auto-routing orchestrator with typo auto-correction (~130 K8s misspellings), hard pre-route regex rules, and pre-route handoff in skill classifier. Centralized Pydantic config (no raw os.environ). Generative views: tools return component specs for rich UI rendering, user-scoped custom dashboards with share/clone. Multi-datasource live tables with K8s watches + PromQL/log enrichment. Tool usage tracking: full audit log with chain intelligence. Adaptive tool selection: TF-IDF + LLM fallback + chain expansion. ORCA multi-signal skill selector (6-channel fusion, 5 active by default), phased plan execution, dependency graph, auto-postmortems, SLO registry. ALWAYS_INCLUDE trimmed from 12 to 5. Release gate: 99.6% (release suite avg).
 
 **UI Repository:** `/Users/amobrem/ali/OpenshiftPulse` — React/TypeScript frontend (Zustand stores, incident views, admin dashboard).
 
@@ -40,7 +40,7 @@ pulse-agent-api                       # FastAPI on port 8080
 # Tests
 python3 -m pytest tests/ -v           # all tests (~tests)
 python3 -m pytest tests/test_k8s_tools.py -v  # single file
-make verify                                    # lint + type-check + test\nmake chaos-test                                # chaos engineering (5 scenarios, needs cluster)
+make verify                                    # lint + type-check + test\nmake test-everything                           # verify + ALL eval suites (deterministic + LLM-judged)\nmake chaos-test                                # chaos engineering (5 scenarios, needs cluster)
 
 # Eval commands
 python -m sre_agent.evals.cli --suite release --fail-on-gate   # run release eval gate
@@ -159,6 +159,10 @@ Rules: validate inputs with `_validate_k8s_name()`/`_validate_k8s_namespace()`, 
 - RollingUpdate strategy with maxUnavailable=1/maxSurge=0 (old pod dies first to free RWO PVC)
 - `chart/templates/deployment.yaml` — validates credentials at install time via `_helpers.tpl`
 - `chart/templates/postgresql.yaml` — PostgreSQL **StatefulSet** (RHEL 9, runAsNonRoot, NetworkPolicy, headless Service)
+
+### Frontend CSS Gotchas
+- **Scrollbar styling**: Uses ONLY `::-webkit-scrollbar` pseudo-elements (in `index.css`). Do NOT add `scrollbar-color` or `scrollbar-width` — Chrome 121+ ignores `::-webkit-scrollbar` when standard scrollbar properties are set (even via inheritance).
+- **`.openshiftpulse` class**: Must be on the Shell root div (`Shell.tsx`). All global CSS rules are scoped to this class.
 
 ### Key Files
 - `config.py` — Pydantic v2 Settings (`PulseAgentSettings` with `PULSE_AGENT_` prefix)
