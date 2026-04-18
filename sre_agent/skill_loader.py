@@ -1328,13 +1328,43 @@ def build_config_from_skill(skill: Skill, query: str = "") -> dict:
     # Build component hint from skill's context
     component_hint = _build_component_hint(skill, list(tool_map.keys()))
 
+    prompt = skill.system_prompt
+    mcp_hint = _build_mcp_hint(list(tool_map.keys()))
+    if mcp_hint:
+        prompt += f"\n\n{mcp_hint}"
+
     return {
-        "system_prompt": skill.system_prompt,
+        "system_prompt": prompt,
         "tool_defs": tool_defs,
         "tool_map": tool_map,
         "write_tools": write_tools,
         "component_hint": component_hint,
     }
+
+
+def _build_mcp_hint(tool_names: list[str]) -> str:
+    """If MCP tools are available, generate a hint listing them by category."""
+    try:
+        from .mcp_client import list_mcp_tools
+
+        mcp_tools = [t for t in list_mcp_tools() if t["name"] in set(tool_names)]
+        if not mcp_tools:
+            return ""
+
+        categories: dict[str, list[str]] = {}
+        for t in mcp_tools:
+            prefix = t["name"].split("_")[0] if "_" in t["name"] else "other"
+            categories.setdefault(prefix, []).append(t["name"])
+
+        lines = [f"You have {len(mcp_tools)} MCP tools available from an OpenShift MCP server:"]
+        for cat, tools in sorted(categories.items()):
+            lines.append(f"  {cat}: {', '.join(tools)}")
+        lines.append(
+            "Use these tools when users ask about Helm releases, Tekton pipelines, Service Mesh, KubeVirt, or other MCP-provided capabilities."
+        )
+        return "\n".join(lines)
+    except Exception:
+        return ""
 
 
 def _build_component_hint(skill: Skill, tool_names: list[str]) -> str:
