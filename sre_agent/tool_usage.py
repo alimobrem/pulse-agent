@@ -500,15 +500,29 @@ def get_usage_stats(
     by_status_rows = db.fetchall(by_status_sql, tuple(params))
     by_status = {row["status"]: row["count"] for row in by_status_rows}
 
-    # By source (native vs mcp)
+    # By source (native vs mcp) with error rate and avg duration
     by_source_sql = f"""
-        SELECT COALESCE(tool_source, 'native') AS source, COUNT(*) AS count
+        SELECT COALESCE(tool_source, 'native') AS source,
+            COUNT(*) AS count,
+            SUM(CASE WHEN status = 'error' THEN 1 ELSE 0 END) AS error_count,
+            COALESCE(ROUND(AVG(duration_ms)), 0) AS avg_duration_ms,
+            COUNT(DISTINCT tool_name) AS unique_tools
         FROM tool_usage
         {where_sql}
         GROUP BY COALESCE(tool_source, 'native')
     """
     by_source_rows = db.fetchall(by_source_sql, tuple(params))
-    by_source = {row["source"]: row["count"] for row in by_source_rows}
+    by_source = [
+        {
+            "source": row["source"],
+            "count": row["count"],
+            "error_count": row["error_count"],
+            "error_rate": round(row["error_count"] / max(row["count"], 1), 3),
+            "avg_duration_ms": int(row["avg_duration_ms"]),
+            "unique_tools": row["unique_tools"],
+        }
+        for row in by_source_rows
+    ]
 
     # Token usage averages from tool_turns
     token_avg = {}
