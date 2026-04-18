@@ -7,6 +7,7 @@ keywords:
   - node, drain, cordon, restart, rollback, oom, pending, events
   - operator, degraded, pull, pvc, volume, storage, network, ingress
   - route, hpa, autoscale, job, cronjob, daemonset, statefulset, configmap
+  - helm, helm chart, helm release, tekton, pipeline, service mesh
   - service, endpoint, dns, readiness, liveness, probe, resource, capacity
 categories:
   - diagnostics

@@ -444,11 +444,18 @@ def _init_hard_pre_route() -> None:
     if _HARD_PRE_ROUTE:
         return
     # High-priority deterministic rules checked FIRST (order matters).
-    # View/dashboard queries must match before skill-specific patterns
-    # because queries like "make me a security dashboard" contain both
-    # view keywords ("make...dashboard") and skill keywords ("security").
+    # MCP/Helm queries must match before view_designer (which matches "chart")
     _HARD_PRE_ROUTE.extend(
         [
+            (
+                re.compile(
+                    r"helm\s+(release|chart|list|install|upgrade|rollback|uninstall|history|values)", re.IGNORECASE
+                ),
+                "sre",
+            ),
+            (re.compile(r"(tekton|pipeline|pipelinerun|taskrun)\b", re.IGNORECASE), "sre"),
+            (re.compile(r"(service\s+mesh|istio|kiali|ossm)\b", re.IGNORECASE), "sre"),
+            (re.compile(r"(kubevirt|virtual\s+machine)\b", re.IGNORECASE), "sre"),
             (
                 re.compile(
                     r"(create|build|make|design)\s+(me\s+)?(a\s+)?(\w+\s+)?(dashboard|view|live\s+table)", re.IGNORECASE
