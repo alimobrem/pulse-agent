@@ -1385,3 +1385,125 @@ async def plan_analytics(
     except Exception as e:
         logger.debug("Plan analytics failed: %s", e, exc_info=True)
         return {"templates": [], "total_executions": 0, "days": days}
+
+
+def _build_activity_events(database, days: int = 7) -> list[dict]:
+    """Aggregate recent agent activity into plain-English events."""
+    try:
+        events: list[dict] = []
+
+        actions = database.fetchall(
+            "SELECT "
+            "COALESCE(category, 'unknown') as category, "
+            "COALESCE(namespace, '') as namespace, "
+            "COUNT(*) as cnt, "
+            "status "
+            "FROM actions "
+            "WHERE timestamp >= EXTRACT(EPOCH FROM NOW() - INTERVAL '1 day' * %s)::BIGINT * 1000 "
+            "AND status IN ('completed', 'failed', 'rolled_back') "
+            "GROUP BY category, namespace, status "
+            "ORDER BY cnt DESC",
+            (days,),
+        )
+        for row in actions or []:
+            cat = row["category"].replace("_", " ")
+            ns = row["namespace"] or "cluster-wide"
+            status = row["status"]
+            verb = "Auto-fixed" if status == "completed" else "Failed to fix" if status == "failed" else "Rolled back"
+            events.append(
+                {
+                    "type": "auto_fix" if status == "completed" else "fix_failed" if status == "failed" else "rollback",
+                    "description": f"{verb} {row['cnt']} {cat} issue{'s' if row['cnt'] != 1 else ''} in {ns}",
+                    "link": "/incidents?tab=actions",
+                    "count": row["cnt"],
+                    "category": row["category"],
+                    "namespace": row["namespace"],
+                }
+            )
+
+        healed = database.fetchall(
+            "SELECT COUNT(*) as cnt FROM findings "
+            "WHERE resolved = 1 "
+            "AND id NOT IN (SELECT finding_id FROM actions WHERE finding_id IS NOT NULL) "
+            "AND timestamp >= EXTRACT(EPOCH FROM NOW() - INTERVAL '1 day' * %s)::BIGINT * 1000",
+            (days,),
+        )
+        healed_count = healed[0]["cnt"] if healed and healed[0]["cnt"] else 0
+        if healed_count > 0:
+            events.append(
+                {
+                    "type": "self_healed",
+                    "description": f"{healed_count} finding{'s' if healed_count != 1 else ''} resolved without intervention",
+                    "link": "/incidents",
+                    "count": healed_count,
+                }
+            )
+
+        postmortems = database.fetchall(
+            "SELECT COUNT(*) as cnt, "
+            "MAX(summary) as latest_summary "
+            "FROM postmortems "
+            "WHERE created_at >= NOW() - INTERVAL '%s days'",
+            (days,),
+        )
+        pm_count = postmortems[0]["cnt"] if postmortems and postmortems[0]["cnt"] else 0
+        if pm_count > 0:
+            summary = postmortems[0].get("latest_summary", "")
+            desc = f"Generated {pm_count} postmortem{'s' if pm_count != 1 else ''}"
+            if summary:
+                desc += f" \u2014 latest: {summary[:60]}"
+            events.append(
+                {
+                    "type": "postmortem",
+                    "description": desc,
+                    "link": "/incidents?tab=postmortems",
+                    "count": pm_count,
+                }
+            )
+
+        investigations = database.fetchall(
+            "SELECT finding_type, target, COUNT(*) as cnt "
+            "FROM findings "
+            "WHERE investigated = 1 "
+            "AND timestamp >= EXTRACT(EPOCH FROM NOW() - INTERVAL '1 day' * %s)::BIGINT * 1000 "
+            "GROUP BY finding_type, target "
+            "ORDER BY cnt DESC "
+            "LIMIT 5",
+            (days,),
+        )
+        for row in investigations or []:
+            ft = (row["finding_type"] or "issue").replace("_", " ")
+            target = row["target"] or ""
+            desc = f"Investigated {ft}"
+            if target:
+                desc += f" on {target}"
+            events.append(
+                {
+                    "type": "investigation",
+                    "description": desc,
+                    "link": "/incidents",
+                    "count": row["cnt"],
+                }
+            )
+
+        return events
+
+    except Exception:
+        logger.debug("Activity event aggregation failed", exc_info=True)
+        return []
+
+
+@router.get("/agent/activity")
+async def get_agent_activity(
+    days: int = Query(7, ge=1, le=90),
+    _auth=Depends(verify_token),
+):
+    """Recent agent activity for the Overview tab."""
+    from .. import db
+
+    try:
+        database = db.get_database()
+        events = _build_activity_events(database, days)
+        return {"events": events, "period_days": days}
+    except Exception:
+        return {"events": [], "period_days": days}
