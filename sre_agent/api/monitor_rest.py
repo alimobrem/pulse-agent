@@ -1089,10 +1089,12 @@ async def get_finding_learning(finding_id: str, _auth=Depends(verify_token)):
         except Exception:
             logger.debug("Failed to query memory store for category %s", category)
 
-    # (f) Confidence delta
+    # (f) Confidence delta + (g) Weight impact — batched DB access
     result["confidence_delta"] = None
+    result["weight_impact"] = None
     try:
         db = get_database()
+
         inv_row = db.fetchone(
             "SELECT confidence FROM investigations WHERE finding_id = ? ORDER BY timestamp DESC LIMIT 1",
             (finding_id,),
@@ -1113,14 +1115,8 @@ async def get_finding_learning(finding_id: str, _auth=Depends(verify_token)):
                     "after": round(after_conf, 2),
                     "delta": round(after_conf - before_conf, 2),
                 }
-    except Exception:
-        logger.debug("Failed to compute confidence delta for %s", finding_id)
 
-    # (g) Weight impact
-    result["weight_impact"] = None
-    if category:
-        try:
-            db = get_database()
+        if category:
             weight_row = db.fetchone(
                 "SELECT channel_weights FROM skill_selection_log "
                 "WHERE session_id = '__weight_snapshot__' "
@@ -1146,8 +1142,8 @@ async def get_finding_learning(finding_id: str, _auth=Depends(verify_token)):
                         "old_weight": round(DEFAULT_WEIGHTS.get(best_ch, 0.0), 4),
                         "new_weight": round(weights.get(best_ch, 0.0), 4),
                     }
-        except Exception:
-            logger.debug("Failed to compute weight impact for %s", finding_id)
+    except Exception:
+        logger.debug("Failed to compute confidence/weight data for %s", finding_id)
 
     return result
 
