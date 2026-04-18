@@ -384,7 +384,20 @@ async def rest_list_scanners(_auth=Depends(verify_token)):
     """List all scanners with metadata and current configuration."""
     from ..monitor import SCANNER_REGISTRY
 
-    return {"scanners": [{"id": k, **v} for k, v in SCANNER_REGISTRY.items()]}
+    return {
+        "scanners": [
+            {
+                "name": k,
+                "display_name": v.get("displayName", k),
+                "description": v.get("description", ""),
+                "category": v.get("category", ""),
+                "checks": v.get("checks", []),
+                "auto_fixable": v.get("auto_fixable", False),
+                "enabled": True,
+            }
+            for k, v in SCANNER_REGISTRY.items()
+        ]
+    }
 
 
 @router.get("/kpi")
