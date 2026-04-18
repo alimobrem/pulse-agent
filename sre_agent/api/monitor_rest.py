@@ -1807,7 +1807,7 @@ def _build_activity_events(database, days: int = 7) -> list[dict]:
         return []
 
 
-@router.get("/agent/activity")
+@router.get("/activity")
 async def get_agent_activity(
     days: int = Query(7, ge=1, le=90),
     _auth=Depends(verify_token),
