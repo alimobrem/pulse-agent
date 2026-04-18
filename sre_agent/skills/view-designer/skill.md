@@ -143,7 +143,10 @@ Every dashboard should be **shaped by its topic**, not a fixed template. Never d
 
 1. `list_saved_views()` -> `get_view_details(view_id)` -> see widgets with indices
 2. `update_view_widgets(view_id, action=..., widget_index=N)` -- actions: rename_widget, change_chart_type, remove_widget, update_columns, sort_by, filter_by, change_kind, update_query
-3. `add_widget_to_view(view_id)` / `remove_widget_from_view(view_id, widget_title)` / `undo_view_change(view_id)`
+3. `add_widget_to_view(view_id)` / `remove_widget_from_view(view_id, widget_title)`
+4. `undo_view_change(view_id)` — revert the last change. Use `get_view_versions(view_id)` to see all versions and restore a specific one.
+5. `clone_dashboard(view_id, new_title)` — duplicate a dashboard as a starting point.
+6. `optimize_view(view_id, strategy)` — fix layout issues. Strategies: "group" (group related), "reflow" (re-pack grid), "compact" (remove whitespace).
 
 ## Chart Types
 

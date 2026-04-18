@@ -1329,6 +1329,10 @@ def build_config_from_skill(skill: Skill, query: str = "") -> dict:
     component_hint = _build_component_hint(skill, list(tool_map.keys()))
 
     prompt = skill.system_prompt
+    tool_name_set = set(tool_map.keys())
+    capabilities_hint = _build_capabilities_hint(tool_name_set)
+    if capabilities_hint:
+        prompt += f"\n\n{capabilities_hint}"
     mcp_hint = _build_mcp_hint(list(tool_map.keys()))
     if mcp_hint:
         prompt += f"\n\n{mcp_hint}"
@@ -1340,6 +1344,68 @@ def build_config_from_skill(skill: Skill, query: str = "") -> dict:
         "write_tools": write_tools,
         "component_hint": component_hint,
     }
+
+
+def _build_capabilities_hint(tool_names: set[str]) -> str:
+    """Inject shared capability awareness into all skill prompts."""
+    sections: list[str] = []
+
+    # Self-description tools (gap 3)
+    self_tools = [
+        ("describe_tools", "list all tools you have access to"),
+        ("describe_agent", "list all available skills"),
+        ("list_ui_components", "list visualization types you can render"),
+        ("list_promql_recipes", "list pre-built Prometheus queries"),
+        ("list_runbooks", "list available incident playbooks"),
+        ("explain_resource", "explain any Kubernetes API resource"),
+    ]
+    available_self = [(name, desc) for name, desc in self_tools if name in tool_names]
+    if available_self:
+        lines = [
+            "## Answering Capability Questions",
+            "When the user asks what you can do, call these tools instead of answering from memory:",
+        ]
+        for name, desc in available_self:
+            lines.append(f"- `{name}()` — {desc}")
+        sections.append("\n".join(lines))
+
+    # Memory and learning tools (gap 2)
+    memory_tools = []
+    if "search_past_incidents" in tool_names:
+        memory_tools.append("- `search_past_incidents(query)` — find similar past issues and how they were resolved")
+    if "get_learned_runbooks" in tool_names:
+        memory_tools.append("- `get_learned_runbooks(query)` — get proven tool sequences from past resolutions")
+    if memory_tools:
+        sections.append(
+            "## Learning From Past Incidents\n"
+            "You have incident memory. Use it to recognize patterns and suggest proven fixes:\n"
+            + "\n".join(memory_tools)
+            + '\nWhen investigating, check memory first — say "I\'ve seen this before" when applicable.'
+        )
+
+    # Topology and blast radius tools (gap 4)
+    topo_tools = []
+    if "get_topology_graph" in tool_names:
+        topo_tools.append("- `get_topology_graph(namespace)` — interactive dependency visualization")
+    if "get_resource_relationships" in tool_names:
+        topo_tools.append("- `get_resource_relationships(namespace, name, kind)` — what depends on this resource")
+    if topo_tools:
+        sections.append(
+            "## Topology & Blast Radius\n"
+            "You can analyze resource dependencies and blast radius:\n"
+            + "\n".join(topo_tools)
+            + "\nUse these when users ask about dependencies, blast radius, or impact analysis."
+        )
+
+    # Runbooks (gap 9)
+    if "list_runbooks" in tool_names:
+        sections.append(
+            "## Runbooks\n"
+            "You have built-in runbooks for common scenarios (crashlooping pods, node pressure, OOM, etc.). "
+            "Call `list_runbooks()` to see available playbooks. Runbooks are also auto-matched to your queries."
+        )
+
+    return "\n\n".join(sections)
 
 
 def _build_mcp_hint(tool_names: list[str]) -> str:

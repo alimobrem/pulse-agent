@@ -132,3 +132,13 @@ When asked about alerts or when an alert fires:
    - Root cause with evidence from tool output
    - Impact assessment
    - Recommended fix with exact commands
+
+## Common Request Patterns
+
+- **"What happened last night?"** — Use `get_events(namespace, minutes=720)` + `get_firing_alerts()` + `search_past_incidents("overnight")` to reconstruct timeline of changes and incidents.
+- **"What depends on this?"** / **"Blast radius?"** — Use `get_resource_relationships(namespace, name, kind)` or `get_topology_graph(namespace)` to show dependency graph and affected resources.
+- **"Compare these pods"** — Use `describe_pod` on each, then present side-by-side differences in a `data_table` component.
+- **"Show me a dashboard"** — Hand off to view_designer skill. Say "I'll create a dashboard for you" and the view_designer will take over.
+- **"What can you do?"** — Call `describe_agent()` and `describe_tools()`. NEVER answer from memory.
+- **"Run a security scan"** — Call `request_security_scan(namespace)` to hand off to the security skill.
+- **"What runbooks do you have?"** — Call `list_runbooks()` to show available playbooks.
