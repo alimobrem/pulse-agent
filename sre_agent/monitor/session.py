@@ -231,6 +231,24 @@ class MonitorSession:
                         continue
 
             confidence = _estimate_auto_fix_confidence(finding, self._recent_fixes)
+
+            # Unfixable by automation — route to human review queue
+            if targeted_plan and targeted_plan.strategy == "require_human_review":
+                action_report = _make_action_report(
+                    finding_id=finding["id"],
+                    tool="require_human_review",
+                    inp={"category": category, "resources": resources},
+                    status="proposed",
+                    reasoning=f"Manual fix required: {targeted_plan.description}",
+                    confidence=confidence,
+                )
+                action_report["fixStrategy"] = targeted_plan.strategy
+                action_report["causeCategory"] = targeted_plan.cause_category
+                action_report["fixDescription"] = targeted_plan.description
+                await self.send(action_report)
+                save_action(action_report, category=category, resources=resources, finding=finding)
+                continue
+
             action_report = _make_action_report(
                 finding_id=finding["id"],
                 tool="",

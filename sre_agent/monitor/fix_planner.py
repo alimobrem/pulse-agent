@@ -58,7 +58,21 @@ _CAUSE_PATTERNS: list[tuple[str, list[str]]] = [
     ("oom", ["oom", "out of memory", "memory limit", "oomkilled", "exceeded memory"]),
     ("probe_failure", ["readiness probe", "liveness probe", "probe failed", "connection refused"]),
     ("quota_exceeded", ["quota", "exceeded", "forbidden", "limit reached"]),
-    ("crash_exit", ["exit code", "fatal", "panic", "segfault", "error code"]),
+    (
+        "crash_exit",
+        [
+            "exit code",
+            "fatal",
+            "panic",
+            "segfault",
+            "error code",
+            "exits immediately",
+            "short-lived",
+            "no persistent",
+            "no long-running",
+            "no foreground process",
+        ],
+    ),
     ("dependency", ["connection refused", "connection timed out", "no such host", "dns", "service unavailable"]),
 ]
 
@@ -98,6 +112,8 @@ _STRATEGY_MAP: dict[str, str] = {
     "missing_config": "create_configmap",
     "probe_failure": "patch_probe",
     "quota_exceeded": "suggest_quota_increase",
+    "crash_exit": "require_human_review",
+    "dependency": "require_human_review",
 }
 
 
@@ -311,6 +327,18 @@ def _execute_noop(plan: FixPlan) -> tuple[str, str, str]:
     return ("skip", "", f"Strategy {plan.strategy} requires manual intervention: {plan.description}")
 
 
+def _execute_require_human_review(plan: FixPlan) -> tuple[str, str, str]:
+    """Route to Approvals queue — restart won't fix this, human needs to decide."""
+    r, ns = _get_first_resource(plan)
+    cause = plan.params.get("suspected_cause", "Unknown root cause")
+    fix = plan.params.get("recommended_fix", "Review and fix manually")
+    return (
+        "require_human_review",
+        f"{r.get('kind', 'Resource')} {r.get('name', '?')} in {ns}: {cause[:100]}",
+        f"Manual fix required: {fix[:200]}",
+    )
+
+
 def _execute_restart_controller(plan: FixPlan) -> tuple[str, str, str]:
     """Delete the pod — its controller (Deployment/RS/SS) recreates it."""
     r, ns = _get_first_resource(plan)
@@ -344,4 +372,5 @@ _EXECUTORS: dict[str, Callable] = {
     "create_configmap": _execute_noop,
     "patch_probe": _execute_noop,
     "suggest_quota_increase": _execute_noop,
+    "require_human_review": _execute_require_human_review,
 }
