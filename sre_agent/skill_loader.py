@@ -592,14 +592,39 @@ def classify_query_multi(query: str, *, context: dict | None = None) -> tuple[Sk
 
     Returns (primary, None) when multi-skill is disabled or no secondary
     qualifies. Existing classify_query() is unchanged — this wraps it.
+
+    Intent splitting runs BEFORE classify_query so that hard pre-route
+    (which matches on the full query) doesn't short-circuit compound queries.
     """
     from .config import get_settings
 
     settings = get_settings()
-    primary = classify_query(query, context=context)
 
     if not settings.multi_skill:
+        return classify_query(query, context=context), None
+
+    # Try intent splitting first — hard pre-route on the full compound
+    # query would short-circuit to one skill and miss the secondary.
+    from .orchestrator import split_compound_intent
+
+    parts = split_compound_intent(query)
+    if len(parts) >= 2:
+        sub_skills: dict[str, Skill] = {}
+        for part in parts:
+            sub_skill = classify_query(part, context=context)
+            if sub_skill.name not in sub_skills:
+                sub_skills[sub_skill.name] = sub_skill
+        if len(sub_skills) >= 2:
+            names = list(sub_skills.keys())
+            primary, secondary = sub_skills[names[0]], sub_skills[names[1]]
+            if names[1] in (primary.conflicts_with or []) or names[0] in (secondary.conflicts_with or []):
+                return primary, None
+            return primary, secondary
+        primary = next(iter(sub_skills.values()))
         return primary, None
+
+    # Single-intent query — run ORCA on the full query
+    primary = classify_query(query, context=context)
 
     # Check ORCA score gap for secondary skill
     from .skill_selector import get_last_selection_result
@@ -609,23 +634,6 @@ def classify_query_multi(query: str, *, context: dict | None = None) -> tuple[Sk
         secondary_skill = get_skill(result.secondary_skill)
         if secondary_skill:
             return primary, secondary_skill
-
-    # Intent splitting for compound queries
-    from .orchestrator import split_compound_intent
-
-    parts = split_compound_intent(query)
-    if len(parts) >= 2:
-        skills_seen: dict[str, Skill] = {primary.name: primary}
-        for part in parts:
-            sub_skill = classify_query(part, context=context)
-            if sub_skill.name not in skills_seen:
-                skills_seen[sub_skill.name] = sub_skill
-        if len(skills_seen) >= 2:
-            other_name = next(n for n in skills_seen if n != primary.name)
-            secondary = skills_seen[other_name]
-            if other_name in (primary.conflicts_with or []) or primary.name in (secondary.conflicts_with or []):
-                return primary, None
-            return primary, secondary
 
     return primary, None
 

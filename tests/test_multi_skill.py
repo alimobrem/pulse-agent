@@ -97,8 +97,18 @@ def test_classify_query_multi_single_skill(set_orca_result):
     assert secondary is None
 
 
-def test_classify_query_multi_two_skills(set_orca_result):
-    """When score gap is small, returns both skills."""
+def test_classify_query_multi_two_skills_via_splitting():
+    """Compound query splits into two sub-queries routed to different skills."""
+    with patch("sre_agent.skill_loader.classify_query") as mock_cq:
+        mock_cq.side_effect = [_mock_skill("sre"), _mock_skill("security")]
+        primary, secondary = classify_query_multi("check crashes and scan for CVEs")
+    assert primary.name == "sre"
+    assert secondary is not None
+    assert secondary.name == "security"
+
+
+def test_classify_query_multi_two_skills_via_orca(set_orca_result):
+    """Single-intent query with close ORCA scores returns secondary."""
     set_orca_result(
         SelectionResult(
             skill_name="sre",
@@ -112,7 +122,7 @@ def test_classify_query_multi_two_skills(set_orca_result):
         patch("sre_agent.skill_loader.classify_query", return_value=_mock_skill("sre")),
         patch("sre_agent.skill_loader.get_skill", side_effect=lambda n: _mock_skill(n)),
     ):
-        primary, secondary = classify_query_multi("check crashes and scan for CVEs")
+        primary, secondary = classify_query_multi("why are pods crashing")
     assert primary.name == "sre"
     assert secondary is not None
     assert secondary.name == "security"
@@ -263,22 +273,13 @@ def test_empty_output_detection():
 # --- Eval scenarios ---
 
 
-def test_compound_query_routes_to_two_skills(set_orca_result):
-    """Compound SRE+Security query should activate multi-skill."""
+def test_compound_query_routes_to_two_skills():
+    """Compound SRE+Security query should activate multi-skill via splitting."""
     parts = split_compound_intent("check why pods are crashing and scan for vulnerabilities")
     assert len(parts) == 2
 
-    set_orca_result(
-        SelectionResult(
-            skill_name="sre",
-            fused_scores={"sre": 0.8, "security": 0.3},
-            channel_scores={},
-            threshold_used=0.3,
-            secondary_skill=None,
-        )
-    )
     with patch("sre_agent.skill_loader.classify_query") as mock_cq:
-        mock_cq.side_effect = [_mock_skill("sre"), _mock_skill("sre"), _mock_skill("security")]
+        mock_cq.side_effect = [_mock_skill("sre"), _mock_skill("security")]
         primary, secondary = classify_query_multi("check why pods are crashing and scan for vulnerabilities")
     assert primary.name == "sre"
     assert secondary is not None
