@@ -109,6 +109,7 @@ spec:
         startupProbe:
           exec:
             command: ["pg_isready", "-U", {{ .Values.database.postgresql.auth.username | quote }}]
+          initialDelaySeconds: 10
           failureThreshold: 15
           periodSeconds: 2
   volumeClaimTemplates:
