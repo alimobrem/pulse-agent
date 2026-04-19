@@ -525,6 +525,17 @@ def classify_query(query: str, *, context: dict | None = None) -> Skill:
     # corrector can mangle non-K8s terms (e.g. "column" → "volume").
     pre_route = _hard_pre_route(query)
     if pre_route:
+        from .skill_selector import SelectionResult, _last_selection_result_var
+
+        _last_selection_result_var.set(
+            SelectionResult(
+                skill_name=pre_route.name,
+                fused_scores={pre_route.name: 1.0},
+                channel_scores={},
+                threshold_used=0.0,
+                source="pre_route",
+            )
+        )
         return pre_route
 
     # Apply typo correction (for ORCA, not for pre-route)
@@ -587,55 +598,68 @@ def classify_query(query: str, *, context: dict | None = None) -> Skill:
     return best_skill
 
 
-def classify_query_multi(query: str, *, context: dict | None = None) -> tuple[Skill, Skill | None]:
-    """Route a query, returning primary + optional secondary skill.
+def _run_orca_for_secondary(query: str, primary: Skill, *, context: dict | None = None) -> Skill | None:
+    """Run ORCA on the full query to detect a secondary skill via score gap.
 
-    Returns (primary, None) when multi-skill is disabled or no secondary
-    qualifies. Existing classify_query() is unchanged — this wraps it.
-
-    Intent splitting runs BEFORE classify_query so that hard pre-route
-    (which matches on the full query) doesn't short-circuit compound queries.
+    classify_query may have been short-circuited by hard pre-route,
+    so we run the selector directly to get fused scores.
     """
-    from .config import get_settings
-
-    settings = get_settings()
-
-    if not settings.multi_skill:
-        return classify_query(query, context=context), None
-
-    # Try intent splitting first — hard pre-route on the full compound
-    # query would short-circuit to one skill and miss the secondary.
-    from .orchestrator import split_compound_intent
-
-    parts = split_compound_intent(query)
-    if len(parts) >= 2:
-        sub_skills: dict[str, Skill] = {}
-        for part in parts:
-            sub_skill = classify_query(part, context=context)
-            if sub_skill.name not in sub_skills:
-                sub_skills[sub_skill.name] = sub_skill
-        if len(sub_skills) >= 2:
-            names = list(sub_skills.keys())
-            primary, secondary = sub_skills[names[0]], sub_skills[names[1]]
-            if names[1] in (primary.conflicts_with or []) or names[0] in (secondary.conflicts_with or []):
-                return primary, None
-            return primary, secondary
-        primary = next(iter(sub_skills.values()))
-        return primary, None
-
-    # Single-intent query — run ORCA on the full query
-    primary = classify_query(query, context=context)
-
-    # Check ORCA score gap for secondary skill
     from .skill_selector import get_last_selection_result
 
     result = get_last_selection_result()
     if result and result.secondary_skill:
-        secondary_skill = get_skill(result.secondary_skill)
-        if secondary_skill:
-            return primary, secondary_skill
+        sec = get_skill(result.secondary_skill)
+        if sec:
+            return sec
 
-    return primary, None
+    # ORCA didn't run (hard pre-route short-circuited) — run it now
+    if not result or result.source == "pre_route":
+        try:
+            from .orchestrator import fix_typos
+
+            q = fix_typos(query)
+        except ImportError:
+            q = query
+        selector = _get_selector()
+        result = selector.select(q, context=context)
+        if result.secondary_skill:
+            sec = get_skill(result.secondary_skill)
+            if sec:
+                return sec
+
+    # Fallback: intent splitting for explicit compound queries
+    from .orchestrator import split_compound_intent
+
+    parts = split_compound_intent(query)
+    if len(parts) >= 2:
+        for part in parts:
+            sub_skill = classify_query(part, context=context)
+            if sub_skill.name != primary.name:
+                if primary.name not in (sub_skill.conflicts_with or []) and sub_skill.name not in (
+                    primary.conflicts_with or []
+                ):
+                    return sub_skill
+
+    return None
+
+
+def classify_query_multi(query: str, *, context: dict | None = None) -> tuple[Skill, Skill | None]:
+    """Route a query, returning primary + optional secondary skill.
+
+    Always runs ORCA scoring (even when hard pre-route picks the primary)
+    so the score gap can detect a secondary skill. Intent splitting is a
+    fallback for explicit compound queries that ORCA doesn't catch.
+    """
+    from .config import get_settings
+
+    settings = get_settings()
+    primary = classify_query(query, context=context)
+
+    if not settings.multi_skill:
+        return primary, None
+
+    secondary = _run_orca_for_secondary(query, primary, context=context)
+    return primary, secondary
 
 
 def _llm_classify(query: str) -> Skill | None:
