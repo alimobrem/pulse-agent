@@ -718,9 +718,12 @@ async def run_parallel_skills(
     Unlike _race_parallel, this always runs both skills to completion
     because the synthesis layer needs both outputs.
     """
-    from .agent import run_agent_streaming
+    from .agent import create_client, run_agent_streaming
     from .context_bus import get_context_bus
     from .skill_loader import build_config_from_skill
+
+    if client is None:
+        client = create_client()
 
     start = time.monotonic()
     bus = get_context_bus()
