@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-Pulse Agent — AI-powered OpenShift/Kubernetes SRE and Security agent built on Claude. Connects to live clusters via the K8s API and uses Claude Opus for diagnostics, incident triage, and automated remediation. v2.4.1, Protocol v2, 135 tools (99 native + 36 MCP), 7 skills (built-in: sre, security, view_designer, capacity_planner, plan-builder, postmortem, slo-management), 18 scanners, tests, 73 PromQL recipes, 15 eval suites, 161 scenarios, 104 eval prompts. 40 modules (k8s_tools/12, monitor/11, api/15, plus decorators.py, tool_predictor.py) — no file over 910 lines. Python 3.11+, Mypy clean (0 errors), ruff clean. Migration version 017 (slo_definitions). Auto-routing orchestrator with typo auto-correction (~130 K8s misspellings), hard pre-route regex rules, and pre-route handoff in skill classifier. Centralized Pydantic config (no raw os.environ). Generative views: tools return component specs for rich UI rendering, user-scoped custom dashboards with share/clone. Multi-datasource live tables with K8s watches + PromQL/log enrichment. Tool usage tracking: full audit log with chain intelligence. Adaptive tool selection: TF-IDF + LLM fallback + chain expansion. ORCA multi-signal skill selector (6-channel fusion, 5 active by default), phased plan execution, dependency graph, auto-postmortems, SLO registry. ALWAYS_INCLUDE trimmed from 12 to 5. Release gate: 99.6% (release suite avg).
+Pulse Agent — AI-powered OpenShift/Kubernetes SRE and Security agent built on Claude. Connects to live clusters via the K8s API and uses Claude Opus for diagnostics, incident triage, and automated remediation. v2.4.1, Protocol v2, 135 tools (99 native + 36 MCP), 7 skills (built-in: sre, security, view_designer, capacity_planner, plan-builder, postmortem, slo-management), 18 scanners, tests, 73 PromQL recipes, 15 eval suites, 161 scenarios, 104 eval prompts. 40 modules (k8s_tools/12, monitor/11, api/15, plus decorators.py, tool_predictor.py) — no file over 910 lines. Python 3.11+, Mypy clean (0 errors), ruff clean. Migration version 017 (slo_definitions). Auto-routing orchestrator with typo auto-correction (~130 K8s misspellings), hard pre-route regex rules, and pre-route handoff in skill classifier. Centralized Pydantic config (no raw os.environ). Generative views: tools return component specs for rich UI rendering, user-scoped custom dashboards with share/clone. Multi-datasource live tables with K8s watches + PromQL/log enrichment. Tool usage tracking: full audit log with chain intelligence. Adaptive tool selection: TF-IDF + LLM fallback + chain expansion. ORCA multi-signal skill selector (6-channel fusion, 5 active by default, parallel multi-skill execution max 2 with Sonnet synthesis), phased plan execution, dependency graph, auto-postmortems, SLO registry. ALWAYS_INCLUDE trimmed from 12 to 5. Release gate: 99.6% (release suite avg).
 
 **UI Repository:** `/Users/amobrem/ali/OpenshiftPulse` — React/TypeScript frontend (Zustand stores, incident views, admin dashboard).
 
@@ -199,6 +199,7 @@ Rules: validate inputs with `_validate_k8s_name()`/`_validate_k8s_namespace()`, 
 - `skill_scaffolder.py` — AI-generated skill packages from conversation patterns and usage data
 - `eval_scaffolder.py` — auto-generates eval scenarios when skills are scaffolded (`scaffold_eval_from_plan()` for full scenario + replay fixture, `scaffold_eval_from_investigation()` for scenario only); writes to non-gating `scaffolded` eval suite
 - `selector_learning.py` — ORCA selector weight learning from feedback signals (routing decisions, overrides, outcomes)
+- `synthesis.py` — parallel skill output merging with Sonnet-powered conflict detection and fallback concatenation
 
 **Frontend:** `/toolbox` consolidates tools, skills, MCP, components, usage, analytics into single page.
 
@@ -232,5 +233,9 @@ Rules: validate inputs with `_validate_k8s_name()`/`_validate_k8s_namespace()`, 
 | `PULSE_AGENT_CB_THRESHOLD` | Circuit breaker failure threshold | `3` |
 | `PULSE_AGENT_CB_TIMEOUT` | Circuit breaker recovery (seconds) | `60` |
 | `PULSE_AGENT_NOISE_THRESHOLD` | Noise score threshold for suppressing findings | `0.7` |
+| `PULSE_AGENT_MULTI_SKILL` | Enable parallel multi-skill routing | `true` |
+| `PULSE_AGENT_MULTI_SKILL_THRESHOLD` | ORCA score gap for multi-skill activation | `0.15` |
+| `PULSE_AGENT_MULTI_SKILL_MAX` | Max concurrent skills | `2` |
+| `PULSE_AGENT_TEMPORAL_CACHE_TTL` | Temporal signal cache TTL (seconds) | `60` |
 
 *One of Vertex AI or Anthropic API key is required.

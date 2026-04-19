@@ -487,7 +487,7 @@ async def websocket_auto_agent(websocket: WebSocket):
                 try:
                     from ..agent import _circuit_breaker
 
-                    if _circuit_breaker and not _circuit_breaker.should_allow():
+                    if _circuit_breaker and not _circuit_breaker.allow_request():
                         logger.info("Circuit breaker OPEN — degrading to single-skill")
                         secondary_skill = None
                 except Exception:
@@ -514,7 +514,7 @@ async def websocket_auto_agent(websocket: WebSocket):
                     )
                     await websocket.send_json({"type": "skill_progress", "skill": "synthesis", "status": "running"})
 
-                    from ..k8s_client import create_client as _create_synth_client
+                    from ..agent import create_client as _create_synth_client
 
                     synth_client = _create_synth_client()
                     synthesis = await synthesize_parallel_outputs(parallel_result, content, synth_client)
@@ -574,7 +574,7 @@ async def websocket_auto_agent(websocket: WebSocket):
                             (_multi_turns / turn_counter) * 100,
                         )
 
-                    last_mode = None
+                    last_mode = ""
                     continue
 
                 except Exception:
