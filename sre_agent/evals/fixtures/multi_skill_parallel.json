@@ -1,0 +1,19 @@
+{
+    "name": "multi_skill_parallel",
+    "prompt": "Check why pods are crashing in production and also scan for security vulnerabilities",
+    "recorded_responses": {
+        "list_pods": "production/api-server-6d4b8c9f7-x2k9p  Status=Running  Restarts=12  Age=2h\nproduction/worker-8f7b6c5d4-m3n2p  Status=Running  Restarts=0  Age=5d\nproduction/cache-redis-0  Status=Running  Restarts=0  Age=10d",
+        "describe_pod": "{\"name\": \"api-server\", \"namespace\": \"production\", \"status\": \"Running\", \"containers\": [{\"name\": \"api-server\", \"image\": \"api:v2.3\", \"ready\": false, \"restarts\": 12, \"state\": \"waiting\", \"reason\": \"CrashLoopBackOff\"}], \"conditions\": [{\"type\": \"Ready\", \"status\": \"False\", \"reason\": \"ContainersNotReady\"}]}",
+        "get_pod_logs": "2024-01-15T10:00:01Z [ERROR] Failed to connect to database: connection refused to db-service:5432\n2024-01-15T10:00:06Z [FATAL] Cannot start without database connection. Exiting.",
+        "get_events": "2m ago  Warning  BackOff  Pod/api-server  Back-off restarting failed container\n5m ago  Warning  Unhealthy  Pod/api-server  Readiness probe failed",
+        "scan_rbac_risks": "{\"namespace\": \"production\", \"risks\": [{\"severity\": \"high\", \"subject\": \"ServiceAccount/default\", \"description\": \"Default SA has cluster-admin binding\"}, {\"severity\": \"medium\", \"subject\": \"ServiceAccount/ci-deployer\", \"description\": \"SA can create pods and exec into them\"}]}",
+        "get_security_summary": "{\"namespace\": \"production\", \"totalFindings\": 5, \"critical\": 1, \"high\": 2, \"medium\": 1, \"low\": 1, \"findings\": [{\"severity\": \"critical\", \"type\": \"privileged_container\", \"resource\": \"Pod/debug-tools\", \"description\": \"Container running as privileged\"}, {\"severity\": \"high\", \"type\": \"no_security_context\", \"resource\": \"Deployment/api-server\", \"description\": \"No securityContext defined\"}]}",
+        "scan_pod_security": "{\"namespace\": \"production\", \"pods_scanned\": 3, \"violations\": [{\"pod\": \"debug-tools\", \"level\": \"restricted\", \"checks_failed\": [\"privileged\", \"runAsNonRoot\"]}]}"
+    },
+    "expected": {
+        "should_mention": ["database", "connection", "crashloop", "security", "rbac"],
+        "should_use_tools": ["list_pods", "get_pod_logs"],
+        "should_not_use_tools": ["delete_pod", "scale_deployment", "drain_node"],
+        "max_tool_calls": 12
+    }
+}

@@ -510,10 +510,54 @@ async def websocket_auto_agent(websocket: WebSocket):
                             client=None,
                         )
 
+                        from ..skill_selector import get_last_selection_result
+
+                        _sel = get_last_selection_result()
+                        if _sel:
+                            parallel_result.primary_confidence = _sel.fused_scores.get(intent, 0.0)
+                            parallel_result.secondary_confidence = _sel.fused_scores.get(secondary_skill.name, 0.0)
+
                         await websocket.send_json({"type": "skill_progress", "skill": intent, "status": "complete"})
                         await websocket.send_json(
                             {"type": "skill_progress", "skill": secondary_skill.name, "status": "complete"}
                         )
+
+                        _p_out = parallel_result.primary_output.strip()
+                        _s_out = parallel_result.secondary_output.strip()
+                        if not _p_out and not _s_out:
+                            logger.warning("Both skill outputs empty — skipping synthesis")
+                            full_response = "Both skills returned empty results. Please try rephrasing your query."
+                            messages.append({"role": "assistant", "content": full_response})
+                            await websocket.send_json({"type": "text_delta", "text": full_response})
+                            await websocket.send_json(
+                                {"type": "done", "full_response": full_response, "skill_name": intent}
+                            )
+                            last_mode = intent
+                            continue
+                        elif not _p_out or not _s_out:
+                            active_skill = intent if _p_out else secondary_skill.name
+                            active_output = _p_out or _s_out
+                            empty_skill = secondary_skill.name if _p_out else intent
+                            logger.warning(
+                                "Skill '%s' returned empty output — using '%s' only", empty_skill, active_skill
+                            )
+                            full_response = f"*Note: {empty_skill} skill did not return results.*\n\n{active_output}"
+                            messages.append({"role": "assistant", "content": full_response})
+                            await websocket.send_json({"type": "text_delta", "text": full_response})
+                            await websocket.send_json(
+                                {
+                                    "type": "done",
+                                    "full_response": full_response,
+                                    "skill_name": active_skill,
+                                    "multi_skill": {
+                                        "skills": [intent, secondary_skill.name],
+                                        "empty_skill": empty_skill,
+                                    },
+                                }
+                            )
+                            last_mode = intent
+                            continue
+
                         await websocket.send_json({"type": "skill_progress", "skill": "synthesis", "status": "running"})
 
                         from ..agent import create_client as _create_synth_client

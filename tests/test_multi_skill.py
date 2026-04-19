@@ -2,30 +2,14 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 from unittest.mock import patch
 
 from sre_agent.config import get_settings
 from sre_agent.orchestrator import split_compound_intent
-from sre_agent.skill_loader import Skill, classify_query_multi
+from sre_agent.skill_loader import classify_query_multi
 from sre_agent.skill_selector import SelectionResult
 
-# --- Helpers ---
-
-
-def _mock_skill(name: str) -> Skill:
-    return Skill(
-        name=name,
-        version=1,
-        description=f"{name} skill",
-        keywords=[],
-        categories=[],
-        write_tools=False,
-        priority=1,
-        system_prompt="",
-        path=Path("."),
-    )
-
+from .conftest import _mock_skill
 
 # --- Config defaults ---
 
@@ -96,40 +80,38 @@ def test_selection_result_secondary_skill_set():
 # --- classify_query_multi ---
 
 
-def test_classify_query_multi_single_skill():
+def test_classify_query_multi_single_skill(set_orca_result):
     """When score gap is large, returns (primary, None)."""
-    mock_result = SelectionResult(
-        skill_name="sre",
-        fused_scores={"sre": 0.9, "security": 0.3},
-        channel_scores={},
-        threshold_used=0.3,
-        secondary_skill=None,
+    set_orca_result(
+        SelectionResult(
+            skill_name="sre",
+            fused_scores={"sre": 0.9, "security": 0.3},
+            channel_scores={},
+            threshold_used=0.3,
+            secondary_skill=None,
+        )
     )
-    with (
-        patch("sre_agent.skill_loader.classify_query", return_value=_mock_skill("sre")),
-        patch("sre_agent.skill_loader._get_selector") as mock_sel,
-    ):
-        mock_sel.return_value.last_result = mock_result
+    with patch("sre_agent.skill_loader.classify_query", return_value=_mock_skill("sre")):
         primary, secondary = classify_query_multi("check pod logs")
     assert primary.name == "sre"
     assert secondary is None
 
 
-def test_classify_query_multi_two_skills():
+def test_classify_query_multi_two_skills(set_orca_result):
     """When score gap is small, returns both skills."""
-    mock_result = SelectionResult(
-        skill_name="sre",
-        fused_scores={"sre": 0.8, "security": 0.7},
-        channel_scores={},
-        threshold_used=0.3,
-        secondary_skill="security",
+    set_orca_result(
+        SelectionResult(
+            skill_name="sre",
+            fused_scores={"sre": 0.8, "security": 0.7},
+            channel_scores={},
+            threshold_used=0.3,
+            secondary_skill="security",
+        )
     )
     with (
         patch("sre_agent.skill_loader.classify_query", return_value=_mock_skill("sre")),
-        patch("sre_agent.skill_loader._get_selector") as mock_sel,
         patch("sre_agent.skill_loader.get_skill", side_effect=lambda n: _mock_skill(n)),
     ):
-        mock_sel.return_value.last_result = mock_result
         primary, secondary = classify_query_multi("check crashes and scan for CVEs")
     assert primary.name == "sre"
     assert secondary is not None
@@ -238,51 +220,86 @@ def test_done_event_includes_multi_skill_metadata():
     assert done_event["multi_skill"]["conflicts"][0]["topic"] == "scaling"
 
 
+# --- contextvars isolation ---
+
+
+def test_last_selection_result_contextvar_isolation(set_orca_result):
+    """ContextVar should not leak across contexts."""
+    from sre_agent.skill_selector import get_last_selection_result
+
+    set_orca_result(None)
+    assert get_last_selection_result() is None
+
+    result = SelectionResult(
+        skill_name="sre",
+        fused_scores={"sre": 0.9},
+        channel_scores={},
+        threshold_used=0.3,
+    )
+    set_orca_result(result)
+    assert get_last_selection_result() is result
+
+
+# --- Empty output guard ---
+
+
+def test_empty_output_detection():
+    """Verify empty string detection for synthesis guard."""
+    from sre_agent.synthesis import ParallelSkillResult
+
+    r = ParallelSkillResult(
+        primary_output="findings here",
+        secondary_output="",
+        primary_skill="sre",
+        secondary_skill="security",
+        primary_confidence=0.8,
+        secondary_confidence=0.0,
+        duration_ms=1000,
+    )
+    assert r.primary_output.strip()
+    assert not r.secondary_output.strip()
+
+
 # --- Eval scenarios ---
 
 
-def test_compound_query_routes_to_two_skills():
+def test_compound_query_routes_to_two_skills(set_orca_result):
     """Compound SRE+Security query should activate multi-skill."""
     parts = split_compound_intent("check why pods are crashing and scan for vulnerabilities")
     assert len(parts) == 2
 
-    with (
-        patch("sre_agent.skill_loader.classify_query") as mock_cq,
-        patch("sre_agent.skill_loader._get_selector") as mock_sel,
-    ):
-        mock_cq.side_effect = [_mock_skill("sre"), _mock_skill("sre"), _mock_skill("security")]
-        mock_sel.return_value.last_result = SelectionResult(
+    set_orca_result(
+        SelectionResult(
             skill_name="sre",
             fused_scores={"sre": 0.8, "security": 0.3},
             channel_scores={},
             threshold_used=0.3,
             secondary_skill=None,
         )
+    )
+    with patch("sre_agent.skill_loader.classify_query") as mock_cq:
+        mock_cq.side_effect = [_mock_skill("sre"), _mock_skill("sre"), _mock_skill("security")]
         primary, secondary = classify_query_multi("check why pods are crashing and scan for vulnerabilities")
     assert primary.name == "sre"
     assert secondary is not None
     assert secondary.name == "security"
 
 
-def test_single_domain_query_stays_single_skill():
+def test_single_domain_query_stays_single_skill(set_orca_result):
     """Pure SRE query should NOT activate multi-skill."""
     parts = split_compound_intent("why are pods crashing in the production namespace")
     assert len(parts) == 1
 
-    with (
-        patch(
-            "sre_agent.skill_loader.classify_query",
-            return_value=_mock_skill("sre"),
-        ),
-        patch("sre_agent.skill_loader._get_selector") as mock_sel,
-    ):
-        mock_sel.return_value.last_result = SelectionResult(
+    set_orca_result(
+        SelectionResult(
             skill_name="sre",
             fused_scores={"sre": 0.9, "security": 0.2},
             channel_scores={},
             threshold_used=0.3,
             secondary_skill=None,
         )
+    )
+    with patch("sre_agent.skill_loader.classify_query", return_value=_mock_skill("sre")):
         primary, secondary = classify_query_multi("why are pods crashing in the production namespace")
     assert primary.name == "sre"
     assert secondary is None

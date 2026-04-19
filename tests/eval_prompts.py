@@ -655,6 +655,31 @@ EVAL_PROMPTS: list[tuple[str, list[str], str, str]] = [
         "view_designer",
         "View widget column addition",
     ),
+    # ─── Multi-skill compound queries ────────────────────────────────────
+    (
+        "check why pods are crashing and also scan for security vulnerabilities",
+        ["list_pods", "get_pod_logs", "scan_rbac_risks"],
+        "both",
+        "Compound SRE+Security query should use diagnostic and security tools",
+    ),
+    (
+        "investigate the crashlooping pods, also run a security audit",
+        ["list_pods", "describe_pod", "get_security_summary"],
+        "both",
+        "Compound query with 'also' should route to both SRE and security",
+    ),
+    (
+        "check pod health and scan for CVEs in production",
+        ["list_pods", "scan_pod_security"],
+        "both",
+        "Compound health+CVE query should invoke both diagnostic and security tools",
+    ),
+    (
+        "why are pods crashing, then check RBAC risks",
+        ["list_pods", "get_pod_logs", "scan_rbac_risks"],
+        "both",
+        "Sequential compound query with 'then' should use tools from both domains",
+    ),
 ]
 
 # Tools that are internal/meta and don't need user-facing eval prompts

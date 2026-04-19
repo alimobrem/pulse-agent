@@ -758,14 +758,30 @@ async def run_parallel_skills(
         primary_task = asyncio.create_task(_run_skill(primary_config, primary.name, primary_config["write_tools"]))
         secondary_task = asyncio.create_task(_run_skill(secondary_config, secondary.name, sec_write_tools))
 
-        results = await asyncio.gather(primary_task, secondary_task, return_exceptions=True)
-        primary_output = results[0] if not isinstance(results[0], BaseException) else ""
-        secondary_output = results[1] if not isinstance(results[1], BaseException) else ""
+        primary_raw: str | BaseException = TimeoutError("not started")
+        secondary_raw: str | BaseException = TimeoutError("not started")
+        try:
+            gathered = await asyncio.wait_for(
+                asyncio.gather(primary_task, secondary_task, return_exceptions=True),
+                timeout=120,
+            )
+            primary_raw, secondary_raw = gathered[0], gathered[1]
+        except TimeoutError:
+            logger.warning("Parallel skills timed out after 120s — cancelling")
+            primary_task.cancel()
+            secondary_task.cancel()
+            if primary_task.done():
+                primary_raw = primary_task.result()
+            if secondary_task.done():
+                secondary_raw = secondary_task.result()
 
-        if isinstance(results[0], BaseException):
-            logger.warning("Primary skill failed: %s", results[0])
-        if isinstance(results[1], BaseException):
-            logger.warning("Secondary skill failed: %s", results[1])
+        primary_output = primary_raw if isinstance(primary_raw, str) else ""
+        secondary_output = secondary_raw if isinstance(secondary_raw, str) else ""
+
+        if isinstance(primary_raw, BaseException):
+            logger.warning("Primary skill failed: %s", primary_raw)
+        if isinstance(secondary_raw, BaseException):
+            logger.warning("Secondary skill failed: %s", secondary_raw)
     finally:
         bus.flush_buffer(task_id)
 

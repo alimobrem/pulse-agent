@@ -154,3 +154,115 @@ class TestMonitorWebSocket:
     def test_monitor_rejects_no_token(self, ws_client):
         with pytest.raises((WebSocketDisconnect, Exception)), ws_client.websocket_connect("/ws/monitor"):
             pass
+
+
+# ── Multi-Skill ───────────────────────────────────────────────────────────
+
+
+def _configure_multi_skill_settings(mock_settings, pulse_token):
+    mock_settings.return_value.multi_skill = True
+    mock_settings.return_value.max_trust_level = 3
+    mock_settings.return_value.ws_token = pulse_token
+    mock_settings.return_value.scan_interval = 60
+    mock_settings.return_value.autofix_enabled = True
+    mock_settings.return_value.memory_enabled = False
+
+
+def _collect_events(ws, content="check pods and scan security"):
+    ws.send_json({"type": "message", "content": content})
+    events = []
+    for _ in range(30):
+        try:
+            data = ws.receive_json(mode="text")
+            events.append(data)
+            if data["type"] in ("done", "error"):
+                break
+        except Exception:
+            break
+    return events
+
+
+class TestMultiSkillFlow:
+    """Integration tests for parallel multi-skill execution via /ws/agent."""
+
+    def test_multi_skill_emits_correct_event_sequence(self, ws_client, pulse_token):
+        """Multi-skill query should emit multi_skill_start → skill_progress → done with multi_skill metadata."""
+        from unittest.mock import AsyncMock
+
+        from sre_agent.synthesis import ParallelSkillResult, SynthesisResult
+
+        from .conftest import _mock_skill
+
+        mock_sre = _mock_skill("sre")
+        mock_sec = _mock_skill("security")
+        mock_parallel = ParallelSkillResult(
+            primary_output="SRE: pods crashlooping due to OOM",
+            secondary_output="Security: RBAC risks found",
+            primary_skill="sre",
+            secondary_skill="security",
+            primary_confidence=0.8,
+            secondary_confidence=0.7,
+            duration_ms=3000,
+        )
+        mock_synthesis = SynthesisResult(
+            unified_response="Combined: OOM crashes detected and RBAC risks found.",
+            conflicts=[],
+            sources={"sre": "pods crashlooping", "security": "RBAC risks"},
+        )
+
+        with (
+            patch("sre_agent.skill_loader.classify_query_multi", return_value=(mock_sre, mock_sec)),
+            patch("sre_agent.skill_loader.classify_query", return_value=mock_sre),
+            patch("sre_agent.config.get_settings") as mock_settings,
+            patch("sre_agent.plan_runtime.run_parallel_skills", new_callable=AsyncMock, return_value=mock_parallel),
+            patch(
+                "sre_agent.synthesis.synthesize_parallel_outputs", new_callable=AsyncMock, return_value=mock_synthesis
+            ),
+            patch("sre_agent.agent.create_client", return_value=MagicMock()),
+            ws_client.websocket_connect(f"/ws/agent?token={pulse_token}") as ws,
+        ):
+            _configure_multi_skill_settings(mock_settings, pulse_token)
+            events = _collect_events(ws)
+
+            event_types = [e["type"] for e in events]
+            assert "multi_skill_start" in event_types, f"Expected multi_skill_start, got: {event_types}"
+            assert "done" in event_types
+
+            done_event = next(e for e in events if e["type"] == "done")
+            assert "multi_skill" in done_event
+            assert done_event["multi_skill"]["skills"] == ["sre", "security"]
+
+    def test_empty_output_skips_synthesis(self, ws_client, pulse_token):
+        """When one skill returns empty, synthesis is skipped and a warning is shown."""
+        from unittest.mock import AsyncMock
+
+        from sre_agent.synthesis import ParallelSkillResult
+
+        from .conftest import _mock_skill
+
+        mock_sre = _mock_skill("sre")
+        mock_sec = _mock_skill("security")
+        mock_parallel = ParallelSkillResult(
+            primary_output="SRE: pods crashlooping due to OOM",
+            secondary_output="",
+            primary_skill="sre",
+            secondary_skill="security",
+            primary_confidence=0.8,
+            secondary_confidence=0.0,
+            duration_ms=2000,
+        )
+
+        with (
+            patch("sre_agent.skill_loader.classify_query_multi", return_value=(mock_sre, mock_sec)),
+            patch("sre_agent.skill_loader.classify_query", return_value=mock_sre),
+            patch("sre_agent.config.get_settings") as mock_settings,
+            patch("sre_agent.plan_runtime.run_parallel_skills", new_callable=AsyncMock, return_value=mock_parallel),
+            ws_client.websocket_connect(f"/ws/agent?token={pulse_token}") as ws,
+        ):
+            _configure_multi_skill_settings(mock_settings, pulse_token)
+            events = _collect_events(ws)
+
+            done_event = next((e for e in events if e["type"] == "done"), None)
+            assert done_event is not None
+            assert "security skill did not return results" in done_event["full_response"]
+            assert done_event.get("multi_skill", {}).get("empty_skill") == "security"

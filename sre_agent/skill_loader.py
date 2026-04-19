@@ -602,8 +602,9 @@ def classify_query_multi(query: str, *, context: dict | None = None) -> tuple[Sk
         return primary, None
 
     # Check ORCA score gap for secondary skill
-    selector = _get_selector()
-    result = getattr(selector, "last_result", None)
+    from .skill_selector import get_last_selection_result
+
+    result = get_last_selection_result()
     if result and result.secondary_skill:
         secondary_skill = get_skill(result.secondary_skill)
         if secondary_skill:

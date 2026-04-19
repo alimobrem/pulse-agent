@@ -242,7 +242,84 @@
       "retry_attempts": 0,
       "transient_failures": 0,
       "rollback_available": false
+    },
+    {
+      "scenario_id": "integration_parallel_sre_security",
+      "category": "sre",
+      "description": "Compound SRE+Security query triggers parallel multi-skill execution and synthesis.",
+      "tool_calls": [
+        "list_pods",
+        "describe_pod",
+        "get_pod_logs",
+        "scan_rbac_risks",
+        "get_security_summary"
+      ],
+      "rejected_tools": 0,
+      "duration_seconds": 90,
+      "user_confirmed_resolution": true,
+      "final_response": "Parallel analysis complete. SRE: pods crashlooping due to missing ConfigMap key 'DB_HOST'. Security: default service account has cluster-admin binding — critical RBAC risk. Both issues in production namespace require immediate attention.",
+      "verification_passed": true,
+      "retry_attempts": 0,
+      "transient_failures": 0,
+      "rollback_available": false
+    },
+    {
+      "scenario_id": "integration_multi_skill_empty_output_fallback",
+      "category": "sre",
+      "description": "One skill times out during parallel execution — synthesis is skipped, non-empty output used with warning.",
+      "tool_calls": [
+        "list_pods",
+        "describe_pod",
+        "get_pod_logs"
+      ],
+      "rejected_tools": 0,
+      "duration_seconds": 135,
+      "user_confirmed_resolution": true,
+      "final_response": "Note: security skill did not return results. SRE analysis: pods crashlooping due to OOM kill. Memory limit of 256Mi is insufficient for current workload. Recommended increasing to 512Mi.",
+      "verification_passed": true,
+      "retry_attempts": 0,
+      "transient_failures": 1,
+      "rollback_available": false
+    },
+    {
+      "scenario_id": "integration_multi_skill_conflict_detection",
+      "category": "sre",
+      "description": "Parallel skills produce conflicting diagnoses that are surfaced for human arbitration.",
+      "tool_calls": [
+        "list_pods",
+        "describe_pod",
+        "get_pod_logs",
+        "get_events",
+        "scan_pod_security"
+      ],
+      "rejected_tools": 0,
+      "duration_seconds": 95,
+      "user_confirmed_resolution": true,
+      "final_response": "Conflict detected: SRE skill attributes pod restarts to OOM kills while security skill attributes them to a restrictive SecurityContextConstraint rejecting the container. Both findings require investigation — check memory limits AND SCC assignments.",
+      "verification_passed": true,
+      "retry_attempts": 0,
+      "transient_failures": 0,
+      "rollback_available": false
+    },
+    {
+      "scenario_id": "integration_compound_intent_routing",
+      "category": "sre",
+      "description": "Compound query with 'and also' correctly splits into two skill domains.",
+      "tool_calls": [
+        "list_pods",
+        "get_pod_logs",
+        "get_firing_alerts",
+        "scan_rbac_risks"
+      ],
+      "rejected_tools": 0,
+      "duration_seconds": 80,
+      "user_confirmed_resolution": true,
+      "final_response": "Investigated both concerns in parallel. SRE: 3 pods crashlooping in production due to failing readiness probes. Security: RBAC audit found 2 high-risk bindings — default SA has cluster-admin. Actionable recommendations provided for each domain.",
+      "verification_passed": true,
+      "retry_attempts": 0,
+      "transient_failures": 0,
+      "rollback_available": false
     }
   ],
-  "description": "Cross-tool workflows testing error recovery, partial data handling, timeouts, and post-fix verification"
+  "description": "Cross-tool workflows testing error recovery, partial data handling, timeouts, post-fix verification, and parallel multi-skill execution"
 }

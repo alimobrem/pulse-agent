@@ -13,6 +13,7 @@ Channels:
 
 from __future__ import annotations
 
+import contextvars
 import logging
 import re
 import threading
@@ -34,6 +35,16 @@ class SelectionResult:
     selection_ms: int = 0
     source: str = "orca"  # "orca" | "fallback"
     secondary_skill: str | None = None
+
+
+_last_selection_result_var: contextvars.ContextVar[SelectionResult | None] = contextvars.ContextVar(
+    "_last_selection_result", default=None
+)
+
+
+def get_last_selection_result() -> SelectionResult | None:
+    """Return the most recent ORCA selection result for the current context."""
+    return _last_selection_result_var.get()
 
 
 @dataclass
@@ -379,7 +390,7 @@ class SkillSelector:
                 source="orca",
                 secondary_skill=secondary,
             )
-            self.last_result = result
+            _last_selection_result_var.set(result)
             return result
 
         # Below threshold — fallback
@@ -393,7 +404,7 @@ class SkillSelector:
             source="fallback",
             secondary_skill=secondary,
         )
-        self.last_result = result
+        _last_selection_result_var.set(result)
         return result
 
     def _score_keywords(self, query: str) -> dict[str, float]:

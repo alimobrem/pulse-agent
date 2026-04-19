@@ -38,6 +38,39 @@ def _ts(minutes_ago: int = 5) -> datetime:
     return datetime.now(UTC).replace(microsecond=0) - __import__("datetime").timedelta(minutes=minutes_ago)
 
 
+def _mock_skill(name: str, **overrides):
+    """Build a minimal Skill object for tests."""
+    from pathlib import Path
+
+    from sre_agent.skill_loader import Skill
+
+    defaults = dict(
+        name=name,
+        version=1,
+        description=f"{name} skill",
+        keywords=[],
+        categories=[],
+        write_tools=False,
+        priority=1,
+        system_prompt="",
+        path=Path("."),
+    )
+    defaults.update(overrides)
+    return Skill(**defaults)
+
+
+@pytest.fixture
+def set_orca_result():
+    """Set the ORCA selection result contextvar, auto-reset on teardown."""
+    from sre_agent.skill_selector import _last_selection_result_var
+
+    def _set(result):
+        _last_selection_result_var.set(result)
+
+    yield _set
+    _last_selection_result_var.set(None)
+
+
 def _make_pod(
     name="test-pod",
     namespace="default",

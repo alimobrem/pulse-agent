@@ -858,6 +858,72 @@ The `/ws/agent` endpoint is the primary chat endpoint. Each incoming `message` i
 
 - `text_delta`, `thinking_delta`, `tool_use`, `component`, `confirm_request` (with nonce), `done`, `error`, `cleared` — same as chat protocol
 
+#### `multi_skill_start` — Parallel multi-skill execution started
+
+Emitted when ORCA detects that two skills should run in parallel (score gap <= threshold and no conflicts).
+
+```json
+{
+  "type": "multi_skill_start",
+  "skills": ["sre", "security"]
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `skills` | `string[]` | Names of the skills running in parallel (always 2) |
+
+#### `skill_progress` — Individual skill status update
+
+Emitted as each parallel skill completes and when synthesis begins/completes.
+
+```json
+{
+  "type": "skill_progress",
+  "skill": "sre",
+  "status": "complete"
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `skill` | `string` | Skill name or `"synthesis"` for the merge step |
+| `status` | `string` | `"running"` or `"complete"` |
+
+#### `done` (multi-skill extended) — Merged response with conflict metadata
+
+When multi-skill execution completes, the `done` event includes additional fields:
+
+```json
+{
+  "type": "done",
+  "full_response": "Merged analysis from both skills...",
+  "skill_name": "sre",
+  "multi_skill": {
+    "skills": ["sre", "security"],
+    "conflicts": [
+      {
+        "topic": "root cause",
+        "skill_a": "sre",
+        "position_a": "OOM kill due to memory leak",
+        "skill_b": "security",
+        "position_b": "Pod evicted by resource quota policy"
+      }
+    ],
+    "empty_skill": null
+  }
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `multi_skill` | `object` | Present only during multi-skill turns |
+| `multi_skill.skills` | `string[]` | Skills that ran in parallel |
+| `multi_skill.conflicts` | `Conflict[]` | Contradictions detected during synthesis (may be empty) |
+| `multi_skill.empty_skill` | `string?` | If one skill returned no output, its name appears here |
+
+**Empty output handling:** If one skill returns empty output (timeout, failure), synthesis is skipped. The non-empty skill's output is returned directly with a note, and `multi_skill.empty_skill` identifies the failed skill.
+
 ---
 
 ## Component Specs
