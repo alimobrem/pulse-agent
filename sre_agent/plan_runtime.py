@@ -712,8 +712,6 @@ async def run_parallel_skills(
     query: str,
     messages: list[dict],
     client,
-    on_text=None,
-    on_tool_use=None,
 ) -> ParallelSkillResult:
     """Run two skills in parallel and collect both outputs.
 
@@ -729,46 +727,48 @@ async def run_parallel_skills(
     task_id = f"parallel-{uuid.uuid4().hex[:8]}"
     bus.start_buffering(task_id)
 
-    primary_config = build_config_from_skill(primary, query=query)
-    secondary_config = build_config_from_skill(secondary, query=query)
+    try:
+        primary_config = build_config_from_skill(primary, query=query)
+        secondary_config = build_config_from_skill(secondary, query=query)
 
-    sec_write_tools = secondary_config["write_tools"]
-    if primary_config["write_tools"] and sec_write_tools:
-        sec_write_tools = set()
+        sec_write_tools = secondary_config["write_tools"]
+        if primary_config["write_tools"] and sec_write_tools:
+            sec_write_tools = set()
 
-    async def _run_skill(config, skill_name, write_tools):
-        try:
-            result = await asyncio.to_thread(
-                run_agent_streaming,
-                client=client,
-                messages=list(messages),
-                system_prompt=config["system_prompt"],
-                tool_defs=config["tool_defs"],
-                tool_map=config["tool_map"],
-                write_tools=write_tools,
-                mode=skill_name,
-            )
-            return result if isinstance(result, str) else result[0]
-        except TimeoutError:
-            logger.warning("Parallel skill %s timed out", skill_name)
-            return ""
-        except Exception:
-            logger.warning("Parallel skill %s failed", skill_name, exc_info=True)
-            return ""
+        async def _run_skill(config, skill_name, write_tools):
+            try:
+                result = await asyncio.to_thread(
+                    run_agent_streaming,
+                    client=client,
+                    messages=list(messages),
+                    system_prompt=config["system_prompt"],
+                    tool_defs=config["tool_defs"],
+                    tool_map=config["tool_map"],
+                    write_tools=write_tools,
+                    mode=skill_name,
+                )
+                return result if isinstance(result, str) else result[0]
+            except TimeoutError:
+                logger.warning("Parallel skill %s timed out", skill_name)
+                return ""
+            except Exception:
+                logger.warning("Parallel skill %s failed", skill_name, exc_info=True)
+                return ""
 
-    primary_task = asyncio.create_task(_run_skill(primary_config, primary.name, primary_config["write_tools"]))
-    secondary_task = asyncio.create_task(_run_skill(secondary_config, secondary.name, sec_write_tools))
+        primary_task = asyncio.create_task(_run_skill(primary_config, primary.name, primary_config["write_tools"]))
+        secondary_task = asyncio.create_task(_run_skill(secondary_config, secondary.name, sec_write_tools))
 
-    results = await asyncio.gather(primary_task, secondary_task, return_exceptions=True)
-    primary_output = results[0] if not isinstance(results[0], BaseException) else ""
-    secondary_output = results[1] if not isinstance(results[1], BaseException) else ""
+        results = await asyncio.gather(primary_task, secondary_task, return_exceptions=True)
+        primary_output = results[0] if not isinstance(results[0], BaseException) else ""
+        secondary_output = results[1] if not isinstance(results[1], BaseException) else ""
 
-    if isinstance(results[0], BaseException):
-        logger.warning("Primary skill failed: %s", results[0])
-    if isinstance(results[1], BaseException):
-        logger.warning("Secondary skill failed: %s", results[1])
+        if isinstance(results[0], BaseException):
+            logger.warning("Primary skill failed: %s", results[0])
+        if isinstance(results[1], BaseException):
+            logger.warning("Secondary skill failed: %s", results[1])
+    finally:
+        bus.flush_buffer(task_id)
 
-    bus.flush_buffer(task_id)
     elapsed_ms = int((time.monotonic() - start) * 1000)
 
     return ParallelSkillResult(

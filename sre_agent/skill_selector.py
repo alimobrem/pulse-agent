@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import logging
 import re
+import threading
 import time
 from dataclasses import dataclass, field
 
@@ -44,15 +45,17 @@ class TemporalSignal:
     active_incidents: int
 
 
+_temporal_signal_lock = threading.Lock()
 _temporal_signal_cache: dict = {"signal": None, "time": 0.0}
 
 
 def _build_temporal_signal(cache_ttl: int = 60) -> TemporalSignal:
-    now = time.monotonic()
-    cached = _temporal_signal_cache.get("signal")
-    cached_time = _temporal_signal_cache.get("time", 0.0)
-    if cached is not None and (now - cached_time) < cache_ttl:
-        return cached
+    with _temporal_signal_lock:
+        now = time.monotonic()
+        cached = _temporal_signal_cache.get("signal")
+        cached_time = _temporal_signal_cache.get("time", 0.0)
+        if cached is not None and (now - cached_time) < cache_ttl:
+            return cached
 
     recent_deploys: list[dict] = []
     active_incidents = 0
@@ -92,8 +95,9 @@ def _build_temporal_signal(cache_ttl: int = 60) -> TemporalSignal:
         time_of_day=tod,
         active_incidents=active_incidents,
     )
-    _temporal_signal_cache["signal"] = signal
-    _temporal_signal_cache["time"] = now
+    with _temporal_signal_lock:
+        _temporal_signal_cache["signal"] = signal
+        _temporal_signal_cache["time"] = now
     return signal
 
 
