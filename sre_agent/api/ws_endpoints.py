@@ -370,16 +370,23 @@ async def websocket_auto_agent(websocket: WebSocket):
                 )
 
             # --- Auto-classify intent with sticky mode ---
-            # Try skill-based routing first (supports custom skills)
-            # Fall back to legacy classify_intent for backward compat
+            # Try multi-skill routing first, fall back to single-skill
+            secondary_skill = None
             try:
-                from ..skill_loader import classify_query
+                from ..skill_loader import classify_query, classify_query_multi
 
-                skill = classify_query(content)
+                skill, secondary_skill = classify_query_multi(content)
                 intent = skill.name
                 is_strong = True
             except Exception:
-                intent, is_strong = classify_intent(content)
+                try:
+                    from ..skill_loader import classify_query
+
+                    skill = classify_query(content)
+                    intent = skill.name
+                    is_strong = True
+                except Exception:
+                    intent, is_strong = classify_intent(content)
 
             q_lower = content.lower()
             if last_mode == "view_designer" and intent != "view_designer":
@@ -474,6 +481,105 @@ async def websocket_auto_agent(websocket: WebSocket):
 
                 _static = system_prompt + style_hint
                 effective_system = build_cached_system_prompt(_static, shared_context or "")
+
+            # --- Multi-skill parallel execution ---
+            if secondary_skill and get_settings().multi_skill:
+                try:
+                    from ..agent import _circuit_breaker
+
+                    if _circuit_breaker and not _circuit_breaker.should_allow():
+                        logger.info("Circuit breaker OPEN — degrading to single-skill")
+                        secondary_skill = None
+                except Exception:
+                    pass
+
+            if secondary_skill and get_settings().multi_skill:
+                try:
+                    await websocket.send_json({"type": "multi_skill_start", "skills": [intent, secondary_skill.name]})
+
+                    from ..plan_runtime import run_parallel_skills
+                    from ..synthesis import synthesize_parallel_outputs
+
+                    parallel_result = await run_parallel_skills(
+                        primary=skill,
+                        secondary=secondary_skill,
+                        query=content,
+                        messages=messages,
+                        client=None,
+                    )
+
+                    await websocket.send_json({"type": "skill_progress", "skill": intent, "status": "complete"})
+                    await websocket.send_json(
+                        {"type": "skill_progress", "skill": secondary_skill.name, "status": "complete"}
+                    )
+                    await websocket.send_json({"type": "skill_progress", "skill": "synthesis", "status": "running"})
+
+                    from ..k8s_client import create_client as _create_synth_client
+
+                    synth_client = _create_synth_client()
+                    synthesis = await synthesize_parallel_outputs(parallel_result, content, synth_client)
+                    full_response = synthesis.unified_response
+                    messages.append({"role": "assistant", "content": full_response})
+
+                    await websocket.send_json({"type": "text_delta", "text": full_response})
+
+                    if parallel_result.primary_output:
+                        bus.publish(
+                            ContextEntry(
+                                source="sre_agent",
+                                category="diagnosis",
+                                summary=parallel_result.primary_output[:200],
+                                details={"mode": intent},
+                                namespace=namespace_from_context,
+                            )
+                        )
+                    if parallel_result.secondary_output:
+                        bus.publish(
+                            ContextEntry(
+                                source="security_agent" if secondary_skill.name == "security" else "sre_agent",
+                                category="diagnosis",
+                                summary=parallel_result.secondary_output[:200],
+                                details={"mode": secondary_skill.name},
+                                namespace=namespace_from_context,
+                            )
+                        )
+
+                    conflict_dicts = [
+                        {
+                            "topic": c.topic,
+                            "skill_a": c.skill_a,
+                            "position_a": c.position_a,
+                            "skill_b": c.skill_b,
+                            "position_b": c.position_b,
+                        }
+                        for c in synthesis.conflicts
+                    ]
+                    await websocket.send_json(
+                        {
+                            "type": "done",
+                            "full_response": full_response,
+                            "skill_name": intent,
+                            "multi_skill": {
+                                "skills": [intent, secondary_skill.name],
+                                "conflicts": conflict_dicts,
+                            },
+                        }
+                    )
+
+                    _multi_turns = getattr(websocket, "_multi_skill_turns", 0) + 1
+                    websocket._multi_skill_turns = _multi_turns  # type: ignore[attr-defined]
+                    if turn_counter > 4 and _multi_turns / turn_counter > 0.5:
+                        logger.warning(
+                            "Multi-skill rate %.0f%% exceeds 50%% — threshold may be too loose",
+                            (_multi_turns / turn_counter) * 100,
+                        )
+
+                    last_mode = None
+                    continue
+
+                except Exception:
+                    logger.warning("Multi-skill execution failed, falling back to single-skill", exc_info=True)
+                    secondary_skill = None
 
             try:
                 result = await _run_agent_ws(

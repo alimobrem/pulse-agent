@@ -697,3 +697,86 @@ def extract_plan_from_response(response: str) -> SkillPlan | None:
 
     logger.info("Extracted dynamic plan: %s (%d phases)", plan.name, len(plan.phases))
     return plan
+
+
+# ---------------------------------------------------------------------------
+# Parallel multi-skill execution (per-turn, not plan-based)
+# ---------------------------------------------------------------------------
+
+from .synthesis import ParallelSkillResult
+
+
+async def run_parallel_skills(
+    primary,
+    secondary,
+    query: str,
+    messages: list[dict],
+    client,
+    on_text=None,
+    on_tool_use=None,
+) -> ParallelSkillResult:
+    """Run two skills in parallel and collect both outputs.
+
+    Unlike _race_parallel, this always runs both skills to completion
+    because the synthesis layer needs both outputs.
+    """
+    from .agent import run_agent_streaming
+    from .context_bus import get_context_bus
+    from .skill_loader import build_config_from_skill
+
+    start = time.monotonic()
+    bus = get_context_bus()
+    task_id = f"parallel-{uuid.uuid4().hex[:8]}"
+    bus.start_buffering(task_id)
+
+    primary_config = build_config_from_skill(primary, query=query)
+    secondary_config = build_config_from_skill(secondary, query=query)
+
+    sec_write_tools = secondary_config["write_tools"]
+    if primary_config["write_tools"] and sec_write_tools:
+        sec_write_tools = set()
+
+    async def _run_skill(config, skill_name, write_tools):
+        try:
+            result = await asyncio.to_thread(
+                run_agent_streaming,
+                client=client,
+                messages=list(messages),
+                system_prompt=config["system_prompt"],
+                tool_defs=config["tool_defs"],
+                tool_map=config["tool_map"],
+                write_tools=write_tools,
+                mode=skill_name,
+            )
+            return result if isinstance(result, str) else result[0]
+        except TimeoutError:
+            logger.warning("Parallel skill %s timed out", skill_name)
+            return ""
+        except Exception:
+            logger.warning("Parallel skill %s failed", skill_name, exc_info=True)
+            return ""
+
+    primary_task = asyncio.create_task(_run_skill(primary_config, primary.name, primary_config["write_tools"]))
+    secondary_task = asyncio.create_task(_run_skill(secondary_config, secondary.name, sec_write_tools))
+
+    results = await asyncio.gather(primary_task, secondary_task, return_exceptions=True)
+    primary_output = results[0] if not isinstance(results[0], BaseException) else ""
+    secondary_output = results[1] if not isinstance(results[1], BaseException) else ""
+
+    if isinstance(results[0], BaseException):
+        logger.warning("Primary skill failed: %s", results[0])
+    if isinstance(results[1], BaseException):
+        logger.warning("Secondary skill failed: %s", results[1])
+
+    bus.flush_buffer(task_id)
+    elapsed_ms = int((time.monotonic() - start) * 1000)
+
+    return ParallelSkillResult(
+        primary_output=primary_output,
+        secondary_output=secondary_output,
+        primary_skill=primary.name,
+        secondary_skill=secondary.name,
+        primary_confidence=0.0,
+        secondary_confidence=0.0,
+        duration_ms=elapsed_ms,
+    )
