@@ -347,6 +347,28 @@ BOTH_KEYWORDS = [
 ]
 
 
+_SPLIT_PATTERN = re.compile(
+    r"""
+    (?:,\s*(?:and\s+)?also\s+)     |  # ", also" or ", and also"
+    (?:\.\s+(?:Also|Then|Plus)\s+) |  # ". Also" / ". Then" / ". Plus"
+    (?:,\s*(?:then|plus)\s+)       |  # ", then" / ", plus"
+    (?:\s+and\s+(?=(?:check|scan|run|review|investigate|list|show|get|describe|verify|audit|analyze)\s))
+    """,
+    re.VERBOSE | re.IGNORECASE,
+)
+
+
+def split_compound_intent(query: str) -> list[str]:
+    """Split a compound query into independent sub-intents.
+
+    Only splits on conjunctions followed by action verbs to avoid splitting
+    lists like "pods and services".
+    """
+    parts = _SPLIT_PATTERN.split(query)
+    parts = [p.strip() for p in parts if p and p.strip()]
+    return parts if parts else [query]
+
+
 def classify_intent(query: str) -> tuple[AgentMode, bool]:
     """Route a user query to the best skill via ORCA multi-signal selector.
 

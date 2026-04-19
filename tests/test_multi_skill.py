@@ -1,0 +1,288 @@
+"""Tests for parallel multi-skill execution — routing, intent splitting, context bus."""
+
+from __future__ import annotations
+
+from pathlib import Path
+from unittest.mock import patch
+
+from sre_agent.config import get_settings
+from sre_agent.orchestrator import split_compound_intent
+from sre_agent.skill_loader import Skill, classify_query_multi
+from sre_agent.skill_selector import SelectionResult
+
+# --- Helpers ---
+
+
+def _mock_skill(name: str) -> Skill:
+    return Skill(
+        name=name,
+        version=1,
+        description=f"{name} skill",
+        keywords=[],
+        categories=[],
+        write_tools=False,
+        priority=1,
+        system_prompt="",
+        path=Path("."),
+    )
+
+
+# --- Config defaults ---
+
+
+def test_multi_skill_config_defaults():
+    s = get_settings()
+    assert s.multi_skill is True
+    assert s.multi_skill_threshold == 0.15
+    assert s.multi_skill_max == 2
+
+
+# --- split_compound_intent ---
+
+
+def test_split_simple_conjunction():
+    parts = split_compound_intent("check pod crashes and scan for CVEs")
+    assert len(parts) == 2
+    assert "check pod crashes" in parts[0]
+    assert "scan for CVEs" in parts[1]
+
+
+def test_split_no_conjunction():
+    parts = split_compound_intent("why are pods crashing in production")
+    assert len(parts) == 1
+    assert parts[0] == "why are pods crashing in production"
+
+
+def test_split_also_conjunction():
+    parts = split_compound_intent("check memory usage, also run a security audit")
+    assert len(parts) == 2
+
+
+def test_split_preserves_single_and():
+    """'and' inside a phrase should not split."""
+    parts = split_compound_intent("check pods and services in namespace foo")
+    assert len(parts) == 1
+
+
+def test_split_triple_conjunction():
+    parts = split_compound_intent("check pods and scan CVEs and review SLOs")
+    assert len(parts) == 3
+
+
+# --- SelectionResult.secondary_skill ---
+
+
+def test_selection_result_secondary_skill_default():
+    r = SelectionResult(
+        skill_name="sre",
+        fused_scores={"sre": 0.8, "security": 0.7},
+        channel_scores={},
+        threshold_used=0.3,
+    )
+    assert r.secondary_skill is None
+
+
+def test_selection_result_secondary_skill_set():
+    r = SelectionResult(
+        skill_name="sre",
+        fused_scores={"sre": 0.8, "security": 0.7},
+        channel_scores={},
+        threshold_used=0.3,
+        secondary_skill="security",
+    )
+    assert r.secondary_skill == "security"
+
+
+# --- classify_query_multi ---
+
+
+def test_classify_query_multi_single_skill():
+    """When score gap is large, returns (primary, None)."""
+    mock_result = SelectionResult(
+        skill_name="sre",
+        fused_scores={"sre": 0.9, "security": 0.3},
+        channel_scores={},
+        threshold_used=0.3,
+        secondary_skill=None,
+    )
+    with (
+        patch("sre_agent.skill_loader.classify_query", return_value=_mock_skill("sre")),
+        patch("sre_agent.skill_loader._get_selector") as mock_sel,
+    ):
+        mock_sel.return_value.last_result = mock_result
+        primary, secondary = classify_query_multi("check pod logs")
+    assert primary.name == "sre"
+    assert secondary is None
+
+
+def test_classify_query_multi_two_skills():
+    """When score gap is small, returns both skills."""
+    mock_result = SelectionResult(
+        skill_name="sre",
+        fused_scores={"sre": 0.8, "security": 0.7},
+        channel_scores={},
+        threshold_used=0.3,
+        secondary_skill="security",
+    )
+    with (
+        patch("sre_agent.skill_loader.classify_query", return_value=_mock_skill("sre")),
+        patch("sre_agent.skill_loader._get_selector") as mock_sel,
+        patch("sre_agent.skill_loader.get_skill", side_effect=lambda n: _mock_skill(n)),
+    ):
+        mock_sel.return_value.last_result = mock_result
+        primary, secondary = classify_query_multi("check crashes and scan for CVEs")
+    assert primary.name == "sre"
+    assert secondary is not None
+    assert secondary.name == "security"
+
+
+def test_classify_query_multi_disabled():
+    """When multi_skill is False, always returns (primary, None)."""
+    with (
+        patch("sre_agent.skill_loader.classify_query", return_value=_mock_skill("sre")),
+        patch("sre_agent.config.get_settings") as mock_settings,
+    ):
+        mock_settings.return_value.multi_skill = False
+        _primary, secondary = classify_query_multi("check crashes and scan CVEs")
+    assert secondary is None
+
+
+# --- Context bus buffered publish ---
+
+
+def test_context_bus_buffered_mode():
+    import uuid
+
+    from sre_agent.context_bus import ContextBus, ContextEntry
+
+    bus = ContextBus(max_entries=100, ttl_seconds=3600)
+    task_id = "parallel-123"
+    tag = uuid.uuid4().hex[:8]
+
+    bus.start_buffering(task_id)
+
+    entry = ContextEntry(
+        source="sre_agent",
+        category="diagnosis",
+        summary=f"buffered-{tag}",
+        details={},
+        parallel_task_id=task_id,
+    )
+    bus.publish(entry)
+
+    results = bus.get_context_for(category="diagnosis", limit=20)
+    buffered = [r for r in results if r.summary == f"buffered-{tag}"]
+    assert len(buffered) == 0
+
+    bus.flush_buffer(task_id)
+
+    results = bus.get_context_for(category="diagnosis", limit=20)
+    flushed = [r for r in results if r.summary == f"buffered-{tag}"]
+    assert len(flushed) == 1
+
+
+def test_context_bus_unbuffered_publishes_immediately():
+    import uuid
+
+    from sre_agent.context_bus import ContextBus, ContextEntry
+
+    bus = ContextBus(max_entries=100, ttl_seconds=3600)
+    tag = uuid.uuid4().hex[:8]
+    entry = ContextEntry(
+        source="sre_agent",
+        category="diagnosis",
+        summary=f"immediate-{tag}",
+        details={},
+    )
+    bus.publish(entry)
+    results = bus.get_context_for(category="diagnosis", limit=20)
+    immediate = [r for r in results if r.summary == f"immediate-{tag}"]
+    assert len(immediate) == 1
+
+
+# --- Done event structure ---
+
+
+def test_done_event_includes_multi_skill_metadata():
+    from sre_agent.synthesis import Conflict
+
+    conflicts = [
+        Conflict(
+            topic="scaling",
+            skill_a="sre",
+            position_a="scale up",
+            skill_b="capacity_planner",
+            position_b="node at limit",
+        )
+    ]
+    done_event = {
+        "type": "done",
+        "full_response": "merged response",
+        "skill_name": "sre",
+        "multi_skill": {
+            "skills": ["sre", "capacity_planner"],
+            "conflicts": [
+                {
+                    "topic": c.topic,
+                    "skill_a": c.skill_a,
+                    "position_a": c.position_a,
+                    "skill_b": c.skill_b,
+                    "position_b": c.position_b,
+                }
+                for c in conflicts
+            ],
+        },
+    }
+    assert done_event["multi_skill"]["skills"] == ["sre", "capacity_planner"]
+    assert len(done_event["multi_skill"]["conflicts"]) == 1
+    assert done_event["multi_skill"]["conflicts"][0]["topic"] == "scaling"
+
+
+# --- Eval scenarios ---
+
+
+def test_compound_query_routes_to_two_skills():
+    """Compound SRE+Security query should activate multi-skill."""
+    parts = split_compound_intent("check why pods are crashing and scan for vulnerabilities")
+    assert len(parts) == 2
+
+    with (
+        patch("sre_agent.skill_loader.classify_query") as mock_cq,
+        patch("sre_agent.skill_loader._get_selector") as mock_sel,
+    ):
+        mock_cq.side_effect = [_mock_skill("sre"), _mock_skill("sre"), _mock_skill("security")]
+        mock_sel.return_value.last_result = SelectionResult(
+            skill_name="sre",
+            fused_scores={"sre": 0.8, "security": 0.3},
+            channel_scores={},
+            threshold_used=0.3,
+            secondary_skill=None,
+        )
+        primary, secondary = classify_query_multi("check why pods are crashing and scan for vulnerabilities")
+    assert primary.name == "sre"
+    assert secondary is not None
+    assert secondary.name == "security"
+
+
+def test_single_domain_query_stays_single_skill():
+    """Pure SRE query should NOT activate multi-skill."""
+    parts = split_compound_intent("why are pods crashing in the production namespace")
+    assert len(parts) == 1
+
+    with (
+        patch(
+            "sre_agent.skill_loader.classify_query",
+            return_value=_mock_skill("sre"),
+        ),
+        patch("sre_agent.skill_loader._get_selector") as mock_sel,
+    ):
+        mock_sel.return_value.last_result = SelectionResult(
+            skill_name="sre",
+            fused_scores={"sre": 0.9, "security": 0.2},
+            channel_scores={},
+            threshold_used=0.3,
+            secondary_skill=None,
+        )
+        primary, secondary = classify_query_multi("why are pods crashing in the production namespace")
+    assert primary.name == "sre"
+    assert secondary is None

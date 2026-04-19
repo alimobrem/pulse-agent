@@ -31,6 +31,7 @@ class ContextEntry:
     timestamp: float = field(default_factory=time.time)
     namespace: str = ""
     resources: list = field(default_factory=list)
+    parallel_task_id: str = ""
 
 
 _tables_ensured = False
@@ -59,9 +60,28 @@ class ContextBus:
         self._lock = threading.Lock()
         self._ttl = ttl_seconds
         self._max_entries = max_entries
+        self._buffers: dict[str, list[ContextEntry]] = {}
+
+    def start_buffering(self, task_id: str) -> None:
+        """Begin buffering entries for a parallel task."""
+        with self._lock:
+            self._buffers[task_id] = []
+
+    def flush_buffer(self, task_id: str) -> None:
+        """Flush buffered entries for a parallel task to the database."""
+        with self._lock:
+            entries = self._buffers.pop(task_id, [])
+        for entry in entries:
+            entry.parallel_task_id = ""
+            self.publish(entry)
 
     def publish(self, entry: ContextEntry) -> None:
         """Publish a context entry from any agent."""
+        if entry.parallel_task_id and entry.parallel_task_id in self._buffers:
+            with self._lock:
+                if entry.parallel_task_id in self._buffers:
+                    self._buffers[entry.parallel_task_id].append(entry)
+                    return
         with self._lock:
             try:
                 _ensure_tables()

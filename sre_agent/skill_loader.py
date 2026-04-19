@@ -587,6 +587,48 @@ def classify_query(query: str, *, context: dict | None = None) -> Skill:
     return best_skill
 
 
+def classify_query_multi(query: str, *, context: dict | None = None) -> tuple[Skill, Skill | None]:
+    """Route a query, returning primary + optional secondary skill.
+
+    Returns (primary, None) when multi-skill is disabled or no secondary
+    qualifies. Existing classify_query() is unchanged — this wraps it.
+    """
+    from .config import get_settings
+
+    settings = get_settings()
+    primary = classify_query(query, context=context)
+
+    if not settings.multi_skill:
+        return primary, None
+
+    # Check ORCA score gap for secondary skill
+    selector = _get_selector()
+    result = getattr(selector, "last_result", None)
+    if result and result.secondary_skill:
+        secondary_skill = get_skill(result.secondary_skill)
+        if secondary_skill:
+            return primary, secondary_skill
+
+    # Intent splitting for compound queries
+    from .orchestrator import split_compound_intent
+
+    parts = split_compound_intent(query)
+    if len(parts) >= 2:
+        skills_seen: dict[str, Skill] = {primary.name: primary}
+        for part in parts:
+            sub_skill = classify_query(part, context=context)
+            if sub_skill.name not in skills_seen:
+                skills_seen[sub_skill.name] = sub_skill
+        if len(skills_seen) >= 2:
+            other_name = next(n for n in skills_seen if n != primary.name)
+            secondary = skills_seen[other_name]
+            if other_name in (primary.conflicts_with or []) or primary.name in (secondary.conflicts_with or []):
+                return primary, None
+            return primary, secondary
+
+    return primary, None
+
+
 def _llm_classify(query: str) -> Skill | None:
     """Use a lightweight LLM call to classify ambiguous queries.
 
