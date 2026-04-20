@@ -1377,9 +1377,12 @@ def get_topology_graph(
     except Exception:
         pass
 
+    # Cluster-scoped kinds (namespace="") should pass namespace filter when explicitly requested
+    cluster_scoped = {"Node", "HPA"}
     for key, node in graph.get_nodes().items():
         if namespace and node.namespace != namespace:
-            continue
+            if not (kind_set and node.kind in kind_set and node.kind in cluster_scoped):
+                continue
         if kind_set and node.kind not in kind_set:
             continue
         resource_key = f"{node.kind}:{node.namespace}:{node.name}"

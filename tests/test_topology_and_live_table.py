@@ -172,7 +172,7 @@ class TestTopologyFiltering:
         assert isinstance(result, tuple)
         _, component = result
         node_kinds = {n["kind"] for n in component["nodes"]}
-        assert node_kinds == {"Pod"}
+        assert node_kinds == {"Node", "Pod"}  # Node is cluster-scoped but explicitly requested
 
     @patch("sre_agent.dependency_graph.get_dependency_graph")
     def test_kind_filtering_all_ns(self, mock_get_graph):
@@ -214,7 +214,8 @@ class TestTopologyFiltering:
         from sre_agent.view_tools import get_topology_graph
 
         mock_get_graph.return_value = self._make_full_graph()
-        result = get_topology_graph(namespace="production", kinds="Node,Pod", relationships="owns")
+        # ConfigMap and Service have no "owns" relationship between them
+        result = get_topology_graph(namespace="production", kinds="ConfigMap,Service", relationships="owns")
         assert isinstance(result, str)
         assert "no edges" in result.lower() or "no relationship" in result.lower()
 
