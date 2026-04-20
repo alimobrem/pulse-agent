@@ -475,8 +475,15 @@ async def _run_agent_ws(
             latest_component = session_components[-1]
             view = _db.get_view(vid, current_user)
             if view:
-                new_layout = view.get("layout", []) + [latest_component]
-                _db.update_view(vid, current_user, _snapshot=True, _action="add_widget", layout=new_layout)
+                existing_layout = view.get("layout", [])
+                new_kind = latest_component.get("kind", "")
+                new_title = latest_component.get("title", "")
+                already_exists = any(w.get("kind") == new_kind and w.get("title") == new_title for w in existing_layout)
+                if already_exists:
+                    logger.info("Skipping duplicate widget: kind=%s title=%s", new_kind, new_title)
+                else:
+                    new_layout = existing_layout + [latest_component]
+                    _db.update_view(vid, current_user, _snapshot=True, _action="add_widget", layout=new_layout)
 
     for vid in _view_updated_ids:
         if not vid:
