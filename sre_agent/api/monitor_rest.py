@@ -848,7 +848,7 @@ async def get_topology(
             node_data["recentlyChanged"] = True
         if group_by:
             if group_by == "namespace":
-                node_data["group"] = node.namespace
+                node_data["group"] = node.namespace or "cluster-scoped"
             elif group_by == "node":
                 if node.kind == "Node":
                     node_data["group"] = node.name

@@ -1396,7 +1396,7 @@ def get_topology_graph(
         }
         if group_by:
             if group_by == "namespace":
-                node_dict["group"] = node.namespace
+                node_dict["group"] = node.namespace or "cluster-scoped"
             elif group_by == "node":
                 if node.kind == "Node":
                     node_dict["group"] = node.name
