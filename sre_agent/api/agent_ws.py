@@ -369,30 +369,30 @@ async def _run_agent_ws(
             import time as _time
 
             from .. import db as _db
-            from ..view_validator import validate_components as _validate
+            from ..quality_engine import evaluate_components
 
             _sanitize_components(session_components)
 
             # Validate and deduplicate components before saving
-            _vr = _validate(session_components)
-            session_components = _vr.components  # Use deduped list
-            if _vr.deduped_count > 0:
-                logger.info("Deduped %d duplicate components from view", _vr.deduped_count)
+            qr = evaluate_components(session_components, positions=None)
+            session_components = qr.components  # Use deduped list
+            if qr.deduped_count > 0:
+                logger.info("Deduped %d duplicate components from view", qr.deduped_count)
 
-            if not _vr.valid:
+            if not qr.valid:
                 # Log warnings but SAVE ANYWAY -- the agent needs the view to exist
                 # so critique_view can score it and guide fixes. Blocking here causes
                 # the agent to enter a confused loop ("view not found").
                 logger.warning(
                     "View has validation issues (saving anyway): %s",
-                    "; ".join(_vr.errors),
+                    "; ".join(qr.errors),
                 )
                 await websocket.send_json(
                     {
                         "type": "view_validation_warning",
-                        "errors": _vr.errors,
-                        "warnings": _vr.warnings,
-                        "deduped_count": _vr.deduped_count,
+                        "errors": qr.errors,
+                        "warnings": qr.warnings,
+                        "deduped_count": qr.deduped_count,
                     }
                 )
 
@@ -411,10 +411,10 @@ async def _run_agent_ws(
                 old_layout = existing.get("layout", [])
                 merged_layout = old_layout + session_components
                 # Re-validate the merged layout (dedup + structural checks)
-                _vr_merged = _validate(merged_layout)
-                merged_layout = _vr_merged.components  # Always use deduped
-                if not _vr_merged.valid:
-                    logger.warning("Merged view has issues (saving anyway): %s", "; ".join(_vr_merged.errors))
+                qr_merged = evaluate_components(merged_layout, positions=None)
+                merged_layout = qr_merged.components  # Always use deduped
+                if not qr_merged.valid:
+                    logger.warning("Merged view has issues (saving anyway): %s", "; ".join(qr_merged.errors))
                 positions = compute_layout(merged_layout)
                 update_kwargs: dict = {"layout": merged_layout, "description": view_desc}
                 if positions:

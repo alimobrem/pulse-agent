@@ -6,7 +6,13 @@ import copy
 
 import pytest
 
-from sre_agent.view_validator import validate_components
+from sre_agent.quality_engine import evaluate_components
+
+
+def validate_components(components: list[dict], **kwargs) -> object:
+    """Wrapper for evaluate_components that maintains test compatibility."""
+    return evaluate_components(components, positions=None, **kwargs)
+
 
 # ---------------------------------------------------------------------------
 # Fixtures
