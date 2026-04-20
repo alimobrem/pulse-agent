@@ -173,3 +173,22 @@ class TestViewOwnershipBypass:
                     result = optimize_view("cv-123", strategy="group")
                     assert "not found" in result.lower(), f"IDOR vulnerability! {result}"
                     assert not mock_update.called
+
+
+class TestReDoSProtection:
+    """Verify regex pattern validation prevents ReDoS attacks."""
+
+    def test_rejects_long_pattern(self):
+        from sre_agent.api.views import _validate_regex_pattern
+
+        assert _validate_regex_pattern("a" * 101) is not None
+
+    def test_rejects_nested_quantifiers(self):
+        from sre_agent.api.views import _validate_regex_pattern
+
+        assert _validate_regex_pattern("(a+)+$") is not None
+
+    def test_allows_normal_pattern(self):
+        from sre_agent.api.views import _validate_regex_pattern
+
+        assert _validate_regex_pattern("error|Error|ERROR") is None

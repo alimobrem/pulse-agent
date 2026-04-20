@@ -7,6 +7,7 @@ import hmac
 import logging
 import os
 import re
+import re as _re
 import time
 import uuid
 
@@ -16,6 +17,22 @@ from ..config import get_settings
 from .auth import get_owner, verify_token
 
 logger = logging.getLogger("pulse_agent.api")
+
+_NESTED_QUANTIFIER_RE = _re.compile(r"[+*]\)*[+*]")
+
+
+def _validate_regex_pattern(pattern: str) -> str | None:
+    """Return error message if pattern is unsafe, None if safe."""
+    if len(pattern) > 100:
+        return "Pattern too long (max 100 characters)"
+    if _NESTED_QUANTIFIER_RE.search(pattern):
+        return "Pattern contains nested quantifiers (ReDoS risk)"
+    try:
+        _re.compile(pattern)
+    except _re.error as e:
+        return f"Invalid regex: {e}"
+    return None
+
 
 router = APIRouter()
 
@@ -320,6 +337,10 @@ async def rest_log_counts(
     ns_err = _validate_k8s_namespace(namespace)
     if ns_err:
         return JSONResponse(status_code=400, content={"error": ns_err})
+
+    pattern_err = _validate_regex_pattern(pattern)
+    if pattern_err:
+        return JSONResponse(status_code=400, content={"error": pattern_err})
 
     core = get_core_client()
 
