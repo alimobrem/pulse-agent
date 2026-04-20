@@ -180,11 +180,16 @@ async def rest_share_view(
     if view is None:
         return JSONResponse(status_code=404, content={"error": "View not found or not owned by you"})
 
+    # Snapshot the view at share time
+    snapshot_version = db.snapshot_view(view_id, action="shared")
+    if snapshot_version is None:
+        return JSONResponse(status_code=500, content={"error": "Failed to create share snapshot"})
+
     secret = os.environ.get("PULSE_SHARE_TOKEN_KEY", "") or get_settings().ws_token
     if not secret:
         return JSONResponse(status_code=503, content={"error": "Server not configured for sharing"})
     expires = int(time.time()) + 86400  # 24 hours
-    payload = f"{view_id}:{expires}"
+    payload = f"{view_id}:{expires}:{snapshot_version}"
     signature = hmac.new(secret.encode(), payload.encode(), hashlib.sha256).hexdigest()
     share_token = f"{payload}:{signature}"
 
@@ -201,13 +206,21 @@ async def rest_claim_shared_view(
 
     from .. import db
 
-    # Verify share token -- format is view_id:expires:full_hmac_sha256
-    # The signature covers view_id:expires using the server's WS token as secret
+    # Verify share token -- supports both old (3-part) and new (4-part) tokens
+    # Old format: view_id:expires:signature
+    # New format: view_id:expires:snapshot_version:signature
     parts = share_token.split(":")
-    if len(parts) != 3:
+    if len(parts) == 4:
+        view_id, expires_str, snapshot_version_str, signature = parts
+        snapshot_version = int(snapshot_version_str)
+        sig_payload = f"{view_id}:{expires_str}:{snapshot_version_str}"
+    elif len(parts) == 3:
+        view_id, expires_str, signature = parts
+        snapshot_version = None
+        sig_payload = f"{view_id}:{expires_str}"
+    else:
         return JSONResponse(status_code=400, content={"error": "Invalid share token"})
 
-    view_id, expires_str, signature = parts
     try:
         expires = int(expires_str)
     except ValueError:
@@ -219,10 +232,15 @@ async def rest_claim_shared_view(
     secret = os.environ.get("PULSE_SHARE_TOKEN_KEY", "") or get_settings().ws_token
     if not secret:
         return JSONResponse(status_code=503, content={"error": "Server not configured"})
-    expected_sig = hmac.new(secret.encode(), f"{view_id}:{expires_str}".encode(), hashlib.sha256).hexdigest()
+    expected_sig = hmac.new(secret.encode(), sig_payload.encode(), hashlib.sha256).hexdigest()
     if not hmac.compare_digest(signature, expected_sig):
         return JSONResponse(status_code=400, content={"error": "Invalid share token"})
-    new_id = db.clone_view(view_id, owner)
+
+    # Clone from the snapshot version if available
+    if snapshot_version is not None:
+        new_id = db.clone_view_at_version(view_id, owner, snapshot_version)
+    else:
+        new_id = db.clone_view(view_id, owner)
     if new_id is None:
         return JSONResponse(status_code=404, content={"error": "Source view not found"})
     return {"id": new_id, "owner": owner}

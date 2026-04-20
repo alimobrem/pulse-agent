@@ -423,6 +423,46 @@ def clone_view(view_id: str, new_owner: str) -> str | None:
     return new_id
 
 
+@_db_safe
+def clone_view_at_version(view_id: str, new_owner: str, version: int) -> str | None:
+    """Clone a view from a specific version snapshot. Returns the new view ID."""
+    import json
+    import uuid
+    from datetime import UTC, datetime
+
+    db = get_database()
+    snapshot = db.fetchone(
+        "SELECT layout, positions, title, description FROM view_versions WHERE view_id = ? AND version = ?",
+        (view_id, version),
+    )
+    if snapshot is None:
+        return None
+
+    new_id = f"cv-{uuid.uuid4().hex[:12]}"
+    now = datetime.now(UTC).isoformat()
+
+    layout = snapshot["layout"] if isinstance(snapshot["layout"], str) else json.dumps(snapshot["layout"])
+    positions = snapshot["positions"] if isinstance(snapshot["positions"], str) else json.dumps(snapshot["positions"])
+
+    db.execute(
+        "INSERT INTO views (id, owner, title, description, icon, layout, positions, created_at, updated_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (
+            new_id,
+            new_owner,
+            snapshot["title"],
+            snapshot.get("description", ""),
+            "",
+            layout,
+            positions,
+            now,
+            now,
+        ),
+    )
+    db.commit()
+    return new_id
+
+
 # ---------------------------------------------------------------------------
 # View Version History
 # ---------------------------------------------------------------------------
