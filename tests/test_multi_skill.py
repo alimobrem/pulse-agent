@@ -91,7 +91,7 @@ def test_classify_query_multi_single_skill(set_orca_result):
             secondary_skill=None,
         )
     )
-    with patch("sre_agent.skill_loader.classify_query", return_value=_mock_skill("sre")):
+    with patch("sre_agent.skill_router.classify_query", return_value=_mock_skill("sre")):
         primary, secondary = classify_query_multi("check pod logs")
     assert primary.name == "sre"
     assert secondary is None
@@ -113,7 +113,7 @@ def test_classify_query_multi_two_skills_via_splitting(set_orca_result):
     mock_selector.select.return_value = orca_no_secondary
 
     with (
-        patch("sre_agent.skill_loader.classify_query") as mock_cq,
+        patch("sre_agent.skill_router.classify_query") as mock_cq,
         patch("sre_agent.skill_loader._get_selector", return_value=mock_selector),
     ):
         mock_cq.side_effect = [_mock_skill("sre"), _mock_skill("sre"), _mock_skill("security")]
@@ -135,7 +135,7 @@ def test_classify_query_multi_two_skills_via_orca(set_orca_result):
         )
     )
     with (
-        patch("sre_agent.skill_loader.classify_query", return_value=_mock_skill("sre")),
+        patch("sre_agent.skill_router.classify_query", return_value=_mock_skill("sre")),
         patch("sre_agent.skill_loader.get_skill", side_effect=lambda n: _mock_skill(n)),
     ):
         primary, secondary = classify_query_multi("why are pods crashing")
@@ -147,7 +147,7 @@ def test_classify_query_multi_two_skills_via_orca(set_orca_result):
 def test_classify_query_multi_disabled():
     """When multi_skill is False, always returns (primary, None)."""
     with (
-        patch("sre_agent.skill_loader.classify_query", return_value=_mock_skill("sre")),
+        patch("sre_agent.skill_router.classify_query", return_value=_mock_skill("sre")),
         patch("sre_agent.config.get_settings") as mock_settings,
     ):
         mock_settings.return_value.multi_skill = False
@@ -428,7 +428,7 @@ def test_compound_query_routes_to_two_skills(set_orca_result):
     mock_selector.select.return_value = orca_no_secondary
 
     with (
-        patch("sre_agent.skill_loader.classify_query") as mock_cq,
+        patch("sre_agent.skill_router.classify_query") as mock_cq,
         patch("sre_agent.skill_loader._get_selector", return_value=mock_selector),
     ):
         mock_cq.side_effect = [_mock_skill("sre"), _mock_skill("sre"), _mock_skill("security")]
@@ -452,7 +452,7 @@ def test_single_domain_query_stays_single_skill(set_orca_result):
             secondary_skill=None,
         )
     )
-    with patch("sre_agent.skill_loader.classify_query", return_value=_mock_skill("sre")):
+    with patch("sre_agent.skill_router.classify_query", return_value=_mock_skill("sre")):
         primary, secondary = classify_query_multi("why are pods crashing in the production namespace")
     assert primary.name == "sre"
     assert secondary is None

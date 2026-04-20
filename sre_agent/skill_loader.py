@@ -1,21 +1,31 @@
-"""Skill Loader — loads skill packages from markdown files and routes queries.
+"""Skill Loader — loads skill packages from markdown files.
 
 Reads sre_agent/skills/*/skill.md files, parses YAML frontmatter,
 builds routing tables, validates dependencies, and supports hot reload.
 
 Tool-category data (TOOL_CATEGORIES, ALWAYS_INCLUDE, get_tool_category, etc.)
 moved to tool_categories.py.
+
+Routing logic (classify_query, classify_query_multi, check_handoff, etc.)
+moved to skill_router.py.
 """
 
 from __future__ import annotations
 
 import logging
-import re
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
 import yaml
+
+# Re-export routing functions for backward compatibility
+from .skill_router import (
+    check_handoff,
+    classify_query,
+    classify_query_multi,
+    get_last_routing_decision,
+)
 
 # Re-export tool categories for backward compatibility
 from .tool_categories import (
@@ -34,6 +44,10 @@ __all__ = [
     "ALWAYS_INCLUDE",
     "MODE_CATEGORIES",
     "TOOL_CATEGORIES",
+    "check_handoff",
+    "classify_query",
+    "classify_query_multi",
+    "get_last_routing_decision",
     "get_tool_category",
     "get_tool_skills",
 ]
@@ -420,25 +434,6 @@ def get_skill(name: str) -> Skill | None:
     return _skills.get(name)
 
 
-_LLM_CLASSIFY_THRESHOLD = 4  # minimum keyword score to skip LLM fallback
-_llm_cache: dict[str, tuple[str, float]] = {}  # query_hash → (skill_name, timestamp)
-_LLM_CACHE_TTL = 300  # 5 minutes
-_LLM_CACHE_MAX = 100
-
-# Last routing decision — per-context to prevent cross-session corruption
-import contextvars
-
-_last_routing_decision_var: contextvars.ContextVar[dict | None] = contextvars.ContextVar(
-    "_last_routing_decision", default=None
-)
-
-
-def get_last_routing_decision() -> dict | None:
-    """Return the last routing decision, or None if no routing has occurred."""
-    d = _last_routing_decision_var.get()
-    return dict(d) if d else None
-
-
 _selector = None  # SkillSelector | None — lazy-initialized
 
 
@@ -452,321 +447,6 @@ def _get_selector():
 
         _selector = SkillSelector(_skills, keyword_index=_keyword_index)
     return _selector
-
-
-# Hard pre-route patterns: (compiled_regex, skill_name)
-# These override ORCA when the query unambiguously matches a skill.
-_HARD_PRE_ROUTE: list[tuple[re.Pattern, str]] = []
-
-
-def _init_hard_pre_route() -> None:
-    """Build hard pre-route rules from skill trigger_patterns."""
-    global _HARD_PRE_ROUTE
-    if _HARD_PRE_ROUTE:
-        return
-    # High-priority deterministic rules checked FIRST (order matters).
-    # MCP/Helm queries must match before view_designer (which matches "chart")
-    _HARD_PRE_ROUTE.extend(
-        [
-            (
-                re.compile(
-                    r"helm\s+(release|chart|list|install|upgrade|rollback|uninstall|history|values)", re.IGNORECASE
-                ),
-                "sre",
-            ),
-            (re.compile(r"(tekton|pipeline|pipelinerun|taskrun)\b", re.IGNORECASE), "sre"),
-            (re.compile(r"(service\s+mesh|istio|kiali|ossm)\b", re.IGNORECASE), "sre"),
-            (re.compile(r"(kubevirt|virtual\s+machine)\b", re.IGNORECASE), "sre"),
-            (
-                re.compile(
-                    r"(create|build|make|design)\s+(me\s+)?(a\s+)?(\w+\s+)?(dashboard|view|live\s+table)", re.IGNORECASE
-                ),
-                "view_designer",
-            ),
-            (
-                re.compile(
-                    r"(edit|update|modify|fix|optimize)\s+(the\s+)?(dashboard|view|layout|widget)", re.IGNORECASE
-                ),
-                "view_designer",
-            ),
-            (re.compile(r"add\s+(a\s+)?(chart|table|widget|metric|column)", re.IGNORECASE), "view_designer"),
-            (
-                re.compile(r"(remove|hide|show|rename|reorder)\s+.{0,30}(column|widget|chart)", re.IGNORECASE),
-                "view_designer",
-            ),
-            (re.compile(r"(sort|filter)\s+(by|the)\s+", re.IGNORECASE), "view_designer"),
-            (re.compile(r"custom_view|/custom/", re.IGNORECASE), "view_designer"),
-            (
-                re.compile(r"(postmortem|post.mortem|incident\s+review|root\s+cause\s+report)\b", re.IGNORECASE),
-                "postmortem",
-            ),
-            (re.compile(r"(slo\b|service\s+level|error\s+budget|burn\s+rate)", re.IGNORECASE), "slo_management"),
-            (re.compile(r"(capacity\s+plan|forecast|projection|right.?siz)", re.IGNORECASE), "capacity_planner"),
-            (
-                re.compile(
-                    r"(since\s+(the\s+)?upgrade|after\s+(the\s+)?upgrade|post.?upgrade|unstable)", re.IGNORECASE
-                ),
-                "sre",
-            ),
-        ]
-    )
-    # Then skill-defined trigger_patterns (lower priority)
-    for skill in _skills.values():
-        for pattern in skill.trigger_patterns:
-            try:
-                _HARD_PRE_ROUTE.append((re.compile(pattern, re.IGNORECASE), skill.name))
-            except re.error:
-                pass
-
-
-def _hard_pre_route(query: str) -> Skill | None:
-    """Check deterministic pre-route rules before ORCA."""
-    if not _HARD_PRE_ROUTE:
-        _init_hard_pre_route()
-    for pattern, skill_name in _HARD_PRE_ROUTE:
-        if pattern.search(query):
-            skill = _skills.get(skill_name)
-            if skill:
-                logger.info("Hard pre-route: '%s' → %s (pattern: %s)", query[:60], skill_name, pattern.pattern)
-                return skill
-    return None
-
-
-def classify_query(query: str, *, context: dict | None = None) -> Skill:
-    """Route a query to the best matching skill.
-
-    ORCA multi-signal routing: keyword + component tags + historical channels
-    with weighted score fusion and dynamic thresholds.
-    """
-    if not _skills:
-        load_skills()
-
-    # Hard pre-route: deterministic regex rules for unambiguous queries.
-    # Runs on the ORIGINAL query before typo correction, because the typo
-    # corrector can mangle non-K8s terms (e.g. "column" → "volume").
-    pre_route = _hard_pre_route(query)
-    if pre_route:
-        from .skill_selector import SelectionResult, _last_selection_result_var
-
-        _last_selection_result_var.set(
-            SelectionResult(
-                skill_name=pre_route.name,
-                fused_scores={pre_route.name: 1.0},
-                channel_scores={},
-                threshold_used=0.0,
-                source="pre_route",
-            )
-        )
-        return pre_route
-
-    # Apply typo correction (for ORCA, not for pre-route)
-    try:
-        from .orchestrator import fix_typos
-
-        q = fix_typos(query)
-    except ImportError:
-        q = query
-
-    selector = _get_selector()
-    result = selector.select(q, context=context)
-
-    best_skill = _skills.get(result.skill_name)
-
-    # If ORCA didn't find a high-confidence match, try LLM fallback
-    if result.source == "fallback" and not best_skill:
-        llm_result = _llm_classify(query)
-        if llm_result:
-            best_skill = llm_result
-            result.skill_name = llm_result.name
-            result.source = "llm_fallback"
-
-    if not best_skill:
-        best_skill = _skills.get("sre") or next(iter(_skills.values()))
-        result.skill_name = best_skill.name
-
-    # Pre-route handoff
-    handoff_target = check_handoff(best_skill, query)
-    if handoff_target:
-        logger.info(
-            "classify_query: pre-route handoff %s → %s for '%s'",
-            best_skill.name,
-            handoff_target.name,
-            query[:60],
-        )
-        best_skill = handoff_target
-        result.skill_name = handoff_target.name
-
-    # Update _last_routing_decision for backward compat (per-context)
-    _last_routing_decision_var.set(
-        {
-            "skill_name": result.skill_name,
-            "keyword_score": int(result.fused_scores.get(result.skill_name, 0) * 10),
-            "used_llm_fallback": result.source == "llm_fallback",
-            "competing_scores": {k: int(v * 10) for k, v in result.fused_scores.items()},
-        }
-    )
-
-    logger.debug(
-        "classify_query: '%s' → %s (source=%s, score=%.3f, threshold=%.2f, %dms)",
-        query[:60],
-        result.skill_name,
-        result.source,
-        result.fused_scores.get(result.skill_name, 0),
-        result.threshold_used,
-        result.selection_ms,
-    )
-
-    return best_skill
-
-
-def _run_orca_for_secondary(query: str, primary: Skill, *, context: dict | None = None) -> Skill | None:
-    """Run ORCA on the full query to detect a secondary skill via score gap.
-
-    classify_query may have been short-circuited by hard pre-route,
-    so we run the selector directly to get fused scores.
-    """
-    from .skill_selector import get_last_selection_result
-
-    result = get_last_selection_result()
-    if result and result.secondary_skill:
-        sec = get_skill(result.secondary_skill)
-        if sec:
-            return sec
-
-    # ORCA didn't run (hard pre-route short-circuited) — run it now
-    if not result or result.source == "pre_route":
-        try:
-            from .orchestrator import fix_typos
-
-            q = fix_typos(query)
-        except ImportError:
-            q = query
-        selector = _get_selector()
-        result = selector.select(q, context=context)
-        if result.secondary_skill:
-            sec = get_skill(result.secondary_skill)
-            if sec:
-                return sec
-
-    # Fallback: intent splitting for explicit compound queries
-    from .orchestrator import split_compound_intent
-
-    parts = split_compound_intent(query)
-    if len(parts) >= 2:
-        for part in parts:
-            sub_skill = classify_query(part, context=context)
-            if sub_skill.name != primary.name:
-                if primary.name not in (sub_skill.conflicts_with or []) and sub_skill.name not in (
-                    primary.conflicts_with or []
-                ):
-                    return sub_skill
-
-    return None
-
-
-def classify_query_multi(query: str, *, context: dict | None = None) -> tuple[Skill, Skill | None]:
-    """Route a query, returning primary + optional secondary skill.
-
-    Always runs ORCA scoring (even when hard pre-route picks the primary)
-    so the score gap can detect a secondary skill. Intent splitting is a
-    fallback for explicit compound queries that ORCA doesn't catch.
-    """
-    from .config import get_settings
-
-    settings = get_settings()
-    primary = classify_query(query, context=context)
-
-    if not settings.multi_skill:
-        return primary, None
-
-    secondary = _run_orca_for_secondary(query, primary, context=context)
-    return primary, secondary
-
-
-def _llm_classify(query: str) -> Skill | None:
-    """Use a lightweight LLM call to classify ambiguous queries.
-
-    Caches results (FIFO, 100 entries, 5min TTL) to avoid repeat API calls.
-    Returns None on any error (caller falls back to keyword/default).
-    """
-    import hashlib
-
-    query_hash = hashlib.md5(query.lower().strip().encode()).hexdigest()[:16]
-
-    # Check cache
-    cached = _llm_cache.get(query_hash)
-    if cached:
-        name, ts = cached
-        if time.time() - ts < _LLM_CACHE_TTL:
-            skill = _skills.get(name)
-            if skill:
-                logger.debug("LLM classify cache hit: '%s' → %s", query[:50], name)
-                return skill
-
-    try:
-        from .agent import create_client
-
-        client = create_client()
-
-        skill_options = "\n".join(f"- {s.name}: {s.description}" for s in _skills.values())
-        response = client.messages.create(
-            model="claude-haiku-4-5-20251001",
-            max_tokens=20,
-            messages=[
-                {
-                    "role": "user",
-                    "content": (
-                        f"Classify this user query into exactly one skill.\n\n"
-                        f"Available skills:\n{skill_options}\n\n"
-                        f"Query: {query}\n\n"
-                        f"Reply with ONLY the skill name, nothing else."
-                    ),
-                }
-            ],
-        )
-
-        name = response.content[0].text.strip().lower().replace(" ", "_")
-        skill = _skills.get(name)
-        if skill:
-            # Cache the result
-            _llm_cache[query_hash] = (name, time.time())
-            # Evict oldest entries if cache is full
-            while len(_llm_cache) > _LLM_CACHE_MAX:
-                oldest_key = next(iter(_llm_cache))
-                del _llm_cache[oldest_key]
-            logger.info("LLM classify: '%s' → %s", query[:50], name)
-            return skill
-
-        logger.debug("LLM classify returned unknown skill: '%s'", name)
-        return None
-    except Exception as e:
-        logger.debug("LLM classify failed: %s", e)
-        return None
-
-
-def check_handoff(current_skill: Skill, query: str) -> Skill | None:
-    """Check if the query should trigger a handoff to another skill.
-
-    Returns the target skill if a handoff keyword matches, else None.
-    """
-    if not current_skill.handoff_to:
-        return None
-
-    q = query.lower()
-    for target_name, keywords in current_skill.handoff_to.items():
-        for kw in keywords:
-            if kw.lower() in q:
-                target = get_skill(target_name)
-                if target:
-                    logger.info(
-                        "Handoff: %s → %s (triggered by '%s')",
-                        current_skill.name,
-                        target_name,
-                        kw,
-                    )
-                    return target
-
-    return None
 
 
 def get_mode_categories() -> dict[str, list[str] | None]:
