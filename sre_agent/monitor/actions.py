@@ -146,6 +146,53 @@ def get_briefing(hours: int = 12) -> dict:
         investigations = db.fetchall("SELECT status FROM investigations WHERE timestamp >= ?", (since,))
         total_investigations = len(investigations)
 
+        # Live scanner runs: fast current state scanners
+        current_findings: list[dict] = []
+        try:
+            from .scanners import (
+                scan_crashlooping_pods,
+                scan_firing_alerts,
+                scan_oom_killed_pods,
+                scan_pending_pods,
+            )
+
+            for scanner in [scan_crashlooping_pods, scan_pending_pods, scan_oom_killed_pods, scan_firing_alerts]:
+                try:
+                    current_findings.extend(scanner())
+                except Exception as e:
+                    logger.debug("Scanner %s failed in briefing: %s", scanner.__name__, e)
+        except ImportError:
+            logger.debug("Scanners not available for briefing")
+
+        # Live trend scanner runs: predictive findings
+        trend_findings: list[dict] = []
+        try:
+            from .trend_scanners import (
+                scan_disk_pressure_forecast,
+                scan_error_rate_acceleration,
+                scan_hpa_exhaustion_trend,
+                scan_memory_pressure_forecast,
+            )
+
+            for scanner in [
+                scan_memory_pressure_forecast,
+                scan_disk_pressure_forecast,
+                scan_hpa_exhaustion_trend,
+                scan_error_rate_acceleration,
+            ]:
+                try:
+                    trend_findings.extend(scanner())
+                except Exception as e:
+                    logger.debug("Trend scanner %s failed in briefing: %s", scanner.__name__, e)
+        except ImportError:
+            logger.debug("Trend scanners not available for briefing")
+
+        # Priority ranking: sort by severity weight
+        all_findings = current_findings + trend_findings
+        severity_weights = {"critical": 4, "warning": 2, "info": 1}
+        all_findings.sort(key=lambda f: severity_weights.get(f.get("severity", "info"), 0), reverse=True)
+        priority_items = all_findings[:10]
+
         # Determine greeting
         import datetime as _dtmod
 
@@ -179,6 +226,9 @@ def get_briefing(hours: int = 12) -> dict:
             "actions": {"total": total_actions, "completed": completed, "failed": failed},
             "investigations": total_investigations,
             "categoriesFixed": categories_fixed,
+            "currentFindings": current_findings,
+            "trendFindings": trend_findings,
+            "priorityItems": priority_items,
         }
     except Exception as e:
         logger.error("Failed to build briefing: %s", e)
@@ -189,6 +239,9 @@ def get_briefing(hours: int = 12) -> dict:
             "actions": {"total": 0, "completed": 0, "failed": 0},
             "investigations": 0,
             "categoriesFixed": [],
+            "currentFindings": [],
+            "trendFindings": [],
+            "priorityItems": [],
         }
 
 
