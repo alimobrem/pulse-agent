@@ -1,0 +1,202 @@
+"""Trend-based predictive scanners using Prometheus predict_linear() and derivatives."""
+
+from __future__ import annotations
+
+import json
+import logging
+from typing import Any
+
+from ..k8s_client import get_core_client
+from .findings import _make_finding
+from .registry import SEVERITY_WARNING
+
+logger = logging.getLogger("pulse_agent.monitor")
+
+
+def _query_prometheus(query: str) -> list[dict]:
+    """Query Prometheus via Thanos-querier service proxy and return results."""
+    try:
+        core = get_core_client()
+        result = core.connect_get_namespaced_service_proxy_with_path(
+            "thanos-querier:web",
+            "openshift-monitoring",
+            path=f"api/v1/query?query={query}",
+            _preload_content=False,
+        )
+        data = json.loads(result.data)
+        if data.get("status") != "success":
+            logger.debug("Prometheus query failed: %s", data.get("error", "unknown"))
+            return []
+        return data.get("data", {}).get("result", [])
+    except Exception as e:
+        logger.debug("Prometheus query error: %s", e)
+        return []
+
+
+def scan_memory_pressure_forecast() -> list[dict]:
+    """Predict node memory exhaustion within 3 days using 7-day linear trends."""
+    findings: list[dict[str, Any]] = []
+    try:
+        query = "predict_linear(node_memory_MemAvailable_bytes[7d], 3*86400) < 0"
+        results = _query_prometheus(query)
+
+        for result in results:
+            metric = result.get("metric", {})
+            node = metric.get("instance", metric.get("node", "unknown"))
+            value = result.get("value", [None, None])[1]
+
+            if value is not None:
+                try:
+                    predicted_bytes = float(value)
+                    # If prediction is negative, memory will be exhausted
+                    if predicted_bytes < 0:
+                        findings.append(
+                            _make_finding(
+                                severity=SEVERITY_WARNING,
+                                category="memory_pressure",
+                                title=f"Node {node} memory exhaustion predicted in 3 days",
+                                summary="Linear projection shows available memory reaching 0 bytes in ~3 days. Current 7-day trend indicates exhaustion.",
+                                resources=[{"kind": "Node", "name": node}],
+                                auto_fixable=False,
+                                confidence=0.75,
+                                finding_type="trend",
+                            )
+                        )
+                except (ValueError, TypeError):
+                    pass
+    except Exception as e:
+        logger.error("Memory pressure forecast scan failed: %s", e)
+    return findings
+
+
+def scan_disk_pressure_forecast() -> list[dict]:
+    """Predict volume capacity exhaustion within 7 days using 7-day linear trends."""
+    findings: list[dict[str, Any]] = []
+    try:
+        # Query for volumes where predicted usage will exceed capacity
+        query = "predict_linear(kubelet_volume_stats_used_bytes[7d], 7*86400) > kubelet_volume_stats_capacity_bytes"
+        results = _query_prometheus(query)
+
+        for result in results:
+            metric = result.get("metric", {})
+            namespace = metric.get("namespace", "")
+            pvc = metric.get("persistentvolumeclaim", "")
+            pod = metric.get("pod", "")
+
+            if pvc:
+                findings.append(
+                    _make_finding(
+                        severity=SEVERITY_WARNING,
+                        category="disk_pressure",
+                        title=f"Volume {pvc} exhaustion predicted in 7 days",
+                        summary="Linear projection shows volume capacity will be exceeded in ~7 days. Current 7-day trend indicates exhaustion.",
+                        resources=[
+                            {"kind": "PersistentVolumeClaim", "name": pvc, "namespace": namespace},
+                        ],
+                        auto_fixable=False,
+                        confidence=0.75,
+                        finding_type="trend",
+                    )
+                )
+            elif pod:
+                findings.append(
+                    _make_finding(
+                        severity=SEVERITY_WARNING,
+                        category="disk_pressure",
+                        title=f"Pod {pod} disk exhaustion predicted in 7 days",
+                        summary="Linear projection shows pod volume capacity will be exceeded in ~7 days.",
+                        resources=[{"kind": "Pod", "name": pod, "namespace": namespace}],
+                        auto_fixable=False,
+                        confidence=0.75,
+                        finding_type="trend",
+                    )
+                )
+    except Exception as e:
+        logger.error("Disk pressure forecast scan failed: %s", e)
+    return findings
+
+
+def scan_hpa_exhaustion_trend() -> list[dict]:
+    """Detect HPAs consistently running at >90% of max capacity over 48 hours."""
+    findings: list[dict[str, Any]] = []
+    try:
+        # Query for HPAs with sustained high utilization
+        query = "avg_over_time((kube_horizontalpodautoscaler_status_current_replicas / kube_horizontalpodautoscaler_spec_max_replicas)[48h:]) > 0.9"
+        results = _query_prometheus(query)
+
+        for result in results:
+            metric = result.get("metric", {})
+            namespace = metric.get("namespace", "")
+            hpa = metric.get("horizontalpodautoscaler", metric.get("hpa", ""))
+            value = result.get("value", [None, None])[1]
+
+            if hpa and value is not None:
+                try:
+                    avg_utilization = float(value)
+                    findings.append(
+                        _make_finding(
+                            severity=SEVERITY_WARNING,
+                            category="hpa",
+                            title=f"HPA {hpa} sustained near-max capacity",
+                            summary=f"HPA has averaged {avg_utilization:.0%} of max replicas over 48 hours. Consider increasing max replicas.",
+                            resources=[
+                                {"kind": "HorizontalPodAutoscaler", "name": hpa, "namespace": namespace},
+                            ],
+                            auto_fixable=False,
+                            confidence=0.85,
+                            finding_type="trend",
+                        )
+                    )
+                except (ValueError, TypeError):
+                    pass
+    except Exception as e:
+        logger.error("HPA exhaustion trend scan failed: %s", e)
+    return findings
+
+
+def scan_error_rate_acceleration() -> list[dict]:
+    """Detect accelerating HTTP 5xx error rates over 24 hours."""
+    findings: list[dict[str, Any]] = []
+    try:
+        # Query for services with increasing error rates
+        query = 'deriv(rate(http_requests_total{code=~"5.."}[1h])[24h:]) > 0'
+        results = _query_prometheus(query)
+
+        for result in results:
+            metric = result.get("metric", {})
+            namespace = metric.get("namespace", "")
+            service = metric.get("service", metric.get("job", ""))
+            code = metric.get("code", "5xx")
+            value = result.get("value", [None, None])[1]
+
+            if value is not None:
+                try:
+                    derivative = float(value)
+                    if derivative > 0:
+                        findings.append(
+                            _make_finding(
+                                severity=SEVERITY_WARNING,
+                                category="errors",
+                                title=f"Service {service} error rate accelerating",
+                                summary=f"HTTP {code} error rate has been increasing over 24 hours. Derivative: {derivative:.6f} errors/sec².",
+                                resources=[
+                                    {"kind": "Service", "name": service, "namespace": namespace},
+                                ],
+                                auto_fixable=False,
+                                confidence=0.70,
+                                finding_type="trend",
+                            )
+                        )
+                except (ValueError, TypeError):
+                    pass
+    except Exception as e:
+        logger.error("Error rate acceleration scan failed: %s", e)
+    return findings
+
+
+TREND_SCANNERS = [
+    ("trend_memory", scan_memory_pressure_forecast),
+    ("trend_disk", scan_disk_pressure_forecast),
+    ("trend_hpa", scan_hpa_exhaustion_trend),
+    ("trend_errors", scan_error_rate_acceleration),
+]

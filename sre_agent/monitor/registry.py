@@ -140,6 +140,34 @@ SCANNER_REGISTRY: dict[str, dict] = {
         ],
         "auto_fixable": False,
     },
+    "trend_memory": {
+        "displayName": "Memory Pressure Forecast",
+        "description": "Predicts node memory exhaustion using 7-day trends",
+        "category": "predictive",
+        "checks": ["predict_linear(node_memory_MemAvailable_bytes[7d], 3*86400) < 0"],
+        "auto_fixable": False,
+    },
+    "trend_disk": {
+        "displayName": "Disk Pressure Forecast",
+        "description": "Predicts volume capacity exhaustion using 7-day trends",
+        "category": "predictive",
+        "checks": ["predict_linear(kubelet_volume_stats_used_bytes[7d], 7*86400) > capacity"],
+        "auto_fixable": False,
+    },
+    "trend_hpa": {
+        "displayName": "HPA Exhaustion Trend",
+        "description": "Detects HPAs consistently running near maximum capacity",
+        "category": "predictive",
+        "checks": ["avg_over_time((current/max)[48h:]) > 0.9"],
+        "auto_fixable": False,
+    },
+    "trend_errors": {
+        "displayName": "Error Rate Acceleration",
+        "description": "Detects increasing error rates over 24 hours",
+        "category": "predictive",
+        "checks": ['deriv(rate(http_requests_total{code=~"5.."}[1h])[24h:]) > 0'],
+        "auto_fixable": False,
+    },
 }
 
 # ── Types ──────────────────────────────────────────────────────────────────

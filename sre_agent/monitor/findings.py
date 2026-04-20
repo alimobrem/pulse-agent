@@ -24,6 +24,7 @@ def _make_finding(
     auto_fixable: bool = False,
     runbook_id: str | None = None,
     confidence: float | None = None,
+    finding_type: str = "current",
 ) -> dict:
     finding: dict = {
         "type": "finding",
@@ -36,6 +37,7 @@ def _make_finding(
         "autoFixable": auto_fixable,
         "runbookId": runbook_id,
         "timestamp": _ts(),
+        "findingType": finding_type,
     }
     if confidence is not None:
         finding["confidence"] = round(max(0.0, min(1.0, confidence)), 2)
