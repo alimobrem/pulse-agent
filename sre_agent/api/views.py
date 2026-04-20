@@ -37,6 +37,15 @@ async def rest_topology(
     """
     from ..view_tools import get_topology_graph_raw
 
+    logger.info(
+        "Topology REST: namespace=%s kinds=%s relationships=%s layout_hint=%s include_metrics=%s group_by=%s",
+        namespace,
+        kinds,
+        relationships,
+        layout_hint,
+        include_metrics,
+        group_by,
+    )
     result = get_topology_graph_raw(
         namespace=namespace,
         kinds=kinds,
