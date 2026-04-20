@@ -1266,24 +1266,102 @@ register_tool(critique_view)
 register_tool(plan_dashboard)
 
 
-@beta_tool
-def get_topology_graph(namespace: str = ""):
-    """Build an interactive dependency topology graph for a namespace showing resource relationships, health status, and risk levels.
+VALID_TOPOLOGY_KINDS = frozenset(
+    {
+        "Node",
+        "Pod",
+        "Deployment",
+        "ReplicaSet",
+        "StatefulSet",
+        "DaemonSet",
+        "Job",
+        "CronJob",
+        "Service",
+        "Ingress",
+        "Route",
+        "ConfigMap",
+        "Secret",
+        "PVC",
+        "ServiceAccount",
+        "NetworkPolicy",
+        "HelmRelease",
+    }
+)
 
-    Returns a visual network graph of Deployments, Services, Pods, ConfigMaps,
-    Secrets, PVCs, and their connections (owns, selects, mounts, references).
-    Each node shows health status (healthy/warning/error) and risk level.
+VALID_TOPOLOGY_RELATIONSHIPS = frozenset(
+    {
+        "owns",
+        "selects",
+        "mounts",
+        "references",
+        "uses",
+        "schedules",
+        "routes_to",
+        "applies_to",
+        "scales",
+        "manages",
+    }
+)
+
+VALID_LAYOUT_HINTS = frozenset({"top-down", "left-to-right", "grouped"})
+
+_MAX_GROUP_SIZE = 20
+
+
+@beta_tool
+def get_topology_graph(
+    namespace: str = "",
+    kinds: str = "",
+    relationships: str = "",
+    layout_hint: str = "",
+    include_metrics: bool = False,
+    group_by: str = "",
+):
+    """Build an interactive dependency topology graph showing resource relationships, health status, and risk levels.
+
+    Returns a visual network graph filtered by resource kinds and relationships.
+    Each node shows health status (healthy/warning/error).
+
+    Perspective reference — use these parameter patterns:
+    - Hardware/capacity: kinds="Node,Pod" relationships="schedules" layout_hint="grouped" include_metrics=true group_by="node"
+    - App structure: kinds="Deployment,ReplicaSet,Pod,ConfigMap,Secret,PVC,ServiceAccount" relationships="owns,references,mounts,uses" layout_hint="top-down"
+    - Network flow: kinds="Route,Ingress,Service,Pod,NetworkPolicy" relationships="routes_to,selects,applies_to" layout_hint="left-to-right"
+    - Tenant usage: kinds="Namespace,Pod,Node" relationships="schedules" layout_hint="grouped" include_metrics=true group_by="namespace"
+    - Helm releases: kinds="HelmRelease,Deployment,StatefulSet,Service,ConfigMap,Secret" relationships="manages,owns" layout_hint="grouped"
 
     Args:
         namespace: Kubernetes namespace to graph. Leave empty for all namespaces.
+        kinds: Comma-separated resource types to include (e.g. "Node,Pod,Service"). Empty = all types.
+        relationships: Comma-separated relationship types to include (e.g. "owns,selects"). Empty = auto-infer from kinds.
+        layout_hint: Layout strategy: "top-down", "left-to-right", or "grouped". Empty = "top-down".
+        include_metrics: Fetch CPU/memory metrics from metrics-server for Node/Pod resources.
+        group_by: Group nodes by "namespace" or a label key (e.g. "team"). Requires layout_hint="grouped".
     """
+    kind_set: set[str] | None = None
+    if kinds:
+        kind_set = {k.strip() for k in kinds.split(",") if k.strip()}
+        invalid = kind_set - VALID_TOPOLOGY_KINDS
+        if invalid:
+            return (
+                f"Invalid kinds: {', '.join(sorted(invalid))}. Valid kinds: {', '.join(sorted(VALID_TOPOLOGY_KINDS))}"
+            )
+
+    rel_set: set[str] | None = None
+    if relationships:
+        rel_set = {r.strip() for r in relationships.split(",") if r.strip()}
+        invalid = rel_set - VALID_TOPOLOGY_RELATIONSHIPS
+        if invalid:
+            return f"Invalid relationships: {', '.join(sorted(invalid))}. Valid relationships: {', '.join(sorted(VALID_TOPOLOGY_RELATIONSHIPS))}"
+
+    if layout_hint and layout_hint not in VALID_LAYOUT_HINTS:
+        return f"Invalid layout hint: {layout_hint}. Valid layout hints: {', '.join(sorted(VALID_LAYOUT_HINTS))}"
+
     from .dependency_graph import get_dependency_graph
 
     graph = get_dependency_graph()
     nodes: list[dict] = []
     edges: list[dict] = []
 
-    # Health status from active findings
     finding_status: dict[str, str] = {}
     try:
         from .db import get_database
@@ -1302,48 +1380,132 @@ def get_topology_graph(namespace: str = ""):
     for key, node in graph.get_nodes().items():
         if namespace and node.namespace != namespace:
             continue
+        if kind_set and node.kind not in kind_set:
+            continue
         resource_key = f"{node.kind}:{node.namespace}:{node.name}"
         status = finding_status.get(resource_key, "healthy")
-        nodes.append(
+        node_dict: dict = {
+            "id": key,
+            "kind": node.kind,
+            "name": node.name,
+            "namespace": node.namespace,
+            "status": status,
+        }
+        if group_by:
+            if group_by == "namespace":
+                node_dict["group"] = node.namespace
+            else:
+                node_dict["group"] = node.labels.get(group_by, "unlabeled")
+        nodes.append(node_dict)
+
+    # Cap group sizes
+    if group_by:
+        groups: dict[str, list[dict]] = {}
+        for n in nodes:
+            g = n.get("group", "")
+            if g not in groups:
+                groups[g] = []
+            groups[g].append(n)
+        capped: list[dict] = []
+        for g, members in groups.items():
+            if len(members) <= _MAX_GROUP_SIZE:
+                capped.extend(members)
+            else:
+                capped.extend(members[:_MAX_GROUP_SIZE])
+                overflow = len(members) - _MAX_GROUP_SIZE
+                capped.append(
+                    {
+                        "id": f"_summary/{g}",
+                        "kind": "Summary",
+                        "name": f"+ {overflow} more",
+                        "namespace": members[0]["namespace"],
+                        "status": "healthy",
+                        "group": g,
+                    }
+                )
+        nodes = capped
+
+    # Metrics enrichment
+    if include_metrics:
+        from .dependency_graph import _fetch_metrics
+
+        node_met, pod_met = _fetch_metrics(namespace)
+        for n in nodes:
+            if n["kind"] == "Node":
+                m = node_met.get(n["name"])
+                if m:
+                    cpu_pct = round(m["cpu_usage_m"] * 100 / m["cpu_capacity_m"]) if m["cpu_capacity_m"] else 0
+                    mem_pct = round(m["memory_usage_b"] * 100 / m["memory_capacity_b"]) if m["memory_capacity_b"] else 0
+                    n["metrics"] = {
+                        "cpu_usage": m["cpu_usage"],
+                        "cpu_capacity": m["cpu_capacity"],
+                        "cpu_percent": cpu_pct,
+                        "memory_usage": m["memory_usage"],
+                        "memory_capacity": m["memory_capacity"],
+                        "memory_percent": mem_pct,
+                    }
+            elif n["kind"] == "Pod":
+                key = f"{n['namespace']}/{n['name']}"
+                m = pod_met.get(key)
+                if m:
+                    n["metrics"] = {
+                        "cpu_usage": m["cpu_usage"],
+                        "memory_usage": m["memory_usage"],
+                        "cpu_percent": 0,
+                        "memory_percent": 0,
+                    }
+
+    node_ids = {n["id"] for n in nodes}
+    node_kinds = {n["kind"] for n in nodes}
+
+    for edge in graph.get_edges():
+        if edge.source not in node_ids or edge.target not in node_ids:
+            continue
+        if rel_set and edge.relationship not in rel_set:
+            continue
+        if kind_set and not rel_set:
+            src_node = graph.get_node(edge.source)
+            tgt_node = graph.get_node(edge.target)
+            if src_node and tgt_node:
+                if src_node.kind not in node_kinds or tgt_node.kind not in node_kinds:
+                    continue
+        edges.append(
             {
-                "id": key,
-                "kind": node.kind,
-                "name": node.name,
-                "namespace": node.namespace,
-                "status": status,
+                "source": edge.source,
+                "target": edge.target,
+                "relationship": edge.relationship,
             }
         )
 
-    node_ids = {n["id"] for n in nodes}
-    for edge in graph.get_edges():
-        if edge.source in node_ids and edge.target in node_ids:
-            edges.append(
-                {
-                    "source": edge.source,
-                    "target": edge.target,
-                    "relationship": edge.relationship,
-                }
-            )
+    if kind_set and rel_set and not edges and nodes:
+        return (
+            f"No edges possible: relationship types {', '.join(sorted(rel_set))} do not connect "
+            f"the given kinds {', '.join(sorted(kind_set))}. Try removing the relationships filter "
+            f"or adding the missing kinds."
+        )
 
     if not nodes:
         ns_label = f" in {namespace}" if namespace else ""
         return f"No topology data available{ns_label}. The dependency graph is built during monitor scans."
 
     ns_label = f" — {namespace}" if namespace else ""
-    kinds: dict[str, int] = {}
+    kind_counts: dict[str, int] = {}
     for n in nodes:
-        kinds[n["kind"]] = kinds.get(n["kind"], 0) + 1
-    summary_parts = [f"{c} {k}s" for k, c in sorted(kinds.items(), key=lambda x: -x[1])]
+        kind_counts[n["kind"]] = kind_counts.get(n["kind"], 0) + 1
+    summary_parts = [f"{c} {k}s" for k, c in sorted(kind_counts.items(), key=lambda x: -x[1])]
 
     text = (
         f"Topology graph{ns_label}: {len(nodes)} resources, {len(edges)} relationships. "
         f"Resources: {', '.join(summary_parts)}."
     )
 
-    component = {
+    component: dict = {
         "kind": "topology",
         "title": f"Topology{ns_label}",
         "description": f"{len(nodes)} resources, {len(edges)} relationships",
+        "layout_hint": layout_hint or "top-down",
+        "include_metrics": include_metrics,
+        "group_by": group_by,
         "nodes": nodes,
         "edges": edges,
     }

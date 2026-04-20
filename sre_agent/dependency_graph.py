@@ -368,6 +368,92 @@ class DependencyGraph:
         }
 
 
+# Metrics cache
+_metrics_cache: dict[str, tuple[float, tuple[dict, dict]]] = {}
+_METRICS_TTL = 30
+
+
+def _fetch_metrics(namespace: str = "") -> tuple[dict[str, dict], dict[str, dict]]:
+    """Fetch CPU/memory metrics from metrics-server with 30s TTL cache.
+
+    Returns (node_metrics_by_name, pod_metrics_by_key) where key is "namespace/name".
+    Returns ({}, {}) if metrics-server is unavailable.
+    """
+    cache_key = namespace or "__all__"
+    now = time.time()
+    cached = _metrics_cache.get(cache_key)
+    if cached and now - cached[0] < _METRICS_TTL:
+        return cached[1]
+
+    node_metrics: dict[str, dict] = {}
+    pod_metrics: dict[str, dict] = {}
+
+    try:
+        from .errors import ToolError
+        from .k8s_client import get_core_client, get_custom_client, safe
+        from .units import format_cpu, format_memory, parse_cpu_millicores, parse_memory_bytes
+
+        custom = get_custom_client()
+
+        raw_nodes = safe(lambda: custom.list_cluster_custom_object("metrics.k8s.io", "v1beta1", "nodes"))
+        if not isinstance(raw_nodes, ToolError):
+            core = get_core_client()
+            node_list = safe(lambda: core.list_node())
+            capacity_map: dict[str, dict] = {}
+            if not isinstance(node_list, ToolError):
+                for n in node_list.items:
+                    cap = n.status.capacity or {}
+                    capacity_map[n.metadata.name] = {
+                        "cpu": str(cap.get("cpu", "0")),
+                        "memory": str(cap.get("memory", "0")),
+                    }
+            for item in raw_nodes.get("items", []):
+                name = item["metadata"]["name"]
+                usage = item.get("usage", {})
+                cap = capacity_map.get(name, {})
+                cpu_usage_m = parse_cpu_millicores(usage.get("cpu", "0"))
+                cpu_cap_m = parse_cpu_millicores(cap.get("cpu", "0"))
+                mem_usage_b = parse_memory_bytes(usage.get("memory", "0"))
+                mem_cap_b = parse_memory_bytes(cap.get("memory", "0"))
+                node_metrics[name] = {
+                    "cpu_usage": format_cpu(cpu_usage_m),
+                    "cpu_capacity": format_cpu(cpu_cap_m),
+                    "memory_usage": format_memory(mem_usage_b),
+                    "memory_capacity": format_memory(mem_cap_b),
+                    "cpu_usage_m": cpu_usage_m,
+                    "cpu_capacity_m": cpu_cap_m,
+                    "memory_usage_b": mem_usage_b,
+                    "memory_capacity_b": mem_cap_b,
+                }
+
+        if namespace:
+            raw_pods = safe(
+                lambda: custom.list_namespaced_custom_object("metrics.k8s.io", "v1beta1", namespace, "pods")
+            )
+        else:
+            raw_pods = safe(lambda: custom.list_cluster_custom_object("metrics.k8s.io", "v1beta1", "pods"))
+        if not isinstance(raw_pods, ToolError):
+            for item in raw_pods.get("items", []):
+                ns = item["metadata"]["namespace"]
+                name = item["metadata"]["name"]
+                containers = item.get("containers", [])
+                total_cpu_m = sum(parse_cpu_millicores(c.get("usage", {}).get("cpu", "0")) for c in containers)
+                total_mem_b = sum(parse_memory_bytes(c.get("usage", {}).get("memory", "0")) for c in containers)
+                pod_metrics[f"{ns}/{name}"] = {
+                    "cpu_usage": format_cpu(total_cpu_m),
+                    "memory_usage": format_memory(total_mem_b),
+                    "cpu_usage_m": total_cpu_m,
+                    "memory_usage_b": total_mem_b,
+                }
+
+    except Exception:
+        logger.debug("Metrics-server unavailable for topology enrichment", exc_info=True)
+
+    result = (node_metrics, pod_metrics)
+    _metrics_cache[cache_key] = (now, result)
+    return result
+
+
 # Singleton
 _graph: DependencyGraph | None = None
 

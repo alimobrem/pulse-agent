@@ -314,6 +314,38 @@
       "rollback_available": true,
       "retry_attempts": 0,
       "transient_failures": 0
+    },
+    {
+      "scenario_id": "release_physical_topology",
+      "category": "sre",
+      "description": "Generate physical topology showing hardware utilization with metrics.",
+      "tool_calls": [
+        "get_topology_graph"
+      ],
+      "rejected_tools": 0,
+      "duration_seconds": 15,
+      "user_confirmed_resolution": true,
+      "final_response": "Physical topology shows 3 nodes with 12 pods. worker-1 is at 78% CPU and 65% memory, worker-2 at 42% CPU. No hardware overload detected but worker-1 is approaching capacity.",
+      "verification_passed": true,
+      "rollback_available": false,
+      "retry_attempts": 0,
+      "transient_failures": 0
+    },
+    {
+      "scenario_id": "release_network_topology",
+      "category": "sre",
+      "description": "Generate network flow topology for connectivity debugging.",
+      "tool_calls": [
+        "get_topology_graph"
+      ],
+      "rejected_tools": 0,
+      "duration_seconds": 12,
+      "user_confirmed_resolution": true,
+      "final_response": "Network topology for production: Route web-route routes to Service web-svc which selects 3 pods. NetworkPolicy deny-all applies to all pods. No connectivity issues.",
+      "verification_passed": true,
+      "rollback_available": false,
+      "retry_attempts": 0,
+      "transient_failures": 0
     }
   ],
   "description": "End-to-end SRE and security scenarios that must pass before shipping a release"

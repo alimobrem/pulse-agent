@@ -422,17 +422,37 @@ register_component(
 register_component(
     ComponentKind(
         name="topology",
-        description="Interactive resource dependency graph with health status",
+        description="Interactive resource dependency graph with health status and perspective filtering",
         category="visualization",
         required_fields=["nodes", "edges"],
-        optional_fields=["title", "description"],
+        optional_fields=["title", "description", "layout_hint", "include_metrics", "group_by"],
         title_required=False,
         example={
             "kind": "topology",
-            "title": "Namespace Topology",
-            "nodes": [{"id": "1", "kind": "Pod", "name": "web", "namespace": "default", "status": "healthy"}],
-            "edges": [{"source": "1", "target": "2", "relationship": "owns"}],
+            "title": "Physical Topology — production",
+            "layout_hint": "grouped",
+            "include_metrics": True,
+            "group_by": "node",
+            "nodes": [
+                {
+                    "id": "1",
+                    "kind": "Node",
+                    "name": "worker-1",
+                    "namespace": "",
+                    "status": "healthy",
+                    "group": "worker-1",
+                }
+            ],
+            "edges": [{"source": "1", "target": "2", "relationship": "schedules"}],
         },
-        prompt_hint="topology — Interactive dependency graph. Use get_topology_graph() to create.",
+        prompt_hint=(
+            "topology — Interactive dependency graph. Use get_topology_graph() to create.\n"
+            "Perspective patterns:\n"
+            "  Physical: kinds='Node,Pod' layout_hint='grouped' include_metrics=true group_by='node'\n"
+            "  Logical: kinds='Deployment,ReplicaSet,Pod,ConfigMap,Secret,PVC,ServiceAccount' layout_hint='top-down'\n"
+            "  Network: kinds='Route,Ingress,Service,Pod,NetworkPolicy' layout_hint='left-to-right'\n"
+            "  Multi-Tenant: kinds='Namespace,Pod,Node' layout_hint='grouped' include_metrics=true group_by='namespace'\n"
+            "  Helm: kinds='HelmRelease,Deployment,StatefulSet,Service,ConfigMap,Secret' layout_hint='grouped'"
+        ),
     )
 )
