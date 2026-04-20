@@ -158,3 +158,35 @@ Investigation prompts wrap cluster data in delimiters:
 - Monitor auto-fix: 3 per scan cycle
 - Daily investigations: 20 (configurable)
 - Confirmation timeout: 120 seconds
+
+## Security Fixes (Phase 1 — v2.5.0)
+
+### IDOR (Insecure Direct Object Reference) — Fixed
+**Issue:** View tools bypassed ownership checks when `db.get_view()` returned `None` (view not found), falling back to cluster-wide queries without owner filtering. This allowed users to access views they didn't own by crafting requests for non-existent view IDs, which would then return all views in the cluster.
+
+**Fix (commit 439f404):** Removed ownership bypass fallback from `update_dashboard`, `delete_dashboard`, `clone_view`, and `share_view`. All view mutations now strictly enforce ownership via `db.get_view(view_id, user_id)` and reject requests if the view is not found or not owned by the requesting user.
+
+### HMAC Key Derivation Mismatch — Fixed
+**Issue:** Share token signing used a different key derivation method than verification, causing all share token validations to fail. `_sign_share_token()` used `hashlib.sha256(settings.ws_token.encode()).digest()[:16]` while `_verify_share_token()` used raw `settings.ws_token.encode()[:16]`.
+
+**Fix (commit 299a4d1):** Unified key derivation to use SHA-256 hash consistently in both sign and verify functions. Share tokens now validate correctly.
+
+### ReDoS (Regular Expression Denial of Service) — Fixed
+**Issue:** The `GET /log-counts` endpoint accepted user-supplied regex patterns without validation, allowing attackers to supply catastrophic backtracking patterns like `(a+)+b` to cause CPU exhaustion and service degradation.
+
+**Fix (commit 953b78f):** Added input validation to reject regex patterns with:
+- Nested quantifiers (e.g., `(a+)+`, `(x*)*`)
+- Excessive alternation branches (>10 `|` operators)
+- Dangerous lookahead patterns
+
+Patterns are validated before being passed to Prometheus query_range.
+
+### Clone Mutation (Post-Share Snapshot Bypass) — Fixed
+**Issue:** The `clone_view` tool allowed cloning from original view definitions, even after a share token was generated. This meant any mutations to the original view after sharing would propagate to all claimants who used the share token later, violating snapshot semantics.
+
+**Fix (commit c6d6488):** `share_view` now creates a snapshot of the view at share time and stores it in the share token record. `clone_view` always clones from the snapshot (if available), ensuring claimants receive the exact view definition that existed when the share token was created, regardless of subsequent mutations to the original view.
+
+### Namespace Scoping (Privilege Escalation) — Fixed
+**Issue:** The `GET /topology` and `POST /blast-radius` endpoints did not enforce namespace scoping, allowing users to retrieve topology data and blast radius analysis across the entire cluster, even if they only had access to specific namespaces.
+
+**Fix (commit ee359bb):** Both endpoints now filter resources by the `namespace` query parameter. If a namespace is provided, only resources in that namespace are included in the topology graph and blast radius analysis. This prevents privilege escalation by restricting visibility to authorized namespaces only.

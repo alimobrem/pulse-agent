@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-Pulse Agent — AI-powered OpenShift/Kubernetes SRE and Security agent built on Claude. Connects to live clusters via the K8s API and uses Claude Opus for diagnostics, incident triage, and automated remediation. v2.5.0, Protocol v2, 135 tools (99 native + 36 MCP), 7 skills (built-in: sre, security, view_designer, capacity_planner, plan-builder, postmortem, slo-management), 18 scanners, tests, 73 PromQL recipes, 15 eval suites, 170 scenarios, 116 eval prompts. 40 modules (k8s_tools/12, monitor/11, api/15, plus decorators.py, tool_predictor.py) — no file over 910 lines. Python 3.11+, Mypy clean (0 errors), ruff clean. Migration version 017 (slo_definitions). Auto-routing orchestrator with typo auto-correction (~130 K8s misspellings), hard pre-route regex rules, and pre-route handoff in skill classifier. Centralized Pydantic config (no raw os.environ). Generative views: tools return component specs for rich UI rendering, user-scoped custom dashboards with share/clone. Multi-datasource live tables with K8s watches + PromQL/log enrichment + sparkline charts. Tool usage tracking: full audit log with chain intelligence. Adaptive tool selection: TF-IDF + LLM fallback + chain expansion. ORCA multi-signal skill selector (6-channel fusion, 5 active by default, parallel multi-skill execution max 2 with Sonnet synthesis), phased plan execution, dependency graph (17 resource types, 10 relationships, 5 topology perspectives with metrics enrichment), auto-postmortems, SLO registry. ALWAYS_INCLUDE trimmed from 12 to 5. Release gate: 99.6% (release suite avg).
+Pulse Agent — AI-powered OpenShift/Kubernetes SRE and Security agent built on Claude. Connects to live clusters via the K8s API and uses Claude Opus for diagnostics, incident triage, and automated remediation. v2.5.0, Protocol v2, 135 tools (99 native + 36 MCP), 7 skills (built-in: sre, security, view_designer, capacity_planner, plan-builder, postmortem, slo-management), 22 scanners (18 reactive + 4 predictive trend scanners), tests, 73 PromQL recipes, 15 eval suites, 170 scenarios, 116 eval prompts. 40 modules (k8s_tools/12, monitor/11, api/18, plus decorators.py, tool_predictor.py) — no file over 910 lines. Python 3.11+, Mypy clean (0 errors), ruff clean. Migration version 017 (slo_definitions). Auto-routing orchestrator with typo auto-correction (~130 K8s misspellings), hard pre-route regex rules, and pre-route handoff in skill classifier. Centralized Pydantic config (no raw os.environ). Generative views: tools return component specs for rich UI rendering, user-scoped custom dashboards with share/clone. Multi-datasource live tables with K8s watches + PromQL/log enrichment + sparkline charts. Tool usage tracking: full audit log with chain intelligence. Adaptive tool selection: TF-IDF + LLM fallback + chain expansion. ORCA multi-signal skill selector (6-channel fusion, 5 active by default, parallel multi-skill execution max 2 with Sonnet synthesis), phased plan execution, dependency graph (17 resource types, 10 relationships, 5 topology perspectives with metrics enrichment), auto-postmortems, SLO registry. ALWAYS_INCLUDE trimmed from 12 to 5. Release gate: 99.6% (release suite avg).
 
 **UI Repository:** `/Users/amobrem/ali/OpenshiftPulse` — React/TypeScript frontend (Zustand stores, incident views, admin dashboard).
 
@@ -77,16 +77,16 @@ cd /Users/amobrem/ali/OpenshiftPulse && ./deploy/deploy.sh --set agent.mcp.enabl
 - `/ws/monitor` — Autonomous cluster monitoring (push-based findings, investigations, actions)
 - Auth: `PULSE_AGENT_WS_TOKEN` via query param, constant-time comparison
 
-### Monitor System (`monitor/` package — 10 modules)
+### Monitor System (`monitor/` package — 11 modules)
 - `MonitorSession` (session.py) — periodic cluster scanning (default 60s interval)
-- 17 scanners: crashlooping pods, pending pods, failed deployments, node pressure, expiring certs, firing alerts, OOM-killed pods, image pull errors, degraded operators, DaemonSet gaps, HPA saturation, security posture + 5 audit scanners (config changes, RBAC, deployments, warning events, auth)
+- 22 scanners: 18 reactive scanners (crashlooping pods, pending pods, failed deployments, node pressure, expiring certs, firing alerts, OOM-killed pods, image pull errors, degraded operators, DaemonSet gaps, HPA saturation, security posture + 5 audit scanners: config changes, RBAC, deployments, warning events, auth) + 4 predictive trend scanners (memory pressure forecast, disk pressure forecast, HPA exhaustion trend, error rate acceleration) using Prometheus `predict_linear()`
 - Auto-fix at trust level 3+: deletes crashlooping pods, restarts failed deployments
 - Confidence scores on all findings, investigations, and action proposals
 - `resolution` events emitted when findings resolve (auto-fix or self-healed)
 - Reasoning chains: investigation prompt requests evidence + alternatives_considered
 - Noise learning: tracks transient findings, assigns `noiseScore` to suppress flaky alerts
 - `findings_snapshot` event for stale finding cleanup
-- Morning briefing: `GET /briefing` endpoint aggregates recent activity with time-aware greeting
+- Morning briefing: `GET /briefing` endpoint aggregates recent activity with time-aware greeting, live scanner data, and trend findings with priority items
 - Simulation preview: `POST /simulate` predicts impact, risk, duration, reversibility
 - WebSocket `feedback` message type for UI-driven memory learning (thumbs up/down)
 - Approved confirmations recorded as implicit positive feedback for memory
@@ -171,10 +171,9 @@ Rules: validate inputs with `_validate_k8s_name()`/`_validate_k8s_namespace()`, 
 - `runbooks.py` — 10 built-in SRE runbooks injected into system prompt
 - `memory/` — self-improving agent (PostgreSQL, pattern detection, learned runbooks)
 - `view_tools.py` — `namespace_summary` + `create_dashboard` + `get_topology_graph` tools for generative views. Topology supports 5 perspectives (Physical, Logical, Network, Multi-Tenant, Helm) via `kinds`, `relationships`, `layout_hint`, `include_metrics`, `group_by` params
+- `view_mutations.py` — view mutation tools extracted from view_tools.py (`update_dashboard`, `delete_dashboard`, `clone_view`, `share_view`)
 - `dependency_graph.py` — live K8s resource dependency graph (17 types, 10 relationships), `_fetch_metrics()` with 30s TTL cache for metrics-server enrichment
-- `quality_engine.py` — unified dashboard validation + quality scoring (merged view_validator + view_critic)
-- `view_validator.py` — backward-compatible wrapper around quality_engine
-- `view_critic.py` — backward-compatible wrapper around quality_engine
+- `quality_engine.py` — unified dashboard validation + quality scoring (includes `critique_view` moved from view_critic.py)
 - `db.py` — Database abstraction (PostgreSQL production, SQLite tests) + view CRUD functions
 - `k8s_client.py` — lazy-initialized K8s client with `safe()` wrapper
 - `context_bus.py` — shared context bus for cross-agent communication
@@ -189,7 +188,9 @@ Rules: validate inputs with `_validate_k8s_name()`/`_validate_k8s_namespace()`, 
 - `evals/compare.py` — A/B comparison of eval suite results (baseline vs current, regression detection)
 - `evals/ablation.py` — prompt section ablation framework (tests impact of removing prompt sections on scores)
 - `evals/history.py` — eval history DB (eval_runs table, trend queries, migration 006)
-- `skill_loader.py` — skill package loader, tool selection, query routing, MCP inclusion, pre-route handoff (consolidates harness tool selection); ALWAYS_INCLUDE trimmed to 5 (adaptive), self-describe tools conditional
+- `skill_loader.py` — skill package loader, tool selection, MCP inclusion (consolidates harness tool selection); ALWAYS_INCLUDE trimmed to 5 (adaptive), self-describe tools conditional
+- `skill_router.py` — query routing and pre-route handoff logic extracted from skill_loader.py
+- `tool_categories.py` — tool category definitions extracted from skill_loader.py
 - `mcp_client.py` — MCP server connections (SSE transport), tool/prompt discovery, registration
 - `self_tools.py` — 12 self-description + 4 skill management + 3 K8s API introspection tools
 - `prompt_log.py` — prompt logging (hash, sections, tokens, version tracking) for observability and debugging
@@ -201,6 +202,10 @@ Rules: validate inputs with `_validate_k8s_name()`/`_validate_k8s_namespace()`, 
 - `eval_scaffolder.py` — auto-generates eval scenarios when skills are scaffolded (`scaffold_eval_from_plan()` for full scenario + replay fixture, `scaffold_eval_from_investigation()` for scenario only); writes to non-gating `scaffolded` eval suite
 - `selector_learning.py` — ORCA selector weight learning from feedback signals (routing decisions, overrides, outcomes)
 - `synthesis.py` — parallel skill output merging with Sonnet-powered conflict detection and fallback concatenation
+- `trend_scanners.py` — 4 predictive scanners (memory pressure, disk pressure, HPA exhaustion, error rate acceleration) using Prometheus predict_linear()
+- `api/scanner_rest.py` — scanner REST endpoints extracted from monitor_rest.py
+- `api/fix_rest.py` — fix history REST endpoints extracted from monitor_rest.py
+- `api/topology_rest.py` — topology REST endpoints extracted from monitor_rest.py
 
 **Frontend:** `/toolbox` consolidates tools, skills, MCP, components, usage, analytics into single page.
 
