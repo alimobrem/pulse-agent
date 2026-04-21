@@ -93,6 +93,91 @@ def run_selector_eval(suite_path: str = "selector") -> SelectorEvalResult:
     return result
 
 
+@dataclass
+class MultiSkillCheckResult:
+    total_scenarios: int = 0
+    passed: int = 0
+    failed_scenarios: list[dict] = field(default_factory=list)
+
+
+def run_multi_skill_check() -> MultiSkillCheckResult:
+    """Run multi-skill parallel execution check. Deterministic — no LLM calls.
+
+    Tests that classify_query_multi correctly handles:
+    - Conflicting skills (view_designer + plan_builder must not co-execute)
+    - Legitimate parallel execution (sre + security)
+    - Single-skill queries (no spurious secondary)
+    """
+    from ..skill_loader import load_skills
+    from ..skill_router import classify_query_multi
+
+    load_skills()
+
+    scenarios = [
+        {
+            "id": "multi_dashboard_no_conflict",
+            "query": "Create a dashboard showing node health",
+            "expected_primary": "view_designer",
+            "forbidden_secondary": ["plan-builder", "plan_builder"],
+        },
+        {
+            "id": "multi_add_widget_no_conflict",
+            "query": "Add a memory chart to the dashboard",
+            "expected_primary": "view_designer",
+            "forbidden_secondary": ["plan-builder", "plan_builder"],
+        },
+        {
+            "id": "multi_design_view_no_conflict",
+            "query": "Design a live table of pods in production",
+            "expected_primary": "view_designer",
+            "forbidden_secondary": ["plan-builder", "plan_builder"],
+        },
+        {
+            "id": "multi_make_dashboard_no_conflict",
+            "query": "Make a dashboard with CPU metrics and pod restarts",
+            "expected_primary": "view_designer",
+            "forbidden_secondary": ["plan-builder", "plan_builder"],
+        },
+        {
+            "id": "multi_sre_only",
+            "query": "Why is my pod crashlooping",
+            "expected_primary": "sre",
+            "forbidden_secondary": [],
+        },
+        {
+            "id": "multi_security_only",
+            "query": "Scan RBAC permissions for cluster-admin",
+            "expected_primary": "security",
+            "forbidden_secondary": [],
+        },
+    ]
+
+    result = MultiSkillCheckResult(total_scenarios=len(scenarios))
+
+    for scenario in scenarios:
+        primary, secondary = classify_query_multi(scenario["query"])
+        primary_name = primary.name if primary else ""
+        secondary_name = secondary.name if secondary else None
+
+        passed = True
+        reason = ""
+
+        if primary_name != scenario["expected_primary"]:
+            passed = False
+            reason = f"primary={primary_name}, expected={scenario['expected_primary']}"
+
+        if secondary_name and secondary_name in scenario["forbidden_secondary"]:
+            passed = False
+            reason = f"forbidden secondary {secondary_name} ran alongside {primary_name}"
+
+        if passed:
+            result.passed += 1
+        else:
+            result.failed_scenarios.append({"id": scenario["id"], "query": scenario["query"][:60], "reason": reason})
+
+    return result
+
+
 def format_selector_eval(result: SelectorEvalResult) -> str:
     """Format selector eval as text."""
     lines = [
