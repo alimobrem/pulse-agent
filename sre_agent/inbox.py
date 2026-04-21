@@ -164,19 +164,21 @@ def list_inbox_items(
     offset: int = 0,
 ) -> dict[str, Any]:
     db = get_database()
+    exclude_clause = None
     if status == "archived":
-        exclude_statuses = "()"
+        exclude_clause = None
     elif status == "agent_cleared":
-        exclude_statuses = "('archived')"
+        exclude_clause = "status NOT IN ('archived')"
     elif status == "__needs_attention__":
-        exclude_statuses = "('archived', 'agent_cleared', 'new', 'agent_reviewing')"
+        exclude_clause = "status NOT IN ('archived', 'agent_cleared', 'new', 'agent_reviewing')"
         status = None
     else:
-        exclude_statuses = "('archived', 'agent_cleared')"
+        exclude_clause = "status NOT IN ('archived', 'agent_cleared')"
     where_parts = [
         "(snoozed_until IS NULL OR snoozed_until <= ?)",
-        f"status NOT IN {exclude_statuses}",
     ]
+    if exclude_clause:
+        where_parts.append(exclude_clause)
     params: list[Any] = [int(time.time())]
 
     if item_type:
