@@ -787,10 +787,8 @@ def _phase_a_triage() -> int:
             if action == "dismiss" and confidence >= 0.7 and not is_user_created:
                 new_status = "agent_cleared"
                 metadata["dismiss_reason"] = triage.get("assessment", "")
-            elif action == "investigate":
-                new_status = "agent_reviewing"
             else:
-                new_status = "triaged"
+                new_status = "agent_reviewing"
 
             now = int(time.time())
             db.execute(
@@ -850,7 +848,7 @@ def _phase_b_investigate() -> int:
 
             if result.get("summary"):
                 investigation_id = result.get("id", f"inv-{item['id']}")
-                save_investigation(result)
+                save_investigation(result, finding_dict)
 
                 metadata = item.get("metadata", {})
                 metadata["investigation_id"] = investigation_id
