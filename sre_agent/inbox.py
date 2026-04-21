@@ -466,6 +466,116 @@ def _deserialize_row(row: Any) -> dict[str, Any]:
     return d
 
 
+# -- Monitor integration --
+
+
+def bridge_finding_to_inbox(finding: dict[str, Any]) -> str:
+    """Create or update an inbox item from a monitor finding."""
+    finding_id = finding.get("id", "")
+    db = get_database()
+
+    existing = db.fetchone(
+        "SELECT * FROM inbox_items WHERE finding_id = ? AND status NOT IN ('resolved', 'archived')",
+        (finding_id,),
+    )
+
+    if existing:
+        existing_item = _deserialize_row(existing)
+        existing_resources = existing_item.get("resources", [])
+        new_resources = finding.get("resources", [])
+        existing_names = {(r["kind"], r["name"], r["namespace"]) for r in existing_resources}
+        for r in new_resources:
+            if (r["kind"], r["name"], r["namespace"]) not in existing_names:
+                existing_resources.append(r)
+
+        now = int(time.time())
+        priority = compute_priority_score(
+            severity=finding.get("severity"),
+            confidence=finding.get("confidence", 0),
+            noise_score=finding.get("noiseScore", 0),
+            created_at=existing_item["created_at"],
+            due_date=None,
+        )
+        db.execute(
+            "UPDATE inbox_items SET resources = ?, priority_score = ?, updated_at = ? WHERE id = ?",
+            (json.dumps(existing_resources), priority, now, existing_item["id"]),
+        )
+        db.commit()
+        return existing_item["id"]
+
+    item = {
+        "item_type": "finding",
+        "title": finding.get("title", "Unknown finding"),
+        "summary": finding.get("summary", ""),
+        "severity": finding.get("severity", "warning"),
+        "confidence": finding.get("confidence", 0),
+        "noise_score": finding.get("noiseScore", 0),
+        "namespace": finding.get("namespace"),
+        "resources": finding.get("resources", []),
+        "correlation_key": f"{finding.get('category', 'unknown')}:{finding.get('namespace', '')}",
+        "created_by": "system:monitor",
+        "finding_id": finding_id,
+    }
+    return create_inbox_item(item)
+
+
+def resolve_finding_inbox_item(finding_id: str) -> bool:
+    """Resolve an inbox item when its linked finding resolves."""
+    db = get_database()
+    row = db.fetchone(
+        "SELECT * FROM inbox_items WHERE finding_id = ? AND status NOT IN ('resolved', 'archived')",
+        (finding_id,),
+    )
+    if row is None:
+        return False
+
+    item = _deserialize_row(row)
+    if item["status"] == "verifying":
+        return update_item_status(item["id"], "resolved")
+
+    now = int(time.time())
+    db.execute(
+        "UPDATE inbox_items SET status = 'resolved', resolved_at = ?, updated_at = ? WHERE id = ?",
+        (now, now, item["id"]),
+    )
+    db.commit()
+    _publish_inbox_event("inbox_item_resolved", item["id"], {"resolved_at": now})
+    return True
+
+
+def run_generator_cycle() -> None:
+    """Run all generators, upsert items, auto-resolve cleared conditions."""
+    from .inbox_generators import run_all_generators
+
+    generated = run_all_generators()
+
+    generated_keys: set[str] = set()
+    for item in generated:
+        corr_key = item.get("correlation_key", "")
+        if corr_key:
+            generated_keys.add(corr_key)
+        upsert_inbox_item(item)
+
+    db = get_database()
+    rows = db.fetchall(
+        """SELECT id, correlation_key, metadata FROM inbox_items
+        WHERE item_type = 'assessment'
+        AND status IN ('new', 'acknowledged')""",
+    )
+    generator_rows = [r for r in rows if _deserialize_row(r).get("metadata", {}).get("generator")]
+    now = int(time.time())
+    for row in generator_rows:
+        if row["correlation_key"] and row["correlation_key"] not in generated_keys:
+            db.execute(
+                "UPDATE inbox_items SET status = 'resolved', resolved_at = ?, updated_at = ? WHERE id = ?",
+                (now, now, row["id"]),
+            )
+    db.commit()
+
+    unsnooze_expired()
+    prune_old_items()
+
+
 # -- Agent tool --
 
 from .decorators import beta_tool

@@ -1208,6 +1208,23 @@ class MonitorSession:
 
         await self.process_handoffs()
 
+        # Bridge findings to inbox (fast DB upserts, no API calls)
+        try:
+            from ..inbox import bridge_finding_to_inbox
+
+            for finding in new_findings:
+                bridge_finding_to_inbox(finding)
+        except Exception:
+            pass
+
+        # Run inbox generators async — don't block the scan cycle
+        try:
+            from ..inbox import run_generator_cycle
+
+            asyncio.create_task(asyncio.to_thread(run_generator_cycle))
+        except Exception:
+            pass
+
         # Improvement flywheel — runs on schedule alongside scans
         await self._run_flywheel()
 
