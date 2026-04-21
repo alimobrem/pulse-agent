@@ -390,11 +390,21 @@ async def websocket_auto_agent(websocket: WebSocket):
 
             q_lower = content.lower()
             if last_mode == "view_designer" and intent != "view_designer":
-                # Break out of view_designer only for unambiguous SRE/Security keywords.
+                # Break out of view_designer for:
+                # 1. Unambiguous SRE/Security keywords
+                # 2. Non-conflicting custom skills (postmortem, capacity_planner)
                 # Never switch to a conflicting skill (plan_builder) mid-session.
                 has_hard_sre = any(kw in q_lower for kw in _HARD_SWITCH_SRE)
                 has_hard_sec = any(kw in q_lower for kw in _HARD_SWITCH_SEC)
-                if not has_hard_sre and not has_hard_sec:
+                try:
+                    from ..skill_loader import get_skill
+
+                    current = get_skill(last_mode)
+                    is_conflicting = current and intent in (current.conflicts_with or [])
+                except Exception:
+                    is_conflicting = False
+                is_custom_skill = intent not in ("sre", "security", "view_designer", "both") and not is_conflicting
+                if not has_hard_sre and not has_hard_sec and not is_custom_skill:
                     intent = "view_designer"
             elif last_mode == "security" and intent == "sre" and not is_strong:
                 pass  # Let it switch to SRE
