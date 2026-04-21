@@ -19,32 +19,76 @@ def _setup():
 _setup()
 
 
-class TestViewDesignerConflicts:
-    def test_dashboard_creation_no_secondary(self):
+class TestExclusiveSkills:
+    """Exclusive skills never get a secondary — they own the full request lifecycle."""
+
+    def test_view_designer_is_exclusive(self):
+        from sre_agent.skill_loader import get_skill
+
+        vd = get_skill("view_designer")
+        assert vd is not None
+        assert vd.exclusive is True
+
+    def test_postmortem_is_exclusive(self):
+        from sre_agent.skill_loader import get_skill
+
+        pm = get_skill("postmortem")
+        assert pm is not None
+        assert pm.exclusive is True
+
+    def test_sre_is_not_exclusive(self):
+        from sre_agent.skill_loader import get_skill
+
+        sre = get_skill("sre")
+        assert sre is not None
+        assert sre.exclusive is False
+
+    def test_exclusive_skill_never_gets_secondary(self):
         from sre_agent.skill_router import classify_query_multi
 
         primary, secondary = classify_query_multi("Create a dashboard showing node health: CPU/memory utilization")
         assert primary.name == "view_designer"
-        assert secondary is None or secondary.name != "plan-builder", (
-            f"plan-builder should not run alongside view_designer, got secondary={secondary.name if secondary else None}"
-        )
+        assert secondary is None, f"Exclusive skill got secondary={secondary.name if secondary else None}"
 
-    def test_add_widget_no_secondary(self):
+    def test_exclusive_add_widget(self):
         from sre_agent.skill_router import classify_query_multi
 
         primary, secondary = classify_query_multi("Add a memory chart to the dashboard")
         assert primary.name == "view_designer"
-        assert secondary is None or secondary.name != "plan-builder"
+        assert secondary is None
 
-    def test_conflicts_with_field_set(self):
+
+class TestConflictsWithBidirectional:
+    """conflicts_with is checked in both directions."""
+
+    def test_view_designer_conflicts_with_plan_builder(self):
         from sre_agent.skill_loader import get_skill
 
         vd = get_skill("view_designer")
         assert vd is not None
         assert "plan-builder" in vd.conflicts_with
 
+    def test_bidirectional_check(self):
+        from sre_agent.skill_router import _skills_conflict
+
+        class FakeSkill:
+            def __init__(self, name, conflicts):
+                self.name = name
+                self.conflicts_with = conflicts
+
+        a = FakeSkill("view_designer", ["plan-builder"])
+        b = FakeSkill("plan-builder", [])
+        assert _skills_conflict(a, b) is True
+        assert _skills_conflict(b, a) is True
+
+        c = FakeSkill("sre", [])
+        d = FakeSkill("security", [])
+        assert _skills_conflict(c, d) is False
+
 
 class TestNonConflictingMultiSkill:
+    """Non-exclusive, non-conflicting skills CAN run in parallel."""
+
     def test_sre_security_can_run_together(self):
         from sre_agent.skill_router import classify_query_multi
 

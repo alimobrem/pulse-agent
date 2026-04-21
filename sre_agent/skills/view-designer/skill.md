@@ -73,6 +73,7 @@ examples:
 success_criteria: "Dashboard renders with real data, no empty widgets"
 risk_level: low
 conflicts_with: [plan-builder]
+exclusive: true
 supported_components:
   - data_table
   - chart

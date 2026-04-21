@@ -94,6 +94,7 @@ class Skill:
     risk_level: str = "low"  # low | medium | high — high triggers approval gate
     trigger_patterns: list[str] = field(default_factory=list)  # regex patterns for hard pre-route
     conflicts_with: list[str] = field(default_factory=list)  # conflicting skill names
+    exclusive: bool = False  # if True, never run a secondary skill alongside this one
     supported_components: list[str] = field(default_factory=list)  # UI component types this skill renders
     generated_by: str = ""
     reviewed: bool = True
@@ -123,6 +124,7 @@ class Skill:
             "success_criteria": self.success_criteria,
             "risk_level": self.risk_level,
             "conflicts_with": self.conflicts_with,
+            "exclusive": self.exclusive,
             "supported_components": self.supported_components,
             "generated_by": self.generated_by,
             "reviewed": self.reviewed,
@@ -224,6 +226,7 @@ def _parse_skill_md(path: Path) -> Skill | None:
         risk_level=meta.get("risk_level", "low"),
         trigger_patterns=meta.get("trigger_patterns", []),
         conflicts_with=meta.get("conflicts_with", []),
+        exclusive=meta.get("exclusive", False),
         supported_components=meta.get("supported_components", []),
         generated_by=meta.get("generated_by", ""),
         reviewed=meta.get("reviewed", True),

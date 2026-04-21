@@ -34,6 +34,7 @@ examples:
 success_criteria: "Postmortem includes timeline, root cause, contributing factors, prevention recommendations"
 risk_level: low
 conflicts_with: []
+exclusive: true
 supported_components:
   - status_list
   - key_value

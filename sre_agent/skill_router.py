@@ -253,11 +253,8 @@ def _run_orca_for_secondary(query: str, primary, *, context: dict | None = None)
     if len(parts) >= 2:
         for part in parts:
             sub_skill = classify_query(part, context=context)
-            if sub_skill.name != primary.name:
-                if primary.name not in (sub_skill.conflicts_with or []) and sub_skill.name not in (
-                    primary.conflicts_with or []
-                ):
-                    return sub_skill
+            if sub_skill.name != primary.name and not _skills_conflict(primary, sub_skill):
+                return sub_skill
 
     return None
 
@@ -279,10 +276,20 @@ def classify_query_multi(query: str, *, context: dict | None = None) -> tuple:
     if not settings.multi_skill:
         return primary, None
 
+    if primary.exclusive:
+        return primary, None
+
     secondary = _run_orca_for_secondary(query, primary, context=context)
-    if secondary and primary.conflicts_with and secondary.name in primary.conflicts_with:
+    if secondary and _skills_conflict(primary, secondary):
         return primary, None
     return primary, secondary
+
+
+def _skills_conflict(a, b) -> bool:
+    """Check if two skills conflict bidirectionally."""
+    if a.name in (b.conflicts_with or []):
+        return True
+    return b.name in (a.conflicts_with or [])
 
 
 def _llm_classify(query: str):
