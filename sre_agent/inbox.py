@@ -634,9 +634,10 @@ def _phase_a_triage() -> int:
     rows = db.fetchall(
         """SELECT * FROM inbox_items
         WHERE status = 'new'
-        AND (metadata NOT LIKE '%"triaged"%' OR metadata NOT LIKE '%true%')
+        AND (metadata NOT LIKE ? OR metadata NOT LIKE ?)
         ORDER BY priority_score DESC
         LIMIT 5""",
+        ('%"triaged"%', "%true%"),
     )
     if not rows:
         return 0
