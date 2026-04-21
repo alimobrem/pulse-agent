@@ -63,9 +63,13 @@ class TestScanCycleLatency:
         ):
             session = _make_session()
 
-            start = time.monotonic()
-            asyncio.new_event_loop().run_until_complete(session.run_scan())
-            elapsed = time.monotonic() - start
+            loop = asyncio.new_event_loop()
+            try:
+                start = time.monotonic()
+                loop.run_until_complete(session.run_scan())
+                elapsed = time.monotonic() - start
+            finally:
+                loop.close()
 
             assert elapsed < SCAN_CYCLE_THRESHOLD_S, (
                 f"Scan cycle took {elapsed:.2f}s (threshold: {SCAN_CYCLE_THRESHOLD_S}s)"
@@ -85,5 +89,9 @@ class TestScanCycleLatency:
             patch("sre_agent.k8s_client.get_version_client", return_value=MagicMock()),
         ):
             session = _make_session()
-            asyncio.new_event_loop().run_until_complete(session.run_scan())
+            loop = asyncio.new_event_loop()
+            try:
+                loop.run_until_complete(session.run_scan())
+            finally:
+                loop.close()
             assert session._scan_counter >= 1

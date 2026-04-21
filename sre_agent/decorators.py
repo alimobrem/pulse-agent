@@ -10,6 +10,7 @@ from __future__ import annotations
 import functools
 import logging
 import time
+from collections import deque
 from collections.abc import Callable
 from typing import Any, TypeVar, Union
 
@@ -22,9 +23,10 @@ ToolReturn = Union[str, "tuple[str, dict[str, Any] | None]"]
 
 _logger = logging.getLogger("pulse_agent.tools")
 
-#: Collected timing data — tool_name → list of execution times (seconds).
-#: Populated only when PULSE_AGENT_PERF_TRACE is set.
-tool_timings: dict[str, list[float]] = {}
+#: Collected timing data — tool_name → deque of recent execution times (seconds).
+#: Capped at 1000 entries per tool to prevent unbounded growth.
+_MAX_TIMING_ENTRIES = 1000
+tool_timings: dict[str, deque[float]] = {}
 
 _PERF_TRACE = False
 
@@ -37,7 +39,7 @@ def enable_perf_trace() -> None:
 
 def get_tool_timings() -> dict[str, list[float]]:
     """Return collected timing data."""
-    return dict(tool_timings)
+    return {k: list(v) for k, v in tool_timings.items()}
 
 
 def reset_tool_timings() -> None:
@@ -62,7 +64,7 @@ def beta_tool(fn: F) -> F:
             return fn(*args, **kwargs)
         finally:
             elapsed = time.monotonic() - start
-            tool_timings.setdefault(fn.__name__, []).append(elapsed)
+            tool_timings.setdefault(fn.__name__, deque(maxlen=_MAX_TIMING_ENTRIES)).append(elapsed)
             if elapsed > 2.0:
                 _logger.warning("Slow tool %s: %.2fs", fn.__name__, elapsed)
 
