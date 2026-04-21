@@ -46,6 +46,7 @@ Defines the REST and WebSocket protocol between the Pulse UI and Pulse Agent. Bo
 | `POST` | `/views/claim/:token` | token | Claim a shared view |
 | `GET` | `/views/:id/versions` | token | List version history for a view |
 | `POST` | `/views/:id/undo` | token | Undo last change to a view |
+| `POST` | `/views/:id/actions` | token + owner | Execute a tool from an action_button component |
 | `GET` | `/fix-history/summary` | token | Aggregated fix stats: totals, success/rollback rates, by-category with auto_fixed/confirmation_required, trend (query: `days` 1-90) |
 | `GET` | `/monitor/coverage` | token | Scanner coverage: active/total scanners, coverage %, category breakdown, per-scanner finding stats (query: `days` 1-90) |
 | `GET` | `/monitor/history` | token | Paginated scan run history (query: `limit`, `offset`) |

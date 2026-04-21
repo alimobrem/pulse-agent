@@ -412,6 +412,8 @@ _TOOL_COMPONENTS: dict[str, list[str]] = {
     "get_pod_metrics": ["data_table"],
     "create_dashboard": ["tabs", "grid", "section"],
     "plan_dashboard": ["tabs", "grid", "section"],
+    "emit_component": ["action_button", "confidence_badge", "resolution_tracker", "blast_radius"],
+    "get_topology_graph": ["topology", "blast_radius"],
 }
 
 
