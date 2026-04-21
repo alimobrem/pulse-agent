@@ -472,8 +472,15 @@ async def rest_execute_action(
             turn_number=0,
             agent_mode="view_action",
             tool_name=action,
-            tool_input=action_input,
-            result_text=text[:500],
+            tool_category=None,
+            input_data=action_input,
+            status=meta.get("status", "error"),
+            error_message=meta.get("error_message"),
+            error_category=meta.get("error_category"),
+            duration_ms=0,
+            result_bytes=meta.get("result_bytes", 0),
+            requires_confirmation=action in WRITE_TOOL_NAMES,
+            was_confirmed=True,
         )
     except Exception:
         pass
