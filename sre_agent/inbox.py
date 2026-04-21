@@ -175,7 +175,7 @@ def list_inbox_items(
     elif status == "agent_cleared":
         exclude_clause = "status NOT IN ('archived')"
     elif status == "__needs_attention__":
-        exclude_clause = "status NOT IN ('archived', 'agent_cleared', 'new', 'agent_reviewing')"
+        exclude_clause = "status NOT IN ('archived', 'agent_cleared', 'new', 'agent_reviewing', 'agent_review_failed')"
         status = None
     else:
         exclude_clause = "status NOT IN ('archived', 'agent_cleared')"
@@ -723,7 +723,7 @@ def _phase_a_triage() -> int:
     db = get_database()
     rows = db.fetchall(
         """SELECT * FROM inbox_items
-        WHERE status = 'new'
+        WHERE status IN ('new', 'agent_review_failed')
         AND (metadata NOT LIKE ? OR metadata NOT LIKE ?)
         ORDER BY priority_score DESC
         LIMIT 5""",
