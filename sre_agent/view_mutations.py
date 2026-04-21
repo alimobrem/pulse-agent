@@ -405,6 +405,7 @@ def optimize_view(view_id: str, strategy: str = "group") -> str:
             'group' — Group widgets by topic (compute, memory, workloads, alerts, etc.) and wrap in sections.
             'reflow' — Re-run the layout engine on current widgets without grouping.
             'compact' — Remove empty space, pack widgets tightly.
+            'fit' — Recalculate widget heights based on actual content (fixes clipped sections).
     """
     from . import db
     from .layout_engine import compute_layout
@@ -451,6 +452,19 @@ def optimize_view(view_id: str, strategy: str = "group") -> str:
         return _signal(
             "view_updated",
             f"Compacted {len(positioned)} widgets — removed gaps and re-packed.",
+            view_id=view_id,
+        )
+
+    if strategy == "fit":
+        patched = []
+        for w in layout:
+            updated = {k: v for k, v in w.items() if k not in ("x", "y", "w", "h")}
+            patched.append(updated)
+        positioned, positions = _apply_positions(patched)
+        db.update_view(view_id, owner, layout=positioned, positions=positions)
+        return _signal(
+            "view_updated",
+            f"Re-fit heights for {len(positioned)} widgets based on content analysis.",
             view_id=view_id,
         )
 

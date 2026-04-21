@@ -393,3 +393,128 @@ class TestNamespaceDashboard:
             assert 0 in layout, f"Kind '{kind}' produced no layout"
             assert layout[0]["w"] > 0
             assert layout[0]["h"] > 0
+
+
+class TestContainerHeights:
+    """Container components (section, tabs, grid) must size based on children."""
+
+    def test_section_height_scales_with_children(self):
+        empty = [{"kind": "section", "components": []}]
+        full = [
+            {
+                "kind": "section",
+                "components": [
+                    {"kind": "metric_card", "title": "A", "value": "1"},
+                    {"kind": "metric_card", "title": "B", "value": "2"},
+                    {"kind": "metric_card", "title": "C", "value": "3"},
+                ],
+            }
+        ]
+        h_empty = compute_layout(empty)[0]["h"]
+        h_full = compute_layout(full)[0]["h"]
+        assert h_full > h_empty, f"Section with 3 children (h={h_full}) should be taller than empty (h={h_empty})"
+
+    def test_section_uses_components_key(self):
+        """Section children are stored under 'components', not 'items'."""
+        wrong_key = [{"kind": "section", "items": [{"kind": "chart"}] * 3}]
+        right_key = [{"kind": "section", "components": [{"kind": "chart"}] * 3}]
+        h_wrong = compute_layout(wrong_key)[0]["h"]
+        h_right = compute_layout(right_key)[0]["h"]
+        assert h_right > h_wrong, "Section should read 'components' key, not 'items'"
+
+    def test_empty_section_minimum_height(self):
+        components = [{"kind": "section", "components": []}]
+        layout = compute_layout(components)
+        assert layout[0]["h"] >= 6
+
+    def test_tabs_height_based_on_tallest_tab(self):
+        components = [
+            {
+                "kind": "tabs",
+                "tabs": [
+                    {"label": "Small", "components": [{"kind": "metric_card", "title": "X", "value": "1"}]},
+                    {
+                        "label": "Large",
+                        "components": [
+                            {"kind": "chart", "series": [{"label": "a"}]},
+                            {"kind": "data_table", "rows": [{}] * 5},
+                        ],
+                    },
+                ],
+            }
+        ]
+        layout = compute_layout(components)
+        assert layout[0]["h"] >= 15, f"Tabs with chart+table tab should be tall, got h={layout[0]['h']}"
+
+    def test_nested_section_in_tabs(self):
+        components = [
+            {
+                "kind": "tabs",
+                "tabs": [
+                    {
+                        "label": "Nested",
+                        "components": [
+                            {
+                                "kind": "section",
+                                "components": [
+                                    {"kind": "metric_card", "title": "A", "value": "1"},
+                                    {"kind": "metric_card", "title": "B", "value": "2"},
+                                ],
+                            },
+                        ],
+                    },
+                ],
+            }
+        ]
+        layout = compute_layout(components)
+        assert layout[0]["h"] >= 12, f"Tabs with nested section should be tall, got h={layout[0]['h']}"
+
+    def test_grid_height_recursive(self):
+        components = [
+            {
+                "kind": "grid",
+                "columns": 2,
+                "items": [
+                    {"kind": "chart", "series": [{"label": "a"}]},
+                    {"kind": "chart", "series": [{"label": "b"}]},
+                ],
+            }
+        ]
+        layout = compute_layout(components)
+        assert layout[0]["h"] >= 10, f"Grid with 2 charts should be tall, got h={layout[0]['h']}"
+
+    def test_recursion_depth_guard(self):
+        deep = {
+            "kind": "section",
+            "components": [
+                {
+                    "kind": "section",
+                    "components": [
+                        {
+                            "kind": "section",
+                            "components": [
+                                {
+                                    "kind": "section",
+                                    "components": [
+                                        {
+                                            "kind": "section",
+                                            "components": [
+                                                {
+                                                    "kind": "section",
+                                                    "components": [
+                                                        {"kind": "metric_card", "title": "Deep", "value": "1"},
+                                                    ],
+                                                }
+                                            ],
+                                        }
+                                    ],
+                                }
+                            ],
+                        }
+                    ],
+                }
+            ],
+        }
+        components = [deep]
+        layout = compute_layout(components)
+        assert layout[0]["h"] > 0, "Deeply nested components should not error"

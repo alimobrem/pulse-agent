@@ -66,6 +66,51 @@ def _resolve_width(hint: str | None, default: int) -> int:
     return _WIDTH_MAP.get(hint, default)
 
 
+def _estimate_nested_height(component: dict, _depth: int = 0) -> int:
+    """Recursively estimate grid-unit height a component needs.
+
+    For leaf components, returns the default from _KIND_MAP.
+    For containers, sums children heights plus overhead.
+    """
+    if _depth > 5:
+        return _KIND_MAP.get(component.get("kind", ""), ("container", 4, 5))[2]
+
+    kind = component.get("kind", "")
+
+    if kind == "section":
+        children = component.get("components", [])
+        if not children:
+            return 6
+        overhead = 3
+        return overhead + sum(_estimate_nested_height(c, _depth + 1) for c in children)
+
+    if kind == "tabs":
+        tabs = component.get("tabs", [])
+        if not tabs:
+            return 6
+        overhead = 3
+        tallest = max(
+            (sum(_estimate_nested_height(c, _depth + 1) for c in tab.get("components", [])) for tab in tabs),
+            default=4,
+        )
+        return overhead + tallest
+
+    if kind == "grid":
+        items = component.get("items", [])
+        cols = component.get("columns", 4)
+        if not items:
+            return 5
+        overhead = 1
+        row_heights: list[int] = []
+        for row_start in range(0, len(items), cols):
+            row_items = items[row_start : row_start + cols]
+            row_heights.append(max(_estimate_nested_height(item, _depth + 1) for item in row_items))
+        return overhead + sum(row_heights)
+
+    _, _, default_h = _KIND_MAP.get(kind, ("container", 4, 5))
+    return _resolve_height(None, default_h, component)
+
+
 def _resolve_height(hint: str | None, default: int, component: dict) -> int:
     """Resolve a height hint, applying content-aware sizing."""
     kind = component.get("kind", "")
@@ -97,17 +142,8 @@ def _resolve_height(hint: str | None, default: int, component: dict) -> int:
     elif kind == "info_card_grid":
         cards = len(component.get("cards", []))
         default = max(4, 2 + min(math.ceil(cards * 1.5), 6))
-    elif kind == "section":
-        items = component.get("items", [])
-        default = max(6, 2 + len(items) * 4)  # Scale with child count
-    elif kind == "grid":
-        items = component.get("items", [])
-        cols = component.get("columns", 4)
-        rows = max(1, math.ceil(len(items) / cols))
-        if any(item.get("kind") == "metric_card" for item in items):
-            default = min(8, 1 + rows * 3)
-        else:
-            default = min(12, 1 + rows * 4)
+    elif kind in ("section", "tabs", "grid"):
+        default = _estimate_nested_height(component)
     elif kind == "bar_list":
         items = len(component.get("items", []))
         default = 2 + min(items, 8) if items else 4
