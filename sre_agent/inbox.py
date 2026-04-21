@@ -9,6 +9,20 @@ from typing import Any
 
 from .db import get_database
 
+# -- WebSocket event helper --
+
+
+def _publish_inbox_event(event_type: str, item_id: str, data: dict[str, Any] | None = None) -> None:
+    try:
+        from .api.view_events import ViewEvent, get_event_bus
+
+        get_event_bus().publish(ViewEvent(event_type=event_type, view_id=item_id, actor="system", data=data or {}))
+    except Exception:
+        pass
+
+
+# -- Status lifecycles per item type --
+
 VALID_TRANSITIONS: dict[str, dict[str, list[str]]] = {
     "finding": {
         "new": ["acknowledged"],
@@ -120,6 +134,11 @@ def create_inbox_item(item: dict[str, Any]) -> str:
         ),
     )
     db.commit()
+    _publish_inbox_event(
+        "inbox_item_created",
+        item_id,
+        {"title": item["title"], "severity": item.get("severity"), "item_type": item["item_type"]},
+    )
     return item_id
 
 
@@ -256,6 +275,8 @@ def update_item_status(item_id: str, new_status: str) -> bool:
         (new_status, now, resolved_at, item_id),
     )
     db.commit()
+    event_type = "inbox_item_resolved" if new_status == "resolved" else "inbox_item_updated"
+    _publish_inbox_event(event_type, item_id, {"status": new_status})
     return True
 
 
@@ -271,6 +292,7 @@ def claim_item(item_id: str, username: str) -> bool:
         (username, now, now, item_id),
     )
     db.commit()
+    _publish_inbox_event("inbox_item_claimed", item_id, {"claimed_by": username, "claimed_at": now})
 
     if item["status"] == "new":
         if item["item_type"] == "task":
@@ -442,3 +464,64 @@ def _deserialize_row(row: Any) -> dict[str, Any]:
         if json_field in d and isinstance(d[json_field], str):
             d[json_field] = json.loads(d[json_field])
     return d
+
+
+# -- Agent tool --
+
+from .decorators import beta_tool
+from .tool_registry import register_tool
+
+URGENCY_MAP = {"today": 8, "this_week": 168, "this_month": 720}
+
+
+@beta_tool
+def create_inbox_task(
+    title: str,
+    detail: str = "",
+    urgency: str = "this_week",
+    namespace: str = "",
+    resource_name: str = "",
+    resource_kind: str = "",
+) -> str:
+    """Add a task to the ops inbox.
+
+    Use when the user asks to track, remind, or follow up on something.
+    Examples: "remind me to rotate certs", "add task: review HPA config",
+    "track the CoreDNS upgrade".
+
+    Args:
+        title: Short description
+        detail: Actionable guidance on what to do
+        urgency: today (8h), this_week (168h), this_month (720h)
+        namespace: Optional K8s namespace
+        resource_name: Optional resource name
+        resource_kind: Optional resource kind (Deployment, Node, etc.)
+    """
+    if urgency not in URGENCY_MAP:
+        return f"Error: invalid urgency '{urgency}'. Use: today, this_week, this_month"
+
+    hours = URGENCY_MAP[urgency]
+    now = int(time.time())
+
+    resources = []
+    if resource_name and resource_kind:
+        resources.append({"kind": resource_kind, "name": resource_name, "namespace": namespace or "default"})
+
+    item = {
+        "item_type": "task",
+        "title": title,
+        "summary": detail,
+        "severity": "warning" if hours <= 8 else "info",
+        "confidence": 1.0,
+        "noise_score": 0,
+        "namespace": namespace or None,
+        "resources": resources,
+        "created_by": "system:agent",
+        "due_date": now + hours * 3600,
+        "metadata": {"urgency_hours": hours, "generator": "agent"},
+    }
+    item_id = create_inbox_item(item)
+    return f"Created inbox task: {title} (id: {item_id}, due: {urgency})"
+
+
+register_tool(create_inbox_task)

@@ -174,7 +174,21 @@ TOOL_CATEGORIES = {
         ],
     },
     "operations": {
-        "keywords": ["drain", "cordon", "uncordon", "apply", "yaml", "maintenance", "upgrade", "update", "config"],
+        "keywords": [
+            "drain",
+            "cordon",
+            "uncordon",
+            "apply",
+            "yaml",
+            "maintenance",
+            "upgrade",
+            "update",
+            "config",
+            "task",
+            "remind",
+            "track",
+            "inbox",
+        ],
         "tools": [
             "cordon_node",
             "uncordon_node",
@@ -183,6 +197,7 @@ TOOL_CATEGORIES = {
             "get_configmap",
             "list_operator_subscriptions",
             "exec_command",
+            "create_inbox_task",
         ],
     },
     "gitops": {

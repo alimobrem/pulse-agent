@@ -2,6 +2,22 @@
 
 import time
 
+import pytest
+
+
+@pytest.fixture(autouse=True)
+def _clean_inbox():
+    """Clear inbox_items between tests to prevent cross-test pollution."""
+    yield
+    try:
+        from sre_agent.db import get_database
+
+        db = get_database()
+        db.execute("DELETE FROM inbox_items")
+        db.commit()
+    except Exception:
+        pass
+
 
 def _make_item(**overrides):
     """Helper to create an inbox item dict with defaults."""
@@ -332,3 +348,28 @@ class TestCleanup:
 
         pruned = prune_old_items(max_age_days=30)
         assert pruned >= 1
+
+
+class TestAgentTool:
+    def test_create_inbox_task_tool(self):
+        from sre_agent.inbox import create_inbox_task
+
+        result = create_inbox_task(
+            title="Rotate TLS certs",
+            detail="Certs expire in 5 days on ingress controller",
+            urgency="this_week",
+            namespace="production",
+        )
+        assert "created" in result.lower() or "inb-" in result.lower()
+
+    def test_create_inbox_task_urgency_today(self):
+        from sre_agent.inbox import create_inbox_task
+
+        result = create_inbox_task(title="Urgent task", urgency="today")
+        assert "inb-" in result
+
+    def test_create_inbox_task_invalid_urgency(self):
+        from sre_agent.inbox import create_inbox_task
+
+        result = create_inbox_task(title="Bad urgency", urgency="invalid")
+        assert "error" in result.lower() or "invalid" in result.lower()
