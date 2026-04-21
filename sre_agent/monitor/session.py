@@ -1215,7 +1215,7 @@ class MonitorSession:
             for finding in new_findings:
                 bridge_finding_to_inbox(finding)
         except Exception:
-            pass
+            logger.exception("Failed to bridge findings to inbox")
 
         # Run inbox generators async — don't block the scan cycle
         try:
@@ -1223,7 +1223,7 @@ class MonitorSession:
 
             asyncio.create_task(asyncio.to_thread(run_generator_cycle))
         except Exception:
-            pass
+            logger.exception("Failed to start inbox generator cycle")
 
         # Improvement flywheel — runs on schedule alongside scans
         await self._run_flywheel()

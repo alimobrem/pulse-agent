@@ -646,6 +646,7 @@ def _phase_a_triage() -> int:
 
         model = get_settings().model
     except Exception:
+        _inbox_logger.exception("Failed to get settings for triage")
         return 0
 
     triaged = 0
@@ -855,7 +856,7 @@ def run_generator_cycle() -> None:
     try:
         agent_process_inbox()
     except Exception:
-        pass
+        _inbox_logger.exception("agent_process_inbox failed")
 
 
 # -- Agent tool --
