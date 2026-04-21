@@ -431,9 +431,17 @@ async def rest_execute_action(
     if action in WRITE_TOOL_NAMES and settings.max_trust_level < 1:
         return JSONResponse(status_code=403, content={"error": "Write operations disabled (trust level 0)"})
 
+    # Check ownership OR team visibility
     view = db.get_view(view_id, owner)
     if view is None:
-        return JSONResponse(status_code=404, content={"error": "View not found or not owned by you"})
+        view = db.get_view(view_id)
+        if view is None or view.get("visibility") != "team":
+            return JSONResponse(status_code=404, content={"error": "View not found or not accessible"})
+
+    # min_trust_level on action_button (set by agent/monitor when creating the view)
+    min_trust = body.get("min_trust_level", 0)
+    if isinstance(min_trust, int) and min_trust > settings.max_trust_level:
+        return JSONResponse(status_code=403, content={"error": f"Action requires trust level {min_trust}"})
 
     from ..agent import _circuit_breaker
 
@@ -472,6 +480,21 @@ async def rest_execute_action(
     except Exception:
         pass
 
+    # Publish event for WebSocket broadcast
+    try:
+        from .view_events import ViewEvent, get_event_bus
+
+        get_event_bus().publish(
+            ViewEvent(
+                event_type="view_action_executed",
+                view_id=view_id,
+                actor=owner,
+                data={"action": action, "label": body.get("label", action)},
+            )
+        )
+    except Exception:
+        pass
+
     status_code = 200 if meta.get("status") == "success" else 500
     return JSONResponse(
         status_code=status_code,
@@ -480,6 +503,7 @@ async def rest_execute_action(
             "component": component,
             "status": meta.get("status", "error"),
             "error_message": meta.get("error_message"),
+            "executed_by": owner,
         },
     )
 
@@ -508,6 +532,16 @@ async def rest_transition_status(
     ok = db.transition_view_status(view_id, owner, new_status)
     if not ok:
         return JSONResponse(status_code=409, content={"error": "Invalid status transition"})
+
+    try:
+        from .view_events import ViewEvent, get_event_bus
+
+        get_event_bus().publish(
+            ViewEvent(event_type="view_status_changed", view_id=view_id, actor=owner, data={"status": new_status})
+        )
+    except Exception:
+        pass
+
     return {"transitioned": True, "view_id": view_id, "status": new_status}
 
 
@@ -524,6 +558,14 @@ async def rest_claim_view(
     ok = db.claim_view(view_id, owner)
     if not ok:
         return JSONResponse(status_code=409, content={"error": "Cannot claim this view"})
+
+    try:
+        from .view_events import ViewEvent, get_event_bus
+
+        get_event_bus().publish(ViewEvent(event_type="view_claimed", view_id=view_id, actor=owner))
+    except Exception:
+        pass
+
     return {"claimed": True, "view_id": view_id, "claimed_by": owner}
 
 

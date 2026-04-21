@@ -158,3 +158,72 @@ class TestFindByFinding:
     def test_find_returns_none_for_unknown(self):
         view = db_module.get_view_by_finding("nonexistent")
         assert view is None
+
+
+class TestClaimExpiry:
+    def test_expire_stale_claims(self):
+        view_id = _create_incident()
+        db_module.claim_view(view_id, "bob")
+        # Manually backdate the claim
+        from sre_agent.db import get_database
+
+        db = get_database()
+        db.execute("UPDATE views SET claimed_at = '2020-01-01T00:00:00+00:00' WHERE id = ?", (view_id,))
+        db.commit()
+        count = db_module.expire_stale_claims()
+        assert count == 1
+        view = db_module.get_view(view_id)
+        assert view["claimed_by"] is None
+
+    def test_fresh_claims_not_expired(self):
+        view_id = _create_incident()
+        db_module.claim_view(view_id, "bob")
+        count = db_module.expire_stale_claims()
+        assert count == 0
+        view = db_module.get_view(view_id)
+        assert view["claimed_by"] == "bob"
+
+
+class TestFindSimilarViews:
+    def test_finds_similar_by_title(self):
+        db_module.save_view(
+            "alice",
+            "cv-old",
+            "CrashLoop in payment-api",
+            "",
+            _layout(),
+            view_type="incident",
+            status="resolved",
+            visibility="team",
+        )
+        results = db_module.find_similar_views("CrashLoop in payment-api pod")
+        assert len(results) >= 1
+        assert results[0]["id"] == "cv-old"
+
+    def test_no_match_for_unrelated(self):
+        db_module.save_view(
+            "alice",
+            "cv-old",
+            "CrashLoop in payment-api",
+            "",
+            _layout(),
+            view_type="incident",
+            status="resolved",
+            visibility="team",
+        )
+        results = db_module.find_similar_views("TLS certificate expiry")
+        assert len(results) == 0
+
+    def test_only_returns_terminal_status(self):
+        db_module.save_view(
+            "alice",
+            "cv-active",
+            "CrashLoop in payment-api",
+            "",
+            _layout(),
+            view_type="incident",
+            status="investigating",
+            visibility="team",
+        )
+        results = db_module.find_similar_views("CrashLoop in payment-api")
+        assert len(results) == 0

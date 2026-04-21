@@ -733,6 +733,53 @@ def unclaim_view(view_id: str, username: str) -> bool:
     return getattr(cursor, "rowcount", 1) > 0
 
 
+_CLAIM_EXPIRY_MINUTES = 30
+
+
+def expire_stale_claims() -> int:
+    """Clear claims older than 30 minutes. Returns count of expired claims."""
+    from datetime import UTC, datetime, timedelta
+
+    db = get_database()
+    cutoff = (datetime.now(UTC) - timedelta(minutes=_CLAIM_EXPIRY_MINUTES)).isoformat()
+    cursor = db.execute(
+        "UPDATE views SET claimed_by = NULL, claimed_at = NULL WHERE claimed_by IS NOT NULL AND claimed_at < ?",
+        (cutoff,),
+    )
+    db.commit()
+    count = getattr(cursor, "rowcount", 0)
+    if count:
+        logger.info("Expired %d stale view claims", count)
+    return count
+
+
+@_db_safe
+def find_similar_views(title: str, view_type: str = "incident", limit: int = 3) -> list[dict]:
+    """Find resolved/completed views with similar titles. Uses trigram-like word overlap."""
+    db = get_database()
+    rows = db.fetchall(
+        "SELECT id, title, status, view_type, updated_at FROM views "
+        "WHERE view_type = ? AND status IN ('resolved', 'completed', 'acknowledged', 'archived') "
+        "ORDER BY updated_at DESC LIMIT 50",
+        (view_type,),
+    )
+    if not rows:
+        return []
+
+    title_words = set(title.lower().split())
+    scored: list[tuple[float, dict]] = []
+    for row in rows:
+        row_words = set(row["title"].lower().split())
+        if not title_words or not row_words:
+            continue
+        overlap = len(title_words & row_words) / max(len(title_words | row_words), 1)
+        if overlap >= 0.3:
+            scored.append((overlap, row))
+
+    scored.sort(key=lambda x: x[0], reverse=True)
+    return [row for _, row in scored[:limit]]
+
+
 @_db_safe
 def get_view_by_finding(finding_id: str) -> dict | None:
     """Find a view linked to a monitor finding. Returns the most recent match."""
