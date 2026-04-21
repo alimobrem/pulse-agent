@@ -186,6 +186,42 @@ async def rest_escalate_item(item_id: str):
     return {"ok": True, "finding_id": finding_id}
 
 
+@router.post("/inbox/{item_id}/restore")
+async def rest_restore_item(item_id: str):
+    from ..inbox import restore_item
+
+    ok = restore_item(item_id)
+    if not ok:
+        raise HTTPException(status_code=400, detail="Item is not agent_cleared or not found")
+    return {"ok": True}
+
+
+@router.get("/inbox/{item_id}/investigation")
+async def rest_get_investigation(item_id: str):
+    item = get_inbox_item(item_id)
+    if item is None:
+        raise HTTPException(status_code=404, detail="Item not found")
+    inv_id = (item.get("metadata") or {}).get("investigation_id")
+    if not inv_id:
+        raise HTTPException(status_code=404, detail="No investigation linked")
+    from ..db import get_database as _get_db
+
+    db = _get_db()
+    row = db.fetchone("SELECT * FROM investigations WHERE id = ?", (inv_id,))
+    if row is None:
+        raise HTTPException(status_code=404, detail="Investigation not found")
+    result = dict(row)
+    for field in ("resources", "evidence", "alternatives_considered"):
+        if field in result and isinstance(result[field], str):
+            import json as _json
+
+            try:
+                result[field] = _json.loads(result[field])
+            except (ValueError, TypeError):
+                pass
+    return result
+
+
 @router.post("/inbox/{item_id}/pin")
 async def rest_pin_item(item_id: str, owner: str = Depends(get_owner)):
     ok = pin_item(item_id, owner)

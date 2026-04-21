@@ -20,26 +20,34 @@ def _publish_event(event_type: str, item_id: str, data: dict[str, Any] | None = 
 
 VALID_TRANSITIONS: dict[str, dict[str, list[str]]] = {
     "finding": {
-        "new": ["acknowledged"],
-        "acknowledged": ["investigating", "new"],
+        "new": ["acknowledged", "agent_reviewing", "agent_cleared"],
+        "agent_reviewing": ["acknowledged", "agent_cleared"],
+        "acknowledged": ["investigating", "agent_reviewing", "new"],
         "investigating": ["action_taken"],
         "action_taken": ["verifying"],
         "verifying": ["resolved", "investigating"],
         "resolved": ["archived"],
+        "agent_cleared": ["new", "acknowledged", "archived"],
     },
     "task": {
-        "new": ["in_progress"],
+        "new": ["in_progress", "agent_reviewing", "agent_cleared"],
+        "agent_reviewing": ["in_progress", "agent_cleared"],
         "in_progress": ["resolved"],
         "resolved": ["archived"],
+        "agent_cleared": ["new", "in_progress", "archived"],
     },
     "alert": {
-        "new": ["acknowledged"],
+        "new": ["acknowledged", "agent_reviewing", "agent_cleared"],
+        "agent_reviewing": ["acknowledged", "agent_cleared"],
         "acknowledged": ["resolved", "new"],
         "resolved": ["archived"],
+        "agent_cleared": ["new", "acknowledged", "archived"],
     },
     "assessment": {
-        "new": ["acknowledged"],
+        "new": ["acknowledged", "agent_reviewing", "agent_cleared"],
+        "agent_reviewing": ["acknowledged", "agent_cleared"],
         "acknowledged": ["escalated", "new"],
+        "agent_cleared": ["new", "acknowledged", "archived"],
     },
 }
 
@@ -156,9 +164,10 @@ def list_inbox_items(
     offset: int = 0,
 ) -> dict[str, Any]:
     db = get_database()
+    exclude_statuses = "('archived', 'agent_cleared')" if status != "agent_cleared" else "('archived')"
     where_parts = [
         "(snoozed_until IS NULL OR snoozed_until <= ?)",
-        "status NOT IN ('archived')",
+        f"status NOT IN {exclude_statuses}",
     ]
     params: list[Any] = [int(time.time())]
 
@@ -247,10 +256,15 @@ def get_inbox_stats() -> dict[str, int]:
     )
     stats: dict[str, int] = {}
     total = 0
+    cleared = 0
     for row in rows:
         stats[row["status"]] = row["cnt"]
-        total += row["cnt"]
+        if row["status"] == "agent_cleared":
+            cleared += row["cnt"]
+        else:
+            total += row["cnt"]
     stats["total"] = total
+    stats["agent_cleared"] = cleared
     return stats
 
 
@@ -483,6 +497,11 @@ def pin_item(item_id: str, username: str) -> bool:
     return True
 
 
+def restore_item(item_id: str) -> bool:
+    """Restore an agent-cleared item back to new status (user override)."""
+    return update_item_status(item_id, "new")
+
+
 def dismiss_item(item_id: str) -> bool:
     item = get_inbox_item(item_id)
     if item is None:
@@ -584,11 +603,23 @@ def bridge_finding_to_inbox(finding: dict[str, Any]) -> str:
     return create_inbox_item(item)
 
 
-def auto_triage_new_items() -> int:
-    """Auto-triage untriaged inbox items using Claude for recommendations."""
-    import logging
+_last_investigate_time: dict[str, float] = {}
+_INVESTIGATE_COOLDOWN = 120
 
-    logger = logging.getLogger("pulse_agent.inbox")
+import logging as _logging
+import re as _re
+
+_inbox_logger = _logging.getLogger("pulse_agent.inbox")
+
+
+def agent_process_inbox() -> None:
+    """Three-phase agent pipeline: triage → investigate → recommend."""
+    _phase_a_triage()
+    _phase_b_investigate()
+
+
+def _phase_a_triage() -> int:
+    """Triage new items: classify as investigate/dismiss/monitor and act."""
     db = get_database()
     rows = db.fetchall(
         """SELECT * FROM inbox_items
@@ -603,8 +634,7 @@ def auto_triage_new_items() -> int:
     try:
         from .config import get_settings
 
-        settings = get_settings()
-        model = settings.model
+        model = get_settings().model
     except Exception:
         return 0
 
@@ -614,6 +644,7 @@ def auto_triage_new_items() -> int:
         if item.get("metadata", {}).get("triaged"):
             continue
 
+        is_user_created = item["created_by"] not in ("system:monitor", "system:agent")
         resources_str = ", ".join(f"{r['kind']}/{r['name']}" for r in item.get("resources", []))
         prompt = (
             f"Triage this {item['item_type']}: {item['title']}. "
@@ -621,9 +652,10 @@ def auto_triage_new_items() -> int:
             f"Resources: {resources_str or 'none'}. "
             f"Namespace: {item.get('namespace') or 'cluster-wide'}. "
             f"Severity: {item.get('severity', 'unknown')}. "
+            f"{'This was manually created by a user — default to investigate, do not dismiss.' if is_user_created else ''}"
             f"Provide: (1) a one-sentence assessment, (2) recommended action (investigate/dismiss/monitor), "
-            f"(3) urgency (immediate/soon/can-wait). Reply in JSON: "
-            f'{{"assessment": "...", "action": "investigate|dismiss|monitor", "urgency": "immediate|soon|can-wait"}}'
+            f"(3) urgency (immediate/soon/can-wait), (4) confidence 0-1. Reply in JSON: "
+            f'{{"assessment": "...", "action": "investigate|dismiss|monitor", "urgency": "immediate|soon|can-wait", "confidence": 0.8}}'
         )
 
         try:
@@ -631,46 +663,127 @@ def auto_triage_new_items() -> int:
 
             client = anthropic.Anthropic()
             response = client.messages.create(
-                model=model,
-                max_tokens=200,
-                messages=[{"role": "user", "content": prompt}],
+                model=model, max_tokens=200, messages=[{"role": "user", "content": prompt}]
             )
             text = response.content[0].text.strip()
 
-            import re
+            match = _re.search(r"\{.*\}", text, _re.DOTALL)
+            if not match:
+                continue
 
-            match = re.search(r"\{.*\}", text, re.DOTALL)
-            if match:
-                import json as _json
+            triage = json.loads(match.group())
+            metadata = item.get("metadata", {})
+            metadata["triaged"] = True
+            metadata["triage_assessment"] = triage.get("assessment", "")
+            metadata["triage_action"] = triage.get("action", "monitor")
+            metadata["triage_urgency"] = triage.get("urgency", "can-wait")
+            metadata["triage_confidence"] = triage.get("confidence", 0.5)
 
-                triage = _json.loads(match.group())
-                metadata = item.get("metadata", {})
-                metadata["triaged"] = True
-                metadata["triage_assessment"] = triage.get("assessment", "")
-                metadata["triage_action"] = triage.get("action", "monitor")
-                metadata["triage_urgency"] = triage.get("urgency", "can-wait")
+            action = triage.get("action", "monitor")
+            confidence = float(triage.get("confidence", 0.5))
 
-                now = int(time.time())
+            if action == "dismiss" and confidence >= 0.7 and not is_user_created:
+                new_status = "agent_cleared"
+                metadata["dismiss_reason"] = triage.get("assessment", "")
+            elif action == "investigate":
+                new_status = "agent_reviewing"
+            else:
                 new_status = "acknowledged"
+
+            now = int(time.time())
+            db.execute(
+                "UPDATE inbox_items SET status = ?, metadata = ?, summary = ?, updated_at = ? WHERE id = ?",
+                (new_status, json.dumps(metadata), triage.get("assessment", item.get("summary", "")), now, item["id"]),
+            )
+            db.commit()
+            _publish_event("inbox_item_updated", item["id"], {"status": new_status})
+            triaged += 1
+            _inbox_logger.info("Triaged %s → %s (%s)", item["id"], new_status, action)
+        except Exception as e:
+            _inbox_logger.debug("Triage failed for %s: %s", item["id"], e)
+
+    return triaged
+
+
+def _phase_b_investigate() -> int:
+    """Investigate items the triage flagged for review using the SRE agent."""
+    db = get_database()
+    rows = db.fetchall(
+        """SELECT * FROM inbox_items
+        WHERE status = 'agent_reviewing'
+        ORDER BY priority_score DESC
+        LIMIT 3""",
+    )
+    if not rows:
+        return 0
+
+    investigated = 0
+    now = time.time()
+
+    for row in rows:
+        item = _deserialize_row(row)
+
+        if now - _last_investigate_time.get(item["id"], 0) < _INVESTIGATE_COOLDOWN:
+            continue
+
+        _last_investigate_time[item["id"]] = now
+
+        finding_dict = {
+            "id": item.get("finding_id") or item["id"],
+            "title": item["title"],
+            "summary": item.get("summary", ""),
+            "severity": item.get("severity", "warning"),
+            "category": item.get("metadata", {}).get("generator", item.get("item_type", "unknown")),
+            "resources": item.get("resources", []),
+            "namespace": item.get("namespace", ""),
+            "confidence": item.get("confidence", 0.5),
+        }
+
+        try:
+            from .monitor.actions import save_investigation
+            from .monitor.investigations import _run_proactive_investigation_sync
+
+            result = _run_proactive_investigation_sync(finding_dict)
+
+            if result.get("summary"):
+                investigation_id = result.get("id", f"inv-{item['id']}")
+                save_investigation(result)
+
+                metadata = item.get("metadata", {})
+                metadata["investigation_id"] = investigation_id
+                metadata["investigation_summary"] = result.get("summary", "")
+                metadata["suspected_cause"] = result.get("suspected_cause", "")
+                metadata["recommended_fix"] = result.get("recommended_fix", "")
+                metadata["investigation_confidence"] = result.get("confidence", 0)
+                metadata["evidence"] = result.get("evidence", [])
+
+                inv_confidence = float(result.get("confidence", 0))
+                recommended_fix = result.get("recommended_fix", "")
+                no_action = any(
+                    phrase in recommended_fix.lower()
+                    for phrase in ["no action", "no issue", "expected behavior", "working as intended", "by design"]
+                )
+
+                if inv_confidence >= 0.85 and no_action:
+                    new_status = "agent_cleared"
+                    metadata["dismiss_reason"] = f"Investigation found no issue: {result.get('summary', '')}"
+                else:
+                    new_status = "acknowledged"
+
+                ts = int(time.time())
                 db.execute(
-                    "UPDATE inbox_items SET status = ?, metadata = ?, summary = ?, updated_at = ? WHERE id = ?",
-                    (
-                        new_status,
-                        json.dumps(metadata),
-                        triage.get("assessment", item.get("summary", "")),
-                        now,
-                        item["id"],
-                    ),
+                    "UPDATE inbox_items SET status = ?, metadata = ?, updated_at = ? WHERE id = ?",
+                    (new_status, json.dumps(metadata), ts, item["id"]),
                 )
                 db.commit()
                 _publish_event("inbox_item_updated", item["id"], {"status": new_status})
-                triaged += 1
-                logger.info("Auto-triaged inbox item %s: %s", item["id"], triage.get("action"))
+                investigated += 1
+                _inbox_logger.info("Investigated %s → %s (confidence: %.2f)", item["id"], new_status, inv_confidence)
         except Exception as e:
-            logger.debug("Auto-triage failed for %s: %s", item["id"], e)
-            continue
+            _inbox_logger.debug("Investigation failed for %s: %s", item["id"], e)
+            update_item_status(item["id"], "acknowledged")
 
-    return triaged
+    return investigated
 
 
 def resolve_finding_inbox_item(finding_id: str) -> bool:
@@ -730,7 +843,7 @@ def run_generator_cycle() -> None:
     prune_old_items()
 
     try:
-        auto_triage_new_items()
+        agent_process_inbox()
     except Exception:
         pass
 
