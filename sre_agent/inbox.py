@@ -259,6 +259,9 @@ def _compute_stats(items: list[dict[str, Any]]) -> dict[str, int]:
     return stats
 
 
+_NEEDS_ATTENTION_EXCLUDE = frozenset({"archived", "agent_cleared", "new", "agent_reviewing", "agent_review_failed"})
+
+
 def get_inbox_stats() -> dict[str, int]:
     db = get_database()
     now = int(time.time())
@@ -272,6 +275,7 @@ def get_inbox_stats() -> dict[str, int]:
     total = 0
     cleared = 0
     archived = 0
+    needs_attention = 0
     for row in rows:
         stats[row["status"]] = row["cnt"]
         if row["status"] == "agent_cleared":
@@ -280,9 +284,12 @@ def get_inbox_stats() -> dict[str, int]:
             archived += row["cnt"]
         else:
             total += row["cnt"]
+        if row["status"] not in _NEEDS_ATTENTION_EXCLUDE:
+            needs_attention += row["cnt"]
     stats["total"] = total
     stats["agent_cleared"] = cleared
     stats["archived"] = archived
+    stats["needs_attention"] = needs_attention
     return stats
 
 
@@ -354,50 +361,64 @@ def _generate_view_for_item(item_id: str, item: dict[str, Any]) -> None:
         )
         db.commit()
 
-        from .view_tools import create_dashboard
+        from .db import save_view
 
+        view_id = f"cv-{uuid.uuid4().hex[:12]}"
         title = f"Investigation: {item['title'][:60]}"
         view_type = "incident" if item["item_type"] == "finding" else "plan"
 
-        result = create_dashboard(
+        layout: list[dict[str, Any]] = []
+        if metadata.get("investigation_summary"):
+            layout.append(
+                {
+                    "kind": "info_card",
+                    "title": "Investigation Summary",
+                    "body": str(metadata["investigation_summary"]),
+                    "props": {
+                        "suspected_cause": str(metadata.get("suspected_cause", "")),
+                        "recommended_fix": str(metadata.get("recommended_fix", "")),
+                    },
+                }
+            )
+        if metadata.get("blast_radius"):
+            layout.append(
+                {
+                    "kind": "blast_radius",
+                    "title": "Blast Radius",
+                    "props": metadata["blast_radius"],
+                }
+            )
+        if item.get("namespace"):
+            layout.append(
+                {
+                    "kind": "namespace_summary",
+                    "title": f"Namespace: {item['namespace']}",
+                    "props": {"namespace": item["namespace"]},
+                }
+            )
+
+        save_view(
+            owner="system",
+            view_id=view_id,
             title=title,
             description=item.get("summary", ""),
+            layout=layout,
             view_type=view_type,
+            status="investigating" if view_type == "incident" else "analyzing",
             trigger_source="agent",
             finding_id=item.get("finding_id") or item_id,
             visibility="team",
         )
 
-        view_id = None
-        if isinstance(result, tuple):
-            _, signal = result
-            if isinstance(signal, dict):
-                view_id = signal.get("view_id") or signal.get("id")
-        elif isinstance(result, str) and "cv-" in result:
-            import re as _re2
-
-            match = _re2.search(r"(cv-[a-f0-9]+)", result)
-            if match:
-                view_id = match.group(1)
-
-        if view_id:
-            metadata["view_status"] = "ready"
-            now = int(time.time())
-            db.execute(
-                "UPDATE inbox_items SET view_id = ?, metadata = ?, updated_at = ? WHERE id = ?",
-                (view_id, json.dumps(metadata), now, item_id),
-            )
-            db.commit()
-            _publish_event("inbox_item_updated", item_id, {"view_id": view_id})
-            _inbox_logger.info("Generated view %s for inbox item %s", view_id, item_id)
-        else:
-            metadata["view_status"] = "failed"
-            db.execute(
-                "UPDATE inbox_items SET metadata = ? WHERE id = ?",
-                (json.dumps(metadata), item_id),
-            )
-            db.commit()
-            _inbox_logger.warning("View generation returned no view_id for %s", item_id)
+        metadata["view_status"] = "ready"
+        now = int(time.time())
+        db.execute(
+            "UPDATE inbox_items SET view_id = ?, metadata = ?, updated_at = ? WHERE id = ?",
+            (view_id, json.dumps(metadata), now, item_id),
+        )
+        db.commit()
+        _publish_event("inbox_item_updated", item_id, {"view_id": view_id})
+        _inbox_logger.info("Generated view %s for inbox item %s", view_id, item_id)
     except Exception:
         _inbox_logger.exception("View generation failed for %s", item_id)
         metadata["view_status"] = "failed"
@@ -666,6 +687,14 @@ def bridge_finding_to_inbox(finding: dict[str, Any]) -> str:
         "SELECT * FROM inbox_items WHERE finding_id = ? AND status NOT IN ('resolved', 'archived')",
         (finding_id,),
     )
+
+    if existing is None:
+        corr_key = f"{finding.get('category', 'unknown')}:{finding.get('namespace', '')}"
+        if corr_key:
+            existing = db.fetchone(
+                "SELECT * FROM inbox_items WHERE correlation_key = ? AND item_type = 'finding' AND status NOT IN ('resolved', 'archived')",
+                (corr_key,),
+            )
 
     if existing:
         existing_item = _deserialize_row(existing)
