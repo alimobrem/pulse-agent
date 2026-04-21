@@ -66,7 +66,7 @@ class TestConflictsWithBidirectional:
 
         vd = get_skill("view_designer")
         assert vd is not None
-        assert "plan-builder" in vd.conflicts_with
+        assert "plan_builder" in vd.conflicts_with
 
     def test_bidirectional_check(self):
         from sre_agent.skill_router import _skills_conflict
@@ -76,8 +76,8 @@ class TestConflictsWithBidirectional:
                 self.name = name
                 self.conflicts_with = conflicts
 
-        a = FakeSkill("view_designer", ["plan-builder"])
-        b = FakeSkill("plan-builder", [])
+        a = FakeSkill("view_designer", ["plan_builder"])
+        b = FakeSkill("plan_builder", [])
         assert _skills_conflict(a, b) is True
         assert _skills_conflict(b, a) is True
 

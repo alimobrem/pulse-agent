@@ -225,7 +225,7 @@ def _parse_skill_md(path: Path) -> Skill | None:
         success_criteria=meta.get("success_criteria", ""),
         risk_level=meta.get("risk_level", "low"),
         trigger_patterns=meta.get("trigger_patterns", []),
-        conflicts_with=meta.get("conflicts_with", []),
+        conflicts_with=[c.replace("-", "_") for c in meta.get("conflicts_with", [])],
         exclusive=meta.get("exclusive", False),
         supported_components=meta.get("supported_components", []),
         generated_by=meta.get("generated_by", ""),
