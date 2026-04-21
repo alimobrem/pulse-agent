@@ -5,49 +5,45 @@ from __future__ import annotations
 from sre_agent.quality_engine import QualityResult, _validate_component
 
 
-class TestConfidenceBadgeValidation:
-    def _validate(self, comp: dict) -> QualityResult:
-        result = QualityResult()
-        _validate_component(comp, result)
-        return result
+def _validate(comp: dict) -> QualityResult:
+    result = QualityResult()
+    _validate_component(comp, result)
+    return result
 
+
+class TestConfidenceBadgeValidation:
     def test_valid(self):
-        r = self._validate({"kind": "confidence_badge", "score": 0.85})
+        r = _validate({"kind": "confidence_badge", "score": 0.85})
         assert not r.errors
 
     def test_missing_score(self):
-        r = self._validate({"kind": "confidence_badge"})
+        r = _validate({"kind": "confidence_badge"})
         assert any("score" in e for e in r.errors)
 
     def test_score_out_of_range_high(self):
-        r = self._validate({"kind": "confidence_badge", "score": 1.5})
+        r = _validate({"kind": "confidence_badge", "score": 1.5})
         assert any("0.0 and 1.0" in e for e in r.errors)
 
     def test_score_out_of_range_negative(self):
-        r = self._validate({"kind": "confidence_badge", "score": -0.1})
+        r = _validate({"kind": "confidence_badge", "score": -0.1})
         assert any("0.0 and 1.0" in e for e in r.errors)
 
     def test_score_zero_valid(self):
-        r = self._validate({"kind": "confidence_badge", "score": 0.0})
+        r = _validate({"kind": "confidence_badge", "score": 0.0})
         assert not r.errors
 
     def test_score_one_valid(self):
-        r = self._validate({"kind": "confidence_badge", "score": 1.0})
+        r = _validate({"kind": "confidence_badge", "score": 1.0})
         assert not r.errors
 
     def test_no_title_required(self):
-        r = self._validate({"kind": "confidence_badge", "score": 0.5})
+        r = _validate({"kind": "confidence_badge", "score": 0.5})
         assert not any("title" in e for e in r.errors)
 
 
 class TestResolutionTrackerValidation:
-    def _validate(self, comp: dict) -> QualityResult:
-        result = QualityResult()
-        _validate_component(comp, result)
-        return result
-
     def test_valid(self):
-        r = self._validate(
+        r = _validate(
             {
                 "kind": "resolution_tracker",
                 "steps": [{"title": "Step 1", "status": "done", "detail": "Complete"}],
@@ -56,15 +52,15 @@ class TestResolutionTrackerValidation:
         assert not r.errors
 
     def test_empty_steps(self):
-        r = self._validate({"kind": "resolution_tracker", "steps": []})
+        r = _validate({"kind": "resolution_tracker", "steps": []})
         assert any("at least 1 step" in e for e in r.errors)
 
     def test_missing_steps(self):
-        r = self._validate({"kind": "resolution_tracker"})
+        r = _validate({"kind": "resolution_tracker"})
         assert any("at least 1 step" in e for e in r.errors)
 
     def test_step_missing_title(self):
-        r = self._validate(
+        r = _validate(
             {
                 "kind": "resolution_tracker",
                 "steps": [{"status": "done", "detail": "no title"}],
@@ -73,7 +69,7 @@ class TestResolutionTrackerValidation:
         assert any("step missing 'title'" in e for e in r.errors)
 
     def test_step_invalid_status(self):
-        r = self._validate(
+        r = _validate(
             {
                 "kind": "resolution_tracker",
                 "steps": [{"title": "Step 1", "status": "invalid_status"}],
@@ -83,7 +79,7 @@ class TestResolutionTrackerValidation:
 
     def test_all_valid_statuses(self):
         for status in ("done", "running", "pending"):
-            r = self._validate(
+            r = _validate(
                 {
                     "kind": "resolution_tracker",
                     "steps": [{"title": "Step", "status": status, "detail": "x"}],
@@ -93,13 +89,8 @@ class TestResolutionTrackerValidation:
 
 
 class TestBlastRadiusValidation:
-    def _validate(self, comp: dict) -> QualityResult:
-        result = QualityResult()
-        _validate_component(comp, result)
-        return result
-
     def test_valid(self):
-        r = self._validate(
+        r = _validate(
             {
                 "kind": "blast_radius",
                 "title": "Blast Radius — payment-api",
@@ -117,15 +108,15 @@ class TestBlastRadiusValidation:
         assert not r.errors
 
     def test_empty_items(self):
-        r = self._validate({"kind": "blast_radius", "title": "Blast Radius", "items": []})
+        r = _validate({"kind": "blast_radius", "title": "Blast Radius", "items": []})
         assert any("at least 1 item" in e for e in r.errors)
 
     def test_missing_items(self):
-        r = self._validate({"kind": "blast_radius", "title": "Blast Radius"})
+        r = _validate({"kind": "blast_radius", "title": "Blast Radius"})
         assert any("at least 1 item" in e for e in r.errors)
 
     def test_item_missing_kind_abbrev(self):
-        r = self._validate(
+        r = _validate(
             {
                 "kind": "blast_radius",
                 "title": "Blast Radius",
@@ -135,7 +126,7 @@ class TestBlastRadiusValidation:
         assert any("kind_abbrev" in e for e in r.errors)
 
     def test_item_missing_name(self):
-        r = self._validate(
+        r = _validate(
             {
                 "kind": "blast_radius",
                 "title": "Blast Radius",
@@ -145,7 +136,7 @@ class TestBlastRadiusValidation:
         assert any("'name'" in e for e in r.errors)
 
     def test_item_invalid_status(self):
-        r = self._validate(
+        r = _validate(
             {
                 "kind": "blast_radius",
                 "title": "Blast Radius",
@@ -156,13 +147,8 @@ class TestBlastRadiusValidation:
 
 
 class TestActionButtonValidation:
-    def _validate(self, comp: dict) -> QualityResult:
-        result = QualityResult()
-        _validate_component(comp, result)
-        return result
-
     def test_valid(self):
-        r = self._validate(
+        r = _validate(
             {
                 "kind": "action_button",
                 "label": "Restart",
@@ -173,7 +159,7 @@ class TestActionButtonValidation:
         assert not r.errors
 
     def test_missing_label(self):
-        r = self._validate(
+        r = _validate(
             {
                 "kind": "action_button",
                 "action": "restart_deployment",
@@ -183,7 +169,7 @@ class TestActionButtonValidation:
         assert any("label" in e for e in r.errors)
 
     def test_missing_action(self):
-        r = self._validate(
+        r = _validate(
             {
                 "kind": "action_button",
                 "label": "Go",
@@ -193,7 +179,7 @@ class TestActionButtonValidation:
         assert any("action" in e for e in r.errors)
 
     def test_missing_action_input(self):
-        r = self._validate(
+        r = _validate(
             {
                 "kind": "action_button",
                 "label": "Go",
@@ -203,7 +189,7 @@ class TestActionButtonValidation:
         assert any("action_input" in e for e in r.errors)
 
     def test_action_input_wrong_type(self):
-        r = self._validate(
+        r = _validate(
             {
                 "kind": "action_button",
                 "label": "Go",
@@ -214,7 +200,7 @@ class TestActionButtonValidation:
         assert any("action_input" in e for e in r.errors)
 
     def test_invalid_style(self):
-        r = self._validate(
+        r = _validate(
             {
                 "kind": "action_button",
                 "label": "Go",
@@ -227,7 +213,7 @@ class TestActionButtonValidation:
 
     def test_valid_styles(self):
         for style in ("primary", "danger", "ghost"):
-            r = self._validate(
+            r = _validate(
                 {
                     "kind": "action_button",
                     "label": "Go",

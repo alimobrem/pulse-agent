@@ -228,6 +228,7 @@ register_component(
         required_fields=["items"],
         optional_fields=["title"],
         supports_mutations=["change_kind"],
+        title_required=False,
         example={"kind": "bar_list", "title": "Top Pods", "items": [{"label": "nginx", "value": 42}]},
         prompt_hint='bar_list — Horizontal ranked bars. Use for "top N" views.',
     )
@@ -241,6 +242,7 @@ register_component(
         required_fields=["items"],
         optional_fields=["title"],
         supports_mutations=["change_kind"],
+        title_required=False,
         example={
             "kind": "progress_list",
             "title": "Node CPU",

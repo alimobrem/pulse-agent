@@ -27,6 +27,10 @@ VALID_KINDS = _get_valid_kinds()  # Backward-compat export; internal validators 
 
 METRIC_SOURCE_KINDS = frozenset({"metric_card", "info_card_grid", "grid"})
 
+_RESOLUTION_VALID_STATUSES = frozenset({"done", "running", "pending"})
+_BLAST_RADIUS_VALID_STATUSES = frozenset({"degraded", "healthy", "retrying", "paused"})
+_ACTION_BUTTON_VALID_STYLES = frozenset({"primary", "danger", "ghost"})
+
 _GENERIC_TITLES = frozenset(
     {
         "chart",
@@ -344,17 +348,10 @@ def _validate_component(comp: dict, result: QualityResult) -> None:
         result.errors.append(f"Invalid kind '{kind}' — must be one of: {', '.join(sorted(valid))}.")
         return
 
-    title_required = kind not in (
-        "grid",
-        "tabs",
-        "section",
-        "bar_list",
-        "progress_list",
-        "timeline",
-        "confidence_badge",
-        "resolution_tracker",
-        "action_button",
-    )
+    from .component_registry import get_component
+
+    comp_def = get_component(kind)
+    title_required = comp_def.title_required if comp_def else True
     if title_required and (not title or not str(title).strip()):
         result.errors.append(f"Component (kind={kind}) missing required 'title' field.")
         return
@@ -458,14 +455,13 @@ def _validate_component(comp: dict, result: QualityResult) -> None:
         if not steps:
             result.errors.append("resolution_tracker must have at least 1 step.")
         elif isinstance(steps, list):
-            valid_statuses = {"done", "running", "pending"}
             for step in steps:
                 if not step.get("title"):
                     result.errors.append("resolution_tracker step missing 'title'.")
                 status = step.get("status")
-                if status not in valid_statuses:
+                if status not in _RESOLUTION_VALID_STATUSES:
                     result.errors.append(
-                        f"resolution_tracker step status must be one of {valid_statuses}, got '{status}'."
+                        f"resolution_tracker step status must be one of {_RESOLUTION_VALID_STATUSES}, got '{status}'."
                     )
 
     elif kind == "blast_radius":
@@ -473,15 +469,16 @@ def _validate_component(comp: dict, result: QualityResult) -> None:
         if not items:
             result.errors.append("blast_radius must have at least 1 item.")
         elif isinstance(items, list):
-            valid_statuses = {"degraded", "healthy", "retrying", "paused"}
             for item in items:
                 if not item.get("kind_abbrev"):
                     result.errors.append("blast_radius item missing 'kind_abbrev'.")
                 if not item.get("name"):
                     result.errors.append("blast_radius item missing 'name'.")
                 status = item.get("status")
-                if status and status not in valid_statuses:
-                    result.errors.append(f"blast_radius item status must be one of {valid_statuses}, got '{status}'.")
+                if status and status not in _BLAST_RADIUS_VALID_STATUSES:
+                    result.errors.append(
+                        f"blast_radius item status must be one of {_BLAST_RADIUS_VALID_STATUSES}, got '{status}'."
+                    )
 
     elif kind == "action_button":
         if not comp.get("label"):
@@ -491,7 +488,7 @@ def _validate_component(comp: dict, result: QualityResult) -> None:
         if not isinstance(comp.get("action_input"), dict):
             result.errors.append("action_button must have 'action_input' (dict).")
         style = comp.get("style", "primary")
-        if style not in ("primary", "danger", "ghost"):
+        if style not in _ACTION_BUTTON_VALID_STYLES:
             result.errors.append(f"action_button style must be primary|danger|ghost, got '{style}'.")
 
 

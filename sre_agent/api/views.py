@@ -392,8 +392,6 @@ async def rest_log_counts(
 # Action Execution — execute a tool from a view's action_button component
 # ---------------------------------------------------------------------------
 
-_ACTION_BLOCKED_TOOLS = frozenset({"drain_node", "exec_command"})
-
 
 @router.post("/views/{view_id}/actions")
 async def rest_execute_action(
@@ -408,6 +406,7 @@ async def rest_execute_action(
 
     from .. import db
     from ..tool_registry import TOOL_REGISTRY, WRITE_TOOL_NAMES
+    from .sanitize import ACTION_BLOCKED_TOOLS, validate_action_input
 
     body = await request.json()
     action = body.get("action", "")
@@ -418,7 +417,7 @@ async def rest_execute_action(
     if not isinstance(action_input, dict):
         return JSONResponse(status_code=400, content={"error": "'action_input' must be a dict"})
 
-    if action in _ACTION_BLOCKED_TOOLS:
+    if action in ACTION_BLOCKED_TOOLS:
         return JSONResponse(status_code=403, content={"error": f"Tool '{action}' is not allowed via action buttons"})
     if action not in TOOL_REGISTRY:
         return JSONResponse(status_code=400, content={"error": f"Tool '{action}' not found"})
@@ -438,26 +437,9 @@ async def rest_execute_action(
             status_code=503, content={"error": "Service temporarily unavailable (circuit breaker open)"}
         )
 
-    from ..k8s_tools.validators import _validate_k8s_name, _validate_k8s_namespace
-
-    ns = action_input.get("namespace")
-    if ns:
-        ns_err = _validate_k8s_namespace(ns)
-        if ns_err:
-            return JSONResponse(status_code=400, content={"error": ns_err})
-    name = action_input.get("name")
-    if name:
-        name_err = _validate_k8s_name(name)
-        if name_err:
-            return JSONResponse(status_code=400, content={"error": name_err})
-    replicas = action_input.get("replicas")
-    if replicas is not None:
-        try:
-            r = int(replicas)
-            if r < 0 or r > 100:
-                return JSONResponse(status_code=400, content={"error": "Replicas must be 0-100"})
-        except (ValueError, TypeError):
-            return JSONResponse(status_code=400, content={"error": "Replicas must be a number"})
+    input_err = validate_action_input(action_input)
+    if input_err:
+        return JSONResponse(status_code=400, content={"error": input_err})
 
     from ..agent import _execute_tool
 
