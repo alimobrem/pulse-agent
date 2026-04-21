@@ -164,7 +164,9 @@ def list_inbox_items(
     offset: int = 0,
 ) -> dict[str, Any]:
     db = get_database()
-    if status == "agent_cleared":
+    if status == "archived":
+        exclude_statuses = "()"
+    elif status == "agent_cleared":
         exclude_statuses = "('archived')"
     elif status == "__needs_attention__":
         exclude_statuses = "('archived', 'agent_cleared', 'new', 'agent_reviewing')"
@@ -256,21 +258,24 @@ def get_inbox_stats() -> dict[str, int]:
     rows = db.fetchall(
         """SELECT status, COUNT(*) as cnt FROM inbox_items
         WHERE (snoozed_until IS NULL OR snoozed_until <= ?)
-        AND status NOT IN ('archived')
         GROUP BY status""",
         (now,),
     )
     stats: dict[str, int] = {}
     total = 0
     cleared = 0
+    archived = 0
     for row in rows:
         stats[row["status"]] = row["cnt"]
         if row["status"] == "agent_cleared":
             cleared += row["cnt"]
+        elif row["status"] == "archived":
+            archived += row["cnt"]
         else:
             total += row["cnt"]
     stats["total"] = total
     stats["agent_cleared"] = cleared
+    stats["archived"] = archived
     return stats
 
 
