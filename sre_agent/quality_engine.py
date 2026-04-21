@@ -344,7 +344,17 @@ def _validate_component(comp: dict, result: QualityResult) -> None:
         result.errors.append(f"Invalid kind '{kind}' — must be one of: {', '.join(sorted(valid))}.")
         return
 
-    title_required = kind not in ("grid", "tabs", "section", "bar_list", "progress_list", "timeline")
+    title_required = kind not in (
+        "grid",
+        "tabs",
+        "section",
+        "bar_list",
+        "progress_list",
+        "timeline",
+        "confidence_badge",
+        "resolution_tracker",
+        "action_button",
+    )
     if title_required and (not title or not str(title).strip()):
         result.errors.append(f"Component (kind={kind}) missing required 'title' field.")
         return
@@ -435,6 +445,54 @@ def _validate_component(comp: dict, result: QualityResult) -> None:
                     result.errors.append("resource_counts item missing 'resource'.")
                 if "count" not in item:
                     result.errors.append("resource_counts item missing 'count'.")
+
+    elif kind == "confidence_badge":
+        score = comp.get("score")
+        if score is None:
+            result.errors.append("confidence_badge must have 'score'.")
+        elif not isinstance(score, (int, float)) or score < 0 or score > 1:
+            result.errors.append("confidence_badge 'score' must be a number between 0.0 and 1.0.")
+
+    elif kind == "resolution_tracker":
+        steps = comp.get("steps")
+        if not steps:
+            result.errors.append("resolution_tracker must have at least 1 step.")
+        elif isinstance(steps, list):
+            valid_statuses = {"done", "running", "pending"}
+            for step in steps:
+                if not step.get("title"):
+                    result.errors.append("resolution_tracker step missing 'title'.")
+                status = step.get("status")
+                if status not in valid_statuses:
+                    result.errors.append(
+                        f"resolution_tracker step status must be one of {valid_statuses}, got '{status}'."
+                    )
+
+    elif kind == "blast_radius":
+        items = comp.get("items")
+        if not items:
+            result.errors.append("blast_radius must have at least 1 item.")
+        elif isinstance(items, list):
+            valid_statuses = {"degraded", "healthy", "retrying", "paused"}
+            for item in items:
+                if not item.get("kind_abbrev"):
+                    result.errors.append("blast_radius item missing 'kind_abbrev'.")
+                if not item.get("name"):
+                    result.errors.append("blast_radius item missing 'name'.")
+                status = item.get("status")
+                if status and status not in valid_statuses:
+                    result.errors.append(f"blast_radius item status must be one of {valid_statuses}, got '{status}'.")
+
+    elif kind == "action_button":
+        if not comp.get("label"):
+            result.errors.append("action_button must have 'label'.")
+        if not comp.get("action"):
+            result.errors.append("action_button must have 'action'.")
+        if not isinstance(comp.get("action_input"), dict):
+            result.errors.append("action_button must have 'action_input' (dict).")
+        style = comp.get("style", "primary")
+        if style not in ("primary", "danger", "ghost"):
+            result.errors.append(f"action_button style must be primary|danger|ghost, got '{style}'.")
 
 
 def _check_generic_title(title: str, kind: str, result: QualityResult) -> None:

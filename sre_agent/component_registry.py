@@ -456,3 +456,107 @@ register_component(
         ),
     )
 )
+
+# Phase 2: Investigation view components
+
+register_component(
+    ComponentKind(
+        name="confidence_badge",
+        description="Inline confidence score badge with color coding",
+        category="status",
+        required_fields=["score"],
+        optional_fields=["label"],
+        title_required=False,
+        example={
+            "kind": "confidence_badge",
+            "score": 0.85,
+            "label": "Root cause confidence",
+        },
+        prompt_hint="confidence_badge — Inline confidence score (0.0-1.0). Green >0.8, amber 0.5-0.8, red <0.5. Embed in card headers.",
+    )
+)
+
+register_component(
+    ComponentKind(
+        name="resolution_tracker",
+        description="Vertical checklist tracking resolution steps with status icons",
+        category="status",
+        required_fields=["steps"],
+        optional_fields=["title"],
+        title_required=False,
+        example={
+            "kind": "resolution_tracker",
+            "title": "Recovery Steps",
+            "steps": [
+                {
+                    "title": "Identify root cause",
+                    "status": "done",
+                    "detail": "OOM kill detected",
+                    "timestamp": "2024-01-15T10:30:00Z",
+                },
+                {"title": "Scale up replicas", "status": "running", "detail": "2 → 4 replicas"},
+                {"title": "Verify health", "status": "pending", "detail": "Waiting for rollout"},
+            ],
+        },
+        prompt_hint="resolution_tracker — Vertical step checklist. Each step: title, status (done|running|pending), detail, optional output (monospace), optional timestamp.",
+    )
+)
+
+register_component(
+    ComponentKind(
+        name="blast_radius",
+        description="Downstream dependency impact list with status indicators",
+        category="status",
+        required_fields=["items"],
+        optional_fields=["title", "perspective"],
+        example={
+            "kind": "blast_radius",
+            "title": "Blast Radius — payment-api",
+            "items": [
+                {
+                    "kind_abbrev": "Svc",
+                    "name": "payment-api",
+                    "relationship": "Service → payment-api (selector match)",
+                    "status": "degraded",
+                    "status_detail": "0 endpoints",
+                },
+                {
+                    "kind_abbrev": "Ing",
+                    "name": "payment-ingress",
+                    "relationship": "Ingress → payment-api (backend)",
+                    "status": "healthy",
+                    "status_detail": "3 active backends",
+                },
+            ],
+        },
+        prompt_hint=(
+            "blast_radius — Downstream dependency impact list. Each item: kind_abbrev, name, relationship, "
+            "status (degraded|healthy|retrying|paused), status_detail. "
+            "Optional perspective: physical|logical|network|multi_tenant|helm to filter dependencies."
+        ),
+    )
+)
+
+register_component(
+    ComponentKind(
+        name="action_button",
+        description="Executable action button that triggers a tool with confirmation for write operations",
+        category="action",
+        required_fields=["label", "action", "action_input"],
+        optional_fields=["style", "confirm_text"],
+        title_required=False,
+        example={
+            "kind": "action_button",
+            "label": "Restart Deployment",
+            "action": "restart_deployment",
+            "action_input": {"name": "payment-api", "namespace": "production"},
+            "style": "danger",
+            "confirm_text": "This will restart all pods in the deployment.",
+        },
+        prompt_hint=(
+            "action_button — Executable button. action must be a registered tool name. "
+            "style: primary|danger|ghost. Write tools show confirmation dialog. "
+            "confirm_text: optional tooltip for dangerous actions."
+        ),
+    )
+)

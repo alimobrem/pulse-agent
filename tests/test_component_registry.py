@@ -36,6 +36,10 @@ class TestRegistry:
             "stat_card",
             "timeline",
             "resource_counts",
+            "confidence_badge",
+            "resolution_tracker",
+            "blast_radius",
+            "action_button",
         }
         actual = get_valid_kinds()
         missing = expected - actual
@@ -44,7 +48,7 @@ class TestRegistry:
     def test_get_valid_kinds_returns_frozenset(self):
         kinds = get_valid_kinds()
         assert isinstance(kinds, frozenset)
-        assert len(kinds) >= 19
+        assert len(kinds) >= 23
 
     def test_get_component(self):
         c = get_component("data_table")
@@ -87,6 +91,36 @@ class TestRegistry:
         assert "grid" in names
         assert "section" in names
         assert "data_table" not in names
+
+    def test_confidence_badge_schema(self):
+        c = get_component("confidence_badge")
+        assert c is not None
+        assert c.category == "status"
+        assert "score" in c.required_fields
+        assert c.title_required is False
+
+    def test_resolution_tracker_schema(self):
+        c = get_component("resolution_tracker")
+        assert c is not None
+        assert c.category == "status"
+        assert "steps" in c.required_fields
+        assert c.title_required is False
+
+    def test_blast_radius_schema(self):
+        c = get_component("blast_radius")
+        assert c is not None
+        assert c.category == "status"
+        assert "items" in c.required_fields
+        assert c.title_required is True
+
+    def test_action_button_schema(self):
+        c = get_component("action_button")
+        assert c is not None
+        assert c.category == "action"
+        assert "label" in c.required_fields
+        assert "action" in c.required_fields
+        assert "action_input" in c.required_fields
+        assert c.title_required is False
 
     def test_mutation_support(self):
         table = get_component("data_table")
