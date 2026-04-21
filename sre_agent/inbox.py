@@ -845,6 +845,17 @@ def _phase_b_investigate() -> int:
             from .monitor.investigations import _run_proactive_investigation_sync
 
             result = _run_proactive_investigation_sync(finding_dict)
+            tools_offered: list[str] = []
+            try:
+                from .agent import TOOL_MAP as SRE_TOOL_MAP
+                from .agent import WRITE_TOOLS as SRE_WRITE_TOOLS
+                from .skill_loader import select_tools
+
+                readonly_map = {n: t for n, t in SRE_TOOL_MAP.items() if n not in SRE_WRITE_TOOLS}
+                inv_prompt = f"Investigate: {item['title']} in {item.get('namespace', 'cluster')}"
+                _, _, tools_offered = select_tools(inv_prompt, list(readonly_map.values()), readonly_map)
+            except Exception:
+                pass
 
             if result.get("summary"):
                 investigation_id = result.get("id", f"inv-{item['id']}")
@@ -857,6 +868,8 @@ def _phase_b_investigate() -> int:
                 metadata["recommended_fix"] = result.get("recommended_fix", "")
                 metadata["investigation_confidence"] = result.get("confidence", 0)
                 metadata["evidence"] = result.get("evidence", [])
+                metadata["skill_used"] = "sre"
+                metadata["tools_offered"] = tools_offered[:20]
 
                 try:
                     from .dependency_graph import get_graph
@@ -944,15 +957,13 @@ def _phase_c_plan() -> int:
         prompt = (
             f"Based on this investigation of '{item['title']}':\n"
             f"- Summary: {investigation}\n"
-            f"- Suspected cause: {cause}\n"
-            f"- Recommended fix: {fix}\n"
+            f"- Cause: {cause}\n"
+            f"- Fix: {fix}\n"
             f"- Resources: {resources_str or 'none'}\n"
             f"- Namespace: {item.get('namespace') or 'cluster-wide'}\n\n"
-            f"Generate a step-by-step action plan. Each step should be concrete and actionable. "
-            f"If a step can be executed by a K8s tool, include the tool name and input. "
-            f"Reply in JSON:\n"
-            f'{{"steps": [{{"title": "...", "description": "...", "tool": "tool_name_or_null", '
-            f'"tool_input": {{}} , "risk": "low|medium|high"}}]}}'
+            f"Generate 2-4 action steps. Reply ONLY with valid JSON, no markdown:\n"
+            f'{{"steps": [{{"title": "short title", "description": "what to do", '
+            f'"tool": null, "risk": "low"}}]}}'
         )
 
         try:
@@ -960,7 +971,7 @@ def _phase_c_plan() -> int:
 
             client = create_client()
             response = client.messages.create(
-                model=model, max_tokens=500, messages=[{"role": "user", "content": prompt}]
+                model=model, max_tokens=1000, messages=[{"role": "user", "content": prompt}]
             )
             text = response.content[0].text.strip()
 
