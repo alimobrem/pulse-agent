@@ -285,7 +285,7 @@ class TestLayoutHints:
     def test_chart_with_series_gets_full_height(self):
         components = [{"kind": "chart", "series": [{"label": "cpu", "data": [[1, 2]]}]}]
         layout = compute_layout(components)
-        assert layout[0]["h"] == 8  # single series — medium
+        assert layout[0]["h"] == 10  # single series — medium
 
     def test_chart_multi_series_gets_tall(self):
         components = [{"kind": "chart", "series": [{"label": "a"}, {"label": "b"}, {"label": "c"}]}]

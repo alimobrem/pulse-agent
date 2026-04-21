@@ -87,13 +87,13 @@ def _resolve_height(hint: str | None, default: int, component: dict) -> int:
         default = 3 + min(pairs, 5) if pairs else 4
     elif kind == "chart":
         series = component.get("series", [])
-        if not series:
-            default = 4  # Empty chart — compact
+        if not series and not component.get("query"):
+            default = 4
         elif len(series) <= 1:
-            default = 8  # Single series — medium
+            default = 10
         # else: keep default 12 for multi-series
     elif kind in ("metric_card", "stat_card"):
-        default = 4  # Always compact — these are KPI cards
+        default = 6 if component.get("query") else 4
     elif kind == "info_card_grid":
         cards = len(component.get("cards", []))
         default = max(4, 2 + min(math.ceil(cards * 1.5), 6))
