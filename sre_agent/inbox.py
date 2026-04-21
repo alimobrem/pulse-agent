@@ -574,6 +574,95 @@ def bridge_finding_to_inbox(finding: dict[str, Any]) -> str:
     return create_inbox_item(item)
 
 
+def auto_triage_new_items() -> int:
+    """Auto-triage untriaged inbox items using Claude for recommendations."""
+    import logging
+
+    logger = logging.getLogger("pulse_agent.inbox")
+    db = get_database()
+    rows = db.fetchall(
+        """SELECT * FROM inbox_items
+        WHERE status = 'new'
+        AND (metadata NOT LIKE '%"triaged"%' OR metadata NOT LIKE '%true%')
+        ORDER BY priority_score DESC
+        LIMIT 5""",
+    )
+    if not rows:
+        return 0
+
+    try:
+        from .config import get_settings
+
+        settings = get_settings()
+        model = settings.model
+    except Exception:
+        return 0
+
+    triaged = 0
+    for row in rows:
+        item = _deserialize_row(row)
+        if item.get("metadata", {}).get("triaged"):
+            continue
+
+        resources_str = ", ".join(f"{r['kind']}/{r['name']}" for r in item.get("resources", []))
+        prompt = (
+            f"Triage this {item['item_type']}: {item['title']}. "
+            f"{item.get('summary', '')} "
+            f"Resources: {resources_str or 'none'}. "
+            f"Namespace: {item.get('namespace') or 'cluster-wide'}. "
+            f"Severity: {item.get('severity', 'unknown')}. "
+            f"Provide: (1) a one-sentence assessment, (2) recommended action (investigate/dismiss/monitor), "
+            f"(3) urgency (immediate/soon/can-wait). Reply in JSON: "
+            f'{{"assessment": "...", "action": "investigate|dismiss|monitor", "urgency": "immediate|soon|can-wait"}}'
+        )
+
+        try:
+            import anthropic
+
+            client = anthropic.Anthropic()
+            response = client.messages.create(
+                model=model,
+                max_tokens=200,
+                messages=[{"role": "user", "content": prompt}],
+            )
+            text = response.content[0].text.strip()
+
+            import re
+
+            match = re.search(r"\{.*\}", text, re.DOTALL)
+            if match:
+                import json as _json
+
+                triage = _json.loads(match.group())
+                metadata = item.get("metadata", {})
+                metadata["triaged"] = True
+                metadata["triage_assessment"] = triage.get("assessment", "")
+                metadata["triage_action"] = triage.get("action", "monitor")
+                metadata["triage_urgency"] = triage.get("urgency", "can-wait")
+
+                now = int(time.time())
+                new_status = "acknowledged"
+                db.execute(
+                    "UPDATE inbox_items SET status = ?, metadata = ?, summary = ?, updated_at = ? WHERE id = ?",
+                    (
+                        new_status,
+                        json.dumps(metadata),
+                        triage.get("assessment", item.get("summary", "")),
+                        now,
+                        item["id"],
+                    ),
+                )
+                db.commit()
+                _publish_event("inbox_item_updated", item["id"], {"status": new_status})
+                triaged += 1
+                logger.info("Auto-triaged inbox item %s: %s", item["id"], triage.get("action"))
+        except Exception as e:
+            logger.debug("Auto-triage failed for %s: %s", item["id"], e)
+            continue
+
+    return triaged
+
+
 def resolve_finding_inbox_item(finding_id: str) -> bool:
     """Resolve an inbox item when its linked finding resolves."""
     db = get_database()
@@ -629,6 +718,11 @@ def run_generator_cycle() -> None:
 
     unsnooze_expired()
     prune_old_items()
+
+    try:
+        auto_triage_new_items()
+    except Exception:
+        pass
 
 
 # -- Agent tool --
