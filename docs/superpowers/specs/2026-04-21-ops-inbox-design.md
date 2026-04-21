@@ -406,6 +406,39 @@ The escalated assessment remains visible (dimmed, status=escalated) until the ne
 6. Badge on existing incidents page Active tab ("Proactive" filter)
 7. Validate on live cluster
 
+**Phase A tests:**
+- `tests/test_inbox.py` — unit tests for:
+  - CRUD operations (create, read, update, delete inbox items)
+  - Status lifecycle transitions (valid transitions succeed, invalid transitions rejected per type)
+  - Priority score computation (severity weights, age bonus, due date bonus, noise score dampening)
+  - Dedup logic (same correlation key updates existing item, different key creates new)
+  - Snooze behavior (excluded from queries while snoozed, re-surfaces with pre-snooze status)
+  - Correlation grouping (same-type grouping, cross-type items never grouped)
+  - Cleanup (resolved items >30 days pruned)
+- `tests/test_inbox_generators.py` — unit tests for each of the 13 generators:
+  - Each generator returns correct item structure with expected fields
+  - Urgency calculation produces correct values for known inputs
+  - Generator output maps to correct item_type and severity
+  - Auto-resolve when condition clears (item generated last cycle but not this cycle)
+- `tests/test_inbox_api.py` — REST endpoint tests:
+  - All CRUD endpoints return correct status codes and payloads
+  - Filter queries (type, status, namespace, claimed_by, severity)
+  - Group-by responses (groups[] vs items[] separation)
+  - Claim/unclaim with auto-transition
+  - Pin toggle per user
+  - Stats endpoint returns correct counts
+  - Auth: created_by uses authenticated user, not impersonation
+- `tests/test_inbox_ws.py` — WebSocket event tests:
+  - inbox_item_created, updated, claimed, resolved events broadcast correctly
+  - Critical items trigger toast-eligible events
+- `tests/test_inbox_monitor.py` — monitor integration tests:
+  - Monitor finding creates inbox item with correct mapping
+  - Finding update updates existing inbox item (no duplicate)
+  - Finding resolution transitions inbox item to resolved
+  - Auto-fix lifecycle: item -> verifying -> resolved (or back to investigating on failure)
+- **Eval scenario:** `evals/scenarios/inbox_task_creation.yaml` — replay fixture where user says "add task: rotate TLS certs by Friday" and agent calls `create_inbox_task` with correct params
+- **Eval scenario:** `evals/scenarios/inbox_proactive_routing.yaml` — replay fixture where proactive generators produce items and agent references them when asked "what needs attention?"
+
 ### Phase B: Full Inbox frontend
 1. InboxPage + InboxList + InboxItem components
 2. InboxFilterBar with presets
@@ -418,10 +451,37 @@ The escalated assessment remains visible (dimmed, status=escalated) until the ne
 9. Keyboard shortcuts
 10. Toast notifications for critical items
 
+**Phase B tests:**
+- `InboxPage.test.tsx` — component tests:
+  - Renders inbox list with items from mock API
+  - Filter presets apply correct filters and clear when manually changed
+  - Group-by renders InboxGroup components with correct collapse/expand
+  - Empty state renders "All clear" message with prompt pills
+  - Error state renders error banner with retry button
+  - Loading state renders skeleton cards
+- `InboxItem.test.tsx` — component tests:
+  - Renders severity indicator, title, namespace, age, claimed-by
+  - Quick actions (acknowledge, claim, snooze, dismiss) call correct API endpoints
+  - Dismiss on critical severity shows ConfirmDialog
+  - Investigation phases badge renders for finding type only
+  - Approval indicator renders when pending actions exist
+- `InboxFilterBar.test.tsx` — filter preset and manual filter interaction
+- `NewTaskDialog.test.tsx` — form validation, submission, namespace picker
+- `useInboxStore.test.ts` — Zustand store tests:
+  - WebSocket subscription updates items in real-time
+  - Filter state management
+  - Selected item drives detail drawer
+- **Manual browser verification:** Full page walkthrough (create task, claim item, snooze, dismiss, filter presets, keyboard shortcuts, toast notifications, detail drawer for each type)
+
 ### Phase C: Cleanup
 1. Remove old incidents page components (after redirect period)
 2. Remove old incident-related Zustand stores
 3. Update all docs (README, CLAUDE.md, API_CONTRACT, SECURITY)
+
+**Phase C tests:**
+- Verify `/incidents` redirects to `/inbox`
+- Verify no dead imports or references to removed incident components
+- Run full test suite to confirm no regressions from removed code
 
 ---
 
