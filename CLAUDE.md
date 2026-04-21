@@ -174,7 +174,7 @@ Rules: validate inputs with `_validate_k8s_name()`/`_validate_k8s_namespace()`, 
 - `view_mutations.py` — view mutation tools extracted from view_tools.py (`update_dashboard`, `delete_dashboard`, `clone_view`, `share_view`)
 - `dependency_graph.py` — live K8s resource dependency graph (17 types, 10 relationships), `_fetch_metrics()` with 30s TTL cache for metrics-server enrichment
 - `quality_engine.py` — unified dashboard validation + quality scoring (includes `critique_view` moved from view_critic.py)
-- `db.py` — Database abstraction (PostgreSQL production, SQLite tests) + view CRUD + lifecycle (status transitions, claims, finding lookup)
+- `db.py` — Database abstraction (PostgreSQL production, SQLite tests) + view CRUD + lifecycle (status transitions, claims, finding lookup, recurrence handling, assessment escalation, resolution tool extraction, similar view search)
 - `k8s_client.py` — lazy-initialized K8s client with `safe()` wrapper
 - `context_bus.py` — shared context bus for cross-agent communication
 - `orchestrator.py` — intent classification + typo correction + agent routing for `/ws/agent`
