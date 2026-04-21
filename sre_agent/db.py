@@ -321,13 +321,38 @@ def save_view(
 
 
 @_db_safe
-def list_views(owner: str, limit: int = 50) -> list[dict]:
-    """List all views owned by a user (max 50)."""
+def list_views(
+    owner: str,
+    limit: int = 50,
+    *,
+    view_type: str | None = None,
+    visibility: str | None = None,
+    exclude_status: str | None = None,
+) -> list[dict]:
+    """List views. By default returns owner's views. With visibility='team', returns all team-visible views."""
     db = get_database()
+    conditions: list[str] = []
+    params: list = []
+
+    if visibility == "team":
+        conditions.append("visibility = 'team'")
+    else:
+        conditions.append("owner = ?")
+        params.append(owner)
+
+    if view_type:
+        conditions.append("view_type = ?")
+        params.append(view_type)
+    if exclude_status:
+        conditions.append("status != ?")
+        params.append(exclude_status)
+
+    where = " AND ".join(conditions)
+    params.append(min(limit, 50))
+
     rows = db.fetchall(
-        "SELECT id, owner, title, description, icon, layout, positions, created_at, updated_at "
-        "FROM views WHERE owner = ? ORDER BY updated_at DESC LIMIT ?",
-        (owner, min(limit, 50)),
+        f"SELECT * FROM views WHERE {where} ORDER BY updated_at DESC LIMIT ?",
+        tuple(params),
     )
     return [_deserialize_view_row(row) for row in rows]
 
@@ -337,8 +362,7 @@ def get_view_by_title(owner: str, title: str) -> dict | None:
     """Find a view by title — returns full view data for merging."""
     db = get_database()
     row = db.fetchone(
-        "SELECT id, owner, title, description, icon, layout, positions, created_at, updated_at "
-        "FROM views WHERE owner = ? AND title = ? LIMIT 1",
+        "SELECT * FROM views WHERE owner = ? AND title = ? LIMIT 1",
         (owner, title),
     )
     return _deserialize_view_row(row) if row else None

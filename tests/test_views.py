@@ -130,6 +130,62 @@ class TestListViews:
         views = db_module.list_views("nobody")
         assert views == []
 
+    def test_filter_by_view_type(self):
+        db_module.save_view("alice", "cv-1", "Custom View", "", _layout())
+        db_module.save_view(
+            "alice",
+            "cv-2",
+            "Incident View",
+            "",
+            _layout(),
+            view_type="incident",
+            status="investigating",
+            visibility="team",
+        )
+        views = db_module.list_views("alice", view_type="incident")
+        assert len(views) == 1
+        assert views[0]["view_type"] == "incident"
+
+    def test_filter_by_visibility_team(self):
+        db_module.save_view("alice", "cv-1", "Private", "", _layout(), visibility="private")
+        db_module.save_view(
+            "alice",
+            "cv-2",
+            "Team Incident",
+            "",
+            _layout(),
+            view_type="incident",
+            visibility="team",
+        )
+        views = db_module.list_views("bob", visibility="team")
+        assert len(views) == 1
+        assert views[0]["id"] == "cv-2"
+
+    def test_filter_excludes_status(self):
+        db_module.save_view(
+            "alice",
+            "cv-1",
+            "Active",
+            "",
+            _layout(),
+            view_type="plan",
+            status="analyzing",
+            visibility="team",
+        )
+        db_module.save_view(
+            "alice",
+            "cv-2",
+            "Done",
+            "",
+            _layout(),
+            view_type="plan",
+            status="completed",
+            visibility="team",
+        )
+        views = db_module.list_views("alice", view_type="plan", exclude_status="completed")
+        assert len(views) == 1
+        assert views[0]["status"] == "analyzing"
+
 
 # ---------------------------------------------------------------------------
 # get_view
