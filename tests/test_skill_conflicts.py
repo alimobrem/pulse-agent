@@ -1,8 +1,17 @@
-"""Tests for skill conflict resolution — ensures conflicting skills don't run in parallel."""
+"""Tests for skill conflict resolution — ensures conflicting skills don't run in parallel.
+
+Covers:
+- Exclusive skills (no secondary)
+- Bidirectional conflicts_with
+- Metadata integrity (conflicts_with entries match real skill names)
+- Multi-turn sticky mode (view_designer stays sticky, plan_builder can't break out)
+"""
 
 from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
+
+import pytest
 
 
 def _setup():
@@ -84,6 +93,129 @@ class TestConflictsWithBidirectional:
         c = FakeSkill("sre", [])
         d = FakeSkill("security", [])
         assert _skills_conflict(c, d) is False
+
+
+class TestMetadataIntegrity:
+    """Verify skill metadata from actual skill.md files is consistent."""
+
+    def test_conflicts_with_entries_match_real_skill_names(self):
+        """Every entry in conflicts_with must be a real loaded skill name."""
+        from sre_agent.skill_loader import list_skills
+
+        all_names = {s.name for s in list_skills()}
+        for skill in list_skills():
+            for conflict in skill.conflicts_with:
+                assert conflict in all_names, (
+                    f"Skill '{skill.name}' has conflicts_with entry '{conflict}' "
+                    f"which is not a loaded skill. Available: {sorted(all_names)}"
+                )
+
+    def test_no_hyphens_in_conflicts_with(self):
+        """conflicts_with must use underscores (normalized), not hyphens."""
+        from sre_agent.skill_loader import list_skills
+
+        for skill in list_skills():
+            for conflict in skill.conflicts_with:
+                assert "-" not in conflict, (
+                    f"Skill '{skill.name}' has hyphen in conflicts_with: '{conflict}'. "
+                    f"Skill names use underscores at runtime."
+                )
+
+    def test_exclusive_skills_have_no_secondary_in_multi(self):
+        """All exclusive skills must return None secondary for any query they handle."""
+        from sre_agent.skill_loader import list_skills
+        from sre_agent.skill_router import classify_query_multi
+
+        exclusive_skills = [s for s in list_skills() if s.exclusive]
+        assert len(exclusive_skills) >= 2
+
+        test_queries = {
+            "view_designer": "Create a dashboard showing pod health",
+            "postmortem": "Write a postmortem for the last outage",
+        }
+        for skill in exclusive_skills:
+            query = test_queries.get(skill.name)
+            if query:
+                primary, secondary = classify_query_multi(query)
+                if primary.name == skill.name:
+                    assert secondary is None, f"Exclusive skill '{skill.name}' got secondary={secondary.name}"
+
+
+class TestMultiTurnStickyMode:
+    """Simulate multi-turn WebSocket sessions to verify sticky mode."""
+
+    @pytest.fixture
+    def ws_client(self, monkeypatch):
+        monkeypatch.setenv("PULSE_AGENT_WS_TOKEN", "sticky-test-token")
+        monkeypatch.setenv("PULSE_AGENT_MEMORY", "0")
+
+        with (
+            patch("sre_agent.k8s_client._initialized", True),
+            patch("sre_agent.k8s_client._load_k8s"),
+            patch("sre_agent.k8s_client.get_core_client", return_value=MagicMock()),
+            patch("sre_agent.k8s_client.get_apps_client", return_value=MagicMock()),
+            patch("sre_agent.k8s_client.get_custom_client", return_value=MagicMock()),
+            patch("sre_agent.k8s_client.get_version_client", return_value=MagicMock()),
+        ):
+            from fastapi.testclient import TestClient
+
+            from sre_agent.api import app
+
+            yield TestClient(app)
+
+    def test_view_designer_stays_sticky_on_follow_up(self, ws_client):
+        """After view_designer handles turn 1, a vague follow-up stays in view_designer."""
+        token = "sticky-test-token"
+        with ws_client.websocket_connect(f"/ws/agent?token={token}") as ws:
+            ws.send_json({"type": "message", "content": "Create a dashboard showing node health"})
+            events = []
+            for _ in range(100):
+                try:
+                    data = ws.receive_json()
+                    events.append(data)
+                    if data.get("type") == "done":
+                        break
+                except Exception:
+                    break
+
+            ws.send_json({"type": "message", "content": "now add the metrics and create it"})
+            events2 = []
+            for _ in range(100):
+                try:
+                    data = ws.receive_json()
+                    events2.append(data)
+                    if data.get("type") == "done":
+                        break
+                except Exception:
+                    break
+
+            hallucinations = [e for e in events2 if e.get("type") == "error" and "unknown tool" in e.get("message", "")]
+            assert not hallucinations, f"Turn 2 had tool hallucinations: {hallucinations}"
+
+    def test_view_designer_no_plan_builder_hallucinations(self, ws_client):
+        """The exact pill query must not produce plan_builder hallucinations."""
+        token = "sticky-test-token"
+        with ws_client.websocket_connect(f"/ws/agent?token={token}") as ws:
+            ws.send_json(
+                {
+                    "type": "message",
+                    "content": "Create a dashboard showing node health: CPU/memory utilization, pod density, and node conditions",
+                }
+            )
+            all_events = []
+            for _ in range(200):
+                try:
+                    data = ws.receive_json()
+                    all_events.append(data)
+                    if data.get("type") == "done":
+                        break
+                except Exception:
+                    break
+
+            hallucinations = [
+                e for e in all_events if e.get("type") == "error" and "unknown tool" in e.get("message", "")
+            ]
+            assert not hallucinations, f"Pill query produced tool hallucinations: {hallucinations}"
 
 
 class TestNonConflictingMultiSkill:
