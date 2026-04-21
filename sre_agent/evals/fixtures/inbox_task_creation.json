@@ -1,0 +1,13 @@
+{
+    "name": "inbox_task_creation",
+    "prompt": "Add a task to remind me to rotate TLS certificates for the ingress controller before Friday. The certs are in the production namespace.",
+    "recorded_responses": {
+        "create_inbox_task": "Created inbox task: Rotate TLS certificates for ingress controller (id: inb-abc123def456, due: this_week)"
+    },
+    "expected": {
+        "should_mention": ["task", "created"],
+        "should_use_tools": ["create_inbox_task"],
+        "should_not_use_tools": ["delete_pod", "scale_deployment", "apply_yaml"],
+        "max_tool_calls": 3
+    }
+}
