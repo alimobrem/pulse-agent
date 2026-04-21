@@ -124,6 +124,14 @@ async def rest_acknowledge_item(item_id: str):
     return {"ok": True}
 
 
+@router.post("/inbox/{item_id}/unacknowledge")
+async def rest_unacknowledge_item(item_id: str):
+    ok = update_item_status(item_id, "new")
+    if not ok:
+        raise HTTPException(status_code=400, detail="Invalid status transition")
+    return {"ok": True}
+
+
 @router.post("/inbox/{item_id}/snooze")
 async def rest_snooze_item(item_id: str, request: Request):
     body = await request.json()

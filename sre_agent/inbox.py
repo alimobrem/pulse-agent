@@ -21,7 +21,7 @@ def _publish_event(event_type: str, item_id: str, data: dict[str, Any] | None = 
 VALID_TRANSITIONS: dict[str, dict[str, list[str]]] = {
     "finding": {
         "new": ["acknowledged"],
-        "acknowledged": ["investigating"],
+        "acknowledged": ["investigating", "new"],
         "investigating": ["action_taken"],
         "action_taken": ["verifying"],
         "verifying": ["resolved", "investigating"],
@@ -34,12 +34,12 @@ VALID_TRANSITIONS: dict[str, dict[str, list[str]]] = {
     },
     "alert": {
         "new": ["acknowledged"],
-        "acknowledged": ["resolved"],
+        "acknowledged": ["resolved", "new"],
         "resolved": ["archived"],
     },
     "assessment": {
         "new": ["acknowledged"],
-        "acknowledged": ["escalated"],
+        "acknowledged": ["escalated", "new"],
     },
 }
 
