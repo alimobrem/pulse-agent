@@ -653,3 +653,92 @@ def migrate_view_ownership(new_owner: str) -> int:
         db.commit()
 
     return total
+
+
+# ---------------------------------------------------------------------------
+# View lifecycle — status transitions, claims, finding lookup
+# ---------------------------------------------------------------------------
+
+_STATUS_TRANSITIONS: dict[str, dict[str, set[str]]] = {
+    "incident": {
+        "investigating": {"action_taken"},
+        "action_taken": {"verifying"},
+        "verifying": {"resolved", "investigating"},
+        "resolved": {"investigating", "archived"},
+    },
+    "plan": {
+        "analyzing": {"ready"},
+        "ready": {"executing"},
+        "executing": {"ready", "completed"},
+    },
+    "assessment": {
+        "analyzing": {"ready"},
+        "ready": {"acknowledged", "investigating"},
+    },
+}
+
+
+@_db_safe
+def transition_view_status(view_id: str, actor: str, new_status: str) -> bool:
+    """Transition a view's status. Validates the transition is legal. Creates a version snapshot."""
+    from datetime import UTC, datetime
+
+    db = get_database()
+    row = db.fetchone("SELECT view_type, status FROM views WHERE id = ?", (view_id,))
+    if not row:
+        return False
+
+    view_type = row["view_type"]
+    current_status = row["status"]
+    allowed = _STATUS_TRANSITIONS.get(view_type, {}).get(current_status, set())
+    if new_status not in allowed:
+        return False
+
+    try:
+        snapshot_view(view_id, f"status:{new_status}")
+    except Exception:
+        pass
+
+    cursor = db.execute(
+        "UPDATE views SET status = ?, updated_at = ? WHERE id = ?",
+        (new_status, datetime.now(UTC).isoformat(), view_id),
+    )
+    db.commit()
+    return getattr(cursor, "rowcount", 1) > 0
+
+
+@_db_safe
+def claim_view(view_id: str, username: str) -> bool:
+    """Claim a team-visible view. Only team views can be claimed."""
+    from datetime import UTC, datetime
+
+    db = get_database()
+    cursor = db.execute(
+        "UPDATE views SET claimed_by = ?, claimed_at = ? WHERE id = ? AND visibility = 'team'",
+        (username, datetime.now(UTC).isoformat(), view_id),
+    )
+    db.commit()
+    return getattr(cursor, "rowcount", 1) > 0
+
+
+@_db_safe
+def unclaim_view(view_id: str, username: str) -> bool:
+    """Release a claim on a view. Only the claimant can unclaim."""
+    db = get_database()
+    cursor = db.execute(
+        "UPDATE views SET claimed_by = NULL, claimed_at = NULL WHERE id = ? AND claimed_by = ?",
+        (view_id, username),
+    )
+    db.commit()
+    return getattr(cursor, "rowcount", 1) > 0
+
+
+@_db_safe
+def get_view_by_finding(finding_id: str) -> dict | None:
+    """Find a view linked to a monitor finding. Returns the most recent match."""
+    db = get_database()
+    row = db.fetchone(
+        "SELECT * FROM views WHERE finding_id = ? ORDER BY updated_at DESC LIMIT 1",
+        (finding_id,),
+    )
+    return _deserialize_view_row(row) if row else None
