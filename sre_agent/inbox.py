@@ -1,0 +1,444 @@
+"""Ops Inbox — unified SRE worklist with CRUD, lifecycle, priority, and dedup."""
+
+from __future__ import annotations
+
+import json
+import time
+import uuid
+from typing import Any
+
+from .db import get_database
+
+VALID_TRANSITIONS: dict[str, dict[str, list[str]]] = {
+    "finding": {
+        "new": ["acknowledged"],
+        "acknowledged": ["investigating"],
+        "investigating": ["action_taken"],
+        "action_taken": ["verifying"],
+        "verifying": ["resolved", "investigating"],
+        "resolved": ["archived"],
+    },
+    "task": {
+        "new": ["in_progress"],
+        "in_progress": ["resolved"],
+        "resolved": ["archived"],
+    },
+    "alert": {
+        "new": ["acknowledged"],
+        "acknowledged": ["resolved"],
+        "resolved": ["archived"],
+    },
+    "assessment": {
+        "new": ["acknowledged"],
+        "acknowledged": ["escalated"],
+    },
+}
+
+SEVERITY_WEIGHTS = {"critical": 4, "warning": 2, "info": 1}
+AGE_BONUS_CAP = 2.0
+AGE_BONUS_PER_HOUR = 0.1
+
+
+def _gen_id() -> str:
+    return f"inb-{uuid.uuid4().hex[:12]}"
+
+
+def _get_cluster_id() -> str | None:
+    try:
+        from .config import get_settings
+
+        return getattr(get_settings(), "cluster_id", None)
+    except Exception:
+        return None
+
+
+def compute_priority_score(
+    severity: str | None,
+    confidence: float,
+    noise_score: float,
+    created_at: int,
+    due_date: int | None,
+) -> float:
+    weight = SEVERITY_WEIGHTS.get(severity or "info", 1)
+    base = weight * confidence * (1 - noise_score)
+
+    age_hours = (time.time() - created_at) / 3600
+    age_bonus = min(age_hours * AGE_BONUS_PER_HOUR, AGE_BONUS_CAP)
+
+    due_bonus = 0.0
+    if due_date is not None:
+        hours_until = (due_date - time.time()) / 3600
+        if hours_until <= 24:
+            due_bonus = 2.0
+        elif hours_until <= 72:
+            due_bonus = 1.0
+
+    return base + age_bonus + due_bonus
+
+
+def create_inbox_item(item: dict[str, Any]) -> str:
+    db = get_database()
+    item_id = _gen_id()
+    now = int(time.time())
+    resources = item.get("resources", [])
+    metadata = item.get("metadata", {})
+    priority = compute_priority_score(
+        severity=item.get("severity"),
+        confidence=item.get("confidence", 0),
+        noise_score=item.get("noise_score", 0),
+        created_at=now,
+        due_date=item.get("due_date"),
+    )
+
+    db.execute(
+        """INSERT INTO inbox_items
+        (id, item_type, status, title, summary, severity, priority_score,
+         confidence, noise_score, namespace, resources, correlation_key,
+         created_by, due_date, finding_id, view_id, cluster_id,
+         pinned_by, metadata, created_at, updated_at)
+        VALUES (?, ?, 'new', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '[]', ?, ?, ?)""",
+        (
+            item_id,
+            item["item_type"],
+            item["title"],
+            item.get("summary", ""),
+            item.get("severity"),
+            priority,
+            item.get("confidence", 0),
+            item.get("noise_score", 0),
+            item.get("namespace"),
+            json.dumps(resources),
+            item.get("correlation_key"),
+            item["created_by"],
+            item.get("due_date"),
+            item.get("finding_id"),
+            item.get("view_id"),
+            item.get("cluster_id") or _get_cluster_id(),
+            json.dumps(metadata),
+            now,
+            now,
+        ),
+    )
+    db.commit()
+    return item_id
+
+
+def get_inbox_item(item_id: str) -> dict[str, Any] | None:
+    db = get_database()
+    row = db.fetchone("SELECT * FROM inbox_items WHERE id = ?", (item_id,))
+    if row is None:
+        return None
+    return _deserialize_row(row)
+
+
+def list_inbox_items(
+    item_type: str | None = None,
+    status: str | None = None,
+    namespace: str | None = None,
+    claimed_by: str | None = None,
+    severity: str | None = None,
+    group_by: str | None = None,
+) -> dict[str, Any]:
+    db = get_database()
+    where_parts = [
+        "(snoozed_until IS NULL OR snoozed_until <= ?)",
+        "status NOT IN ('archived')",
+    ]
+    params: list[Any] = [int(time.time())]
+
+    if item_type:
+        where_parts.append("item_type = ?")
+        params.append(item_type)
+    if status:
+        where_parts.append("status = ?")
+        params.append(status)
+    if namespace:
+        where_parts.append("namespace = ?")
+        params.append(namespace)
+    if claimed_by:
+        where_parts.append("claimed_by = ?")
+        params.append(claimed_by)
+    if severity:
+        where_parts.append("severity = ?")
+        params.append(severity)
+
+    where = " AND ".join(where_parts)
+    rows = db.fetchall(
+        f"SELECT * FROM inbox_items WHERE {where} ORDER BY priority_score DESC",
+        tuple(params),
+    )
+    items = [_deserialize_row(r) for r in rows]
+
+    groups: list[dict[str, Any]] = []
+    ungrouped: list[dict[str, Any]] = []
+
+    if group_by == "correlation":
+        corr_map: dict[str, list[dict[str, Any]]] = {}
+        for item in items:
+            key = item.get("correlation_key")
+            if key:
+                corr_map.setdefault(key, []).append(item)
+            else:
+                ungrouped.append(item)
+
+        for key, group_items in corr_map.items():
+            if len(group_items) >= 2:
+                severities = [i.get("severity") for i in group_items if i.get("severity")]
+                top = "critical" if "critical" in severities else ("warning" if "warning" in severities else "info")
+                groups.append(
+                    {
+                        "correlation_key": key,
+                        "items": group_items,
+                        "count": len(group_items),
+                        "top_severity": top,
+                    }
+                )
+            else:
+                ungrouped.extend(group_items)
+    else:
+        ungrouped = items
+
+    all_for_stats = ungrouped + [i for g in groups for i in g["items"]]
+    return {
+        "items": ungrouped,
+        "groups": groups,
+        "stats": _compute_stats(all_for_stats),
+        "total": len(all_for_stats),
+    }
+
+
+def _compute_stats(items: list[dict[str, Any]]) -> dict[str, int]:
+    stats: dict[str, int] = {}
+    for item in items:
+        s = item.get("status", "new")
+        stats[s] = stats.get(s, 0) + 1
+    stats["total"] = len(items)
+    return stats
+
+
+def get_inbox_stats() -> dict[str, int]:
+    db = get_database()
+    now = int(time.time())
+    rows = db.fetchall(
+        """SELECT status, COUNT(*) as cnt FROM inbox_items
+        WHERE (snoozed_until IS NULL OR snoozed_until <= ?)
+        AND status NOT IN ('archived')
+        GROUP BY status""",
+        (now,),
+    )
+    stats: dict[str, int] = {}
+    total = 0
+    for row in rows:
+        stats[row["status"]] = row["cnt"]
+        total += row["cnt"]
+    stats["total"] = total
+    return stats
+
+
+def update_item_status(item_id: str, new_status: str) -> bool:
+    item = get_inbox_item(item_id)
+    if item is None:
+        return False
+
+    item_type = item["item_type"]
+    current_status = item["status"]
+    transitions = VALID_TRANSITIONS.get(item_type, {})
+    valid_next = transitions.get(current_status, [])
+
+    if new_status not in valid_next:
+        return False
+
+    db = get_database()
+    now = int(time.time())
+    resolved_at = now if new_status == "resolved" else item.get("resolved_at")
+    db.execute(
+        "UPDATE inbox_items SET status = ?, updated_at = ?, resolved_at = ? WHERE id = ?",
+        (new_status, now, resolved_at, item_id),
+    )
+    db.commit()
+    return True
+
+
+def claim_item(item_id: str, username: str) -> bool:
+    item = get_inbox_item(item_id)
+    if item is None:
+        return False
+
+    db = get_database()
+    now = int(time.time())
+    db.execute(
+        "UPDATE inbox_items SET claimed_by = ?, claimed_at = ?, updated_at = ? WHERE id = ?",
+        (username, now, now, item_id),
+    )
+    db.commit()
+
+    if item["status"] == "new":
+        if item["item_type"] == "task":
+            update_item_status(item_id, "in_progress")
+        elif item["item_type"] == "finding":
+            update_item_status(item_id, "acknowledged")
+
+    return True
+
+
+def unclaim_item(item_id: str) -> bool:
+    db = get_database()
+    now = int(time.time())
+    db.execute(
+        "UPDATE inbox_items SET claimed_by = NULL, claimed_at = NULL, updated_at = ? WHERE id = ?",
+        (now, item_id),
+    )
+    db.commit()
+    return True
+
+
+def snooze_item(item_id: str, hours: float) -> bool:
+    item = get_inbox_item(item_id)
+    if item is None:
+        return False
+
+    db = get_database()
+    now = int(time.time())
+    snoozed_until = now + int(hours * 3600)
+
+    metadata = item.get("metadata", {})
+    metadata["pre_snooze_status"] = item["status"]
+
+    db.execute(
+        "UPDATE inbox_items SET snoozed_until = ?, metadata = ?, updated_at = ? WHERE id = ?",
+        (snoozed_until, json.dumps(metadata), now, item_id),
+    )
+    db.commit()
+    return True
+
+
+def unsnooze_expired() -> int:
+    db = get_database()
+    now = int(time.time())
+    rows = db.fetchall(
+        "SELECT id, metadata FROM inbox_items WHERE snoozed_until IS NOT NULL AND snoozed_until <= ?",
+        (now,),
+    )
+    count = 0
+    for row in rows:
+        raw = row["metadata"]
+        metadata = json.loads(raw) if isinstance(raw, str) else (raw or {})
+        pre_status = metadata.pop("pre_snooze_status", "new")
+        db.execute(
+            "UPDATE inbox_items SET snoozed_until = NULL, status = ?, metadata = ?, updated_at = ? WHERE id = ?",
+            (pre_status, json.dumps(metadata), now, row["id"]),
+        )
+        count += 1
+    if count:
+        db.commit()
+    return count
+
+
+def upsert_inbox_item(item: dict[str, Any]) -> str:
+    db = get_database()
+    corr_key = item.get("correlation_key")
+    item_type = item["item_type"]
+
+    existing = None
+    if corr_key:
+        row = db.fetchone(
+            "SELECT * FROM inbox_items WHERE correlation_key = ? AND item_type = ? AND status NOT IN ('resolved', 'archived')",
+            (corr_key, item_type),
+        )
+        if row:
+            existing = _deserialize_row(row)
+
+    if existing is None:
+        return create_inbox_item(item)
+
+    existing_resources = existing.get("resources", [])
+    new_resources = item.get("resources", [])
+    existing_names = {(r["kind"], r["name"], r["namespace"]) for r in existing_resources}
+    for r in new_resources:
+        if (r["kind"], r["name"], r["namespace"]) not in existing_names:
+            existing_resources.append(r)
+
+    now = int(time.time())
+    priority = compute_priority_score(
+        severity=item.get("severity", existing.get("severity")),
+        confidence=item.get("confidence", existing.get("confidence", 0)),
+        noise_score=item.get("noise_score", existing.get("noise_score", 0)),
+        created_at=existing["created_at"],
+        due_date=item.get("due_date", existing.get("due_date")),
+    )
+
+    db.execute(
+        "UPDATE inbox_items SET resources = ?, priority_score = ?, updated_at = ? WHERE id = ?",
+        (json.dumps(existing_resources), priority, now, existing["id"]),
+    )
+    db.commit()
+    return existing["id"]
+
+
+def escalate_assessment(item_id: str) -> str | None:
+    item = get_inbox_item(item_id)
+    if item is None or item["item_type"] != "assessment":
+        return None
+
+    db = get_database()
+    now = int(time.time())
+    db.execute(
+        "UPDATE inbox_items SET status = 'escalated', updated_at = ? WHERE id = ?",
+        (now, item_id),
+    )
+    db.commit()
+
+    finding_item = {
+        "item_type": "finding",
+        "title": item["title"],
+        "summary": item.get("summary", ""),
+        "severity": item.get("severity", "warning"),
+        "confidence": item.get("confidence", 0),
+        "noise_score": 0,
+        "namespace": item.get("namespace"),
+        "resources": item.get("resources", []),
+        "correlation_key": item.get("correlation_key"),
+        "created_by": "system:monitor",
+        "metadata": {"escalated_from": item_id},
+    }
+    return create_inbox_item(finding_item)
+
+
+def pin_item(item_id: str, username: str) -> bool:
+    item = get_inbox_item(item_id)
+    if item is None:
+        return False
+
+    pinned = item.get("pinned_by", [])
+    if username in pinned:
+        pinned.remove(username)
+    else:
+        pinned.append(username)
+
+    db = get_database()
+    now = int(time.time())
+    db.execute(
+        "UPDATE inbox_items SET pinned_by = ?, updated_at = ? WHERE id = ?",
+        (json.dumps(pinned), now, item_id),
+    )
+    db.commit()
+    return True
+
+
+def prune_old_items(max_age_days: int = 30) -> int:
+    db = get_database()
+    cutoff = int(time.time()) - max_age_days * 86400
+    cur = db.execute(
+        "DELETE FROM inbox_items WHERE status IN ('resolved', 'archived') AND resolved_at IS NOT NULL AND resolved_at < ?",
+        (cutoff,),
+    )
+    db.commit()
+    return cur.rowcount if hasattr(cur, "rowcount") else 0
+
+
+def _deserialize_row(row: Any) -> dict[str, Any]:
+    d = dict(row)
+    for json_field in ("resources", "pinned_by", "metadata"):
+        if json_field in d and isinstance(d[json_field], str):
+            d[json_field] = json.loads(d[json_field])
+    return d
