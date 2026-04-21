@@ -480,6 +480,18 @@ def _validate_component(comp: dict, result: QualityResult) -> None:
                         f"blast_radius item status must be one of {_BLAST_RADIUS_VALID_STATUSES}, got '{status}'."
                     )
 
+    elif kind == "status_pipeline":
+        steps = comp.get("steps")
+        current = comp.get("current")
+        if not steps or not isinstance(steps, list):
+            result.errors.append("status_pipeline must have 'steps' (non-empty list).")
+        elif len(steps) < 2:
+            result.errors.append("status_pipeline must have at least 2 steps.")
+        if current is None or not isinstance(current, int):
+            result.errors.append("status_pipeline must have 'current' (int).")
+        elif isinstance(steps, list) and (current < 0 or current >= len(steps)):
+            result.errors.append(f"status_pipeline 'current' must be 0..{len(steps) - 1}, got {current}.")
+
     elif kind == "action_button":
         if not comp.get("label"):
             result.errors.append("action_button must have 'label'.")

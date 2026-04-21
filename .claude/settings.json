@@ -1,4 +1,18 @@
 {
+  "permissions": {
+    "allow": [
+      "Bash(oc get *)",
+      "Bash(oc logs *)",
+      "Bash(oc describe *)",
+      "Bash(oc whoami *)",
+      "Bash(npx vitest *)",
+      "Bash(npx tsc *)",
+      "Bash(helm template *)",
+      "Bash(helm lint *)",
+      "Bash(npm run type-check)",
+      "Bash(npm run test)"
+    ]
+  },
   "hooks": {
     "PreToolUse": [
       {

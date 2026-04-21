@@ -1,4 +1,4 @@
-.PHONY: lint format type-check test verify test-all evals helm-lint release sync-token clean
+.PHONY: lint format type-check test verify test-all evals helm-lint release sync-token clean coverage perf perf-baseline perf-check
 
 lint:
 	python3 -m ruff check sre_agent/ tests/
@@ -14,6 +14,19 @@ test:
 
 verify: lint type-check test
 	@echo "All checks passed."
+
+coverage:
+	python3 -m pytest tests/ --cov=sre_agent --cov-fail-under=80 --cov-report=term-missing
+
+perf:
+	python3 -m pytest tests/perf/ -v
+
+perf-baseline:
+	python3 -m pytest tests/perf/ -v --tb=short | tee tests/perf/baselines/latest.txt
+	@echo "Baseline saved to tests/perf/baselines/latest.txt"
+
+perf-check:
+	python3 -m pytest tests/perf/ -v
 
 evals:
 	@echo "Running deterministic evals..."

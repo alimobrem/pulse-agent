@@ -35,6 +35,11 @@ _KIND_MAP: dict[str, tuple[str, int, int]] = {
     "resource_counts": ("kpi_group", 4, 4),
     "summary_bar": ("kpi_group", 4, 3),
     "topology": ("chart", 4, 24),
+    "status_pipeline": ("kpi_group", 4, 3),
+    "confidence_badge": ("kpi", 1, 2),
+    "resolution_tracker": ("detail", 4, 10),
+    "blast_radius": ("detail", 4, 8),
+    "action_button": ("detail", 1, 3),
 }
 
 # Width hint vocabulary
@@ -361,3 +366,139 @@ def _pack_details(
             y += h
 
     return y
+
+
+# ---------------------------------------------------------------------------
+# View-type layout templates — hero header + tabs for agent views
+# ---------------------------------------------------------------------------
+
+_INCIDENT_STEPS = ["Detected", "Investigated", "Action Taken", "Verifying", "Resolved"]
+_PLAN_STEPS = ["Analyzing", "Ready", "Executing", "Completed"]
+_ASSESSMENT_STEPS = ["Analyzing", "Ready", "Acknowledged"]
+
+_STATUS_TO_STEP: dict[str, dict[str, int]] = {
+    "incident": {
+        "investigating": 1,
+        "action_taken": 2,
+        "verifying": 3,
+        "resolved": 4,
+    },
+    "plan": {
+        "analyzing": 0,
+        "ready": 1,
+        "executing": 2,
+        "completed": 3,
+    },
+    "assessment": {
+        "analyzing": 0,
+        "ready": 1,
+        "acknowledged": 2,
+    },
+}
+
+_TAB_TEMPLATES: dict[str, list[str]] = {
+    "incident": ["Resolution", "Analysis", "Impact", "Timeline"],
+    "plan": ["Prerequisites", "Steps", "Impact", "Current State"],
+    "assessment": ["Trend", "Recommendations", "Impact"],
+}
+
+_VIEW_STEPS: dict[str, list[str]] = {
+    "incident": _INCIDENT_STEPS,
+    "plan": _PLAN_STEPS,
+    "assessment": _ASSESSMENT_STEPS,
+}
+
+
+def build_view_layout(
+    components: list[dict],
+    view_type: str,
+    status: str = "",
+) -> list[dict]:
+    """Wrap components in a hero-header + tabs layout for agent view types.
+
+    Returns a new layout list: [section(hero), tabs(...)].
+    Custom views pass through unchanged.
+    """
+    if view_type not in _TAB_TEMPLATES:
+        return components
+
+    steps_list = _VIEW_STEPS[view_type]
+
+    step_map = _STATUS_TO_STEP.get(view_type, {})
+    current_step = step_map.get(status, 0)
+
+    hero_children: list[dict] = []
+    tab_buckets: dict[str, list[dict]] = {t: [] for t in _TAB_TEMPLATES[view_type]}
+    tab_names = _TAB_TEMPLATES[view_type]
+
+    confidence_badge = None
+    metric_cards: list[dict] = []
+
+    for comp in components:
+        kind = comp.get("kind", "")
+        if kind == "confidence_badge":
+            confidence_badge = comp
+        elif kind == "status_pipeline":
+            pass
+        elif kind == "metric_card":
+            metric_cards.append(comp)
+        elif kind in ("resolution_tracker", "action_button"):
+            tab_buckets[tab_names[0]].append(comp)
+        elif kind == "blast_radius":
+            if "Impact" in tab_buckets:
+                tab_buckets["Impact"].append(comp)
+            else:
+                tab_buckets[tab_names[-1]].append(comp)
+        elif kind == "timeline":
+            if view_type == "incident" and "Timeline" in tab_buckets:
+                tab_buckets["Timeline"].append(comp)
+            else:
+                tab_buckets[tab_names[-1]].append(comp)
+        elif kind in ("key_value", "data_table"):
+            if view_type == "incident":
+                tab_buckets["Analysis"].append(comp)
+            elif view_type == "plan":
+                tab_buckets["Current State"].append(comp)
+            else:
+                tab_buckets[tab_names[0]].append(comp)
+        else:
+            tab_buckets[tab_names[0]].append(comp)
+
+    if confidence_badge:
+        hero_children.append(confidence_badge)
+
+    hero_children.append(
+        {
+            "kind": "status_pipeline",
+            "steps": steps_list,
+            "current": current_step,
+        }
+    )
+
+    if metric_cards:
+        hero_children.append(
+            {
+                "kind": "grid",
+                "columns": min(len(metric_cards), 6),
+                "items": metric_cards,
+            }
+        )
+
+    tabs_content = []
+    for tab_name in tab_names:
+        bucket = tab_buckets[tab_name]
+        tabs_content.append({"label": tab_name, "components": bucket})
+
+    return [
+        {
+            "kind": "section",
+            "title": "",
+            "collapsible": False,
+            "defaultOpen": True,
+            "components": hero_children,
+        },
+        {
+            "kind": "tabs",
+            "tabs": tabs_content,
+        },
+    ]

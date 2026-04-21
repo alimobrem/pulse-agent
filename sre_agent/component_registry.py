@@ -541,6 +541,23 @@ register_component(
 
 register_component(
     ComponentKind(
+        name="status_pipeline",
+        description="Horizontal status step indicator showing investigation/plan progress",
+        category="status",
+        required_fields=["steps", "current"],
+        optional_fields=[],
+        title_required=False,
+        example={
+            "kind": "status_pipeline",
+            "steps": ["Detected", "Investigated", "Action Taken", "Verifying", "Resolved"],
+            "current": 1,
+        },
+        prompt_hint="status_pipeline — Horizontal step indicator for view lifecycle progress. steps: list of stage names, current: 0-based index of active step.",
+    )
+)
+
+register_component(
+    ComponentKind(
         name="action_button",
         description="Executable action button that triggers a tool with confirmation for write operations",
         category="action",

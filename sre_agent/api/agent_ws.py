@@ -408,8 +408,11 @@ async def _run_agent_ws(
             finding_id = sig.get("finding_id")
             view_visibility = sig.get("visibility", "private")
 
-            # Compute positions using semantic layout engine
-            from ..layout_engine import compute_layout
+            # Apply view-type layout template for agent views (hero + tabs)
+            from ..layout_engine import build_view_layout, compute_layout
+
+            if view_type != "custom":
+                session_components = build_view_layout(session_components, view_type, view_status)
 
             positions = compute_layout(session_components)
 
