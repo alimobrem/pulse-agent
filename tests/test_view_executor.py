@@ -73,6 +73,102 @@ class TestPropsOnlyWidgets:
         assert "nonexistent_widget" not in kinds
         assert "resolution_tracker" in kinds
 
+
+# ---------------------------------------------------------------------------
+# Tool-backed widgets
+# ---------------------------------------------------------------------------
+
+from unittest.mock import MagicMock, patch
+
+
+class TestToolBackedWidgets:
+    def test_tool_returns_tuple_extracts_component(self):
+        from sre_agent.view_executor import execute_view_plan
+
+        mock_tool = MagicMock()
+        mock_tool.call.return_value = (
+            "2 pods found",
+            {"kind": "status_list", "items": [{"name": "pod-1", "status": "healthy"}]},
+        )
+
+        with patch("sre_agent.view_executor._resolve_tool", return_value=mock_tool):
+            plan = [{"kind": "status_list", "title": "Pods", "tool": "list_pods", "args": {"namespace": "prod"}}]
+            layout = execute_view_plan(plan, {"id": "x", "title": "x", "metadata": {}})
+
+        pods = [w for w in layout if w.get("title") == "Pods"]
+        assert len(pods) == 1
+        mock_tool.call.assert_called_once_with({"namespace": "prod"})
+
+    def test_tool_returns_string_wraps_in_info_card(self):
+        from sre_agent.view_executor import execute_view_plan
+
+        mock_tool = MagicMock()
+        mock_tool.call.return_value = "No events found"
+
+        with patch("sre_agent.view_executor._resolve_tool", return_value=mock_tool):
+            plan = [{"kind": "data_table", "title": "Events", "tool": "get_events", "args": {"namespace": "prod"}}]
+            layout = execute_view_plan(plan, {"id": "x", "title": "x", "metadata": {}})
+
+        events = [w for w in layout if w.get("title") == "Events"]
+        assert len(events) == 1
+        assert events[0]["kind"] == "info_card_grid"
+
+    def test_write_tool_rejected(self):
+        from sre_agent.view_executor import execute_view_plan
+
+        plan = [{"kind": "action_button", "title": "Delete", "tool": "delete_pod", "args": {"name": "x"}}]
+        with patch("sre_agent.view_executor.WRITE_TOOL_NAMES", {"delete_pod"}):
+            layout = execute_view_plan(plan, {"id": "x", "title": "x", "metadata": {}})
+        assert not any(w.get("title") == "Delete" for w in layout)
+
+    def test_unknown_tool_skipped(self):
+        from sre_agent.view_executor import execute_view_plan
+
+        with patch("sre_agent.view_executor._resolve_tool", return_value=None):
+            plan = [{"kind": "data_table", "title": "X", "tool": "fake_tool", "args": {}}]
+            layout = execute_view_plan(plan, {"id": "x", "title": "x", "metadata": {}})
+        assert not any(w.get("title") == "X" for w in layout)
+
+    def test_tool_timeout_skips_widget(self):
+        from sre_agent.view_executor import execute_view_plan
+
+        mock_tool = MagicMock()
+
+        def slow_call(args):
+            import time
+
+            time.sleep(30)
+
+        mock_tool.call.side_effect = slow_call
+
+        with patch("sre_agent.view_executor._resolve_tool", return_value=mock_tool):
+            with patch("sre_agent.view_executor._TOOL_TIMEOUT", 0.1):
+                plan = [{"kind": "data_table", "title": "Slow", "tool": "slow_tool", "args": {}}]
+                layout = execute_view_plan(plan, {"id": "x", "title": "x", "metadata": {}})
+        assert not any(w.get("title") == "Slow" for w in layout)
+
+    def test_tool_exception_skips_widget(self):
+        from sre_agent.view_executor import execute_view_plan
+
+        mock_tool = MagicMock()
+        mock_tool.call.side_effect = RuntimeError("connection refused")
+
+        with patch("sre_agent.view_executor._resolve_tool", return_value=mock_tool):
+            plan = [
+                {"kind": "data_table", "title": "Fail", "tool": "fail_tool", "args": {}},
+                {"kind": "resolution_tracker", "title": "Good", "props": {"steps": []}},
+            ]
+            layout = execute_view_plan(plan, {"id": "x", "title": "x", "metadata": {}})
+        assert not any(w.get("title") == "Fail" for w in layout)
+        assert any(w.get("title") == "Good" for w in layout)
+
+    def test_non_dict_args_skipped(self):
+        from sre_agent.view_executor import execute_view_plan
+
+        plan = [{"kind": "data_table", "title": "Bad", "tool": "get_events", "args": "not a dict"}]
+        layout = execute_view_plan(plan, {"id": "x", "title": "x", "metadata": {}})
+        assert not any(w.get("title") == "Bad" for w in layout)
+
     def test_confidence_badge_always_present(self):
         from sre_agent.view_executor import execute_view_plan
 
