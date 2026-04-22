@@ -176,6 +176,18 @@ def verify_query(query: str):
     if any(c in query for c in [";", "\\", "\n", "\r"]):
         return "Error: Invalid characters in query."
 
+    thanos_warning = ""
+    try:
+        from ..prometheus import get_prometheus_client
+        from ..promql_recipes import check_thanos_compatibility
+
+        if get_prometheus_client().is_acm_available():
+            w = check_thanos_compatibility(query)
+            if w:
+                thanos_warning = f"⚠ ACM Thanos: {w}\n"
+    except Exception:
+        pass
+
     try:
         data = prometheus_request("api/v1/query", params={"query": query}, timeout=15)
     except Exception as e:
@@ -189,7 +201,7 @@ def verify_query(query: str):
             record_query_result(query, success=False, series_count=0)
         except Exception:
             pass
-        return f"FAIL_SYNTAX: {error_msg}"
+        return f"{thanos_warning}FAIL_SYNTAX: {error_msg}"
 
     results = data.get("data", {}).get("result", [])
 
@@ -214,7 +226,7 @@ def verify_query(query: str):
     except Exception:
         pass
 
-    return f"PASS: Query returns data ({len(results)} series, sample: {sample_info})"
+    return f"{thanos_warning}PASS: Query returns data ({len(results)} series, sample: {sample_info})"
 
 
 @beta_tool

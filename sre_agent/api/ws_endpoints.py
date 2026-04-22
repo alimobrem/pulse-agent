@@ -156,9 +156,10 @@ async def websocket_agent(websocket: WebSocket, mode: str):
             if fleet_mode:
                 content = (
                     "[FLEET MODE: This query spans all managed clusters. "
-                    "Use fleet_* tools (fleet_list_pods, fleet_list_deployments, fleet_compare_resource, etc.) "
-                    "to query across clusters. Do NOT use single-cluster tools unless the user specifies a cluster.]\n\n"
-                    + content
+                    "Use fleet_* tools (fleet_list_pods, fleet_list_deployments, fleet_compare_resource, "
+                    "fleet_query_metrics, fleet_compare_metrics, etc.) to query across clusters. "
+                    "For metrics, fleet_query_metrics routes through ACM Thanos. "
+                    "Do NOT use single-cluster tools unless the user specifies a cluster.]\n\n" + content
                 )
 
             # Context from Pulse UI -- sanitize and prefix
@@ -364,9 +365,10 @@ async def websocket_auto_agent(websocket: WebSocket):
             if fleet_mode:
                 content = (
                     "[FLEET MODE: This query spans all managed clusters. "
-                    "Use fleet_* tools (fleet_list_pods, fleet_list_deployments, fleet_compare_resource, etc.) "
-                    "to query across clusters. Do NOT use single-cluster tools unless the user specifies a cluster.]\n\n"
-                    + content
+                    "Use fleet_* tools (fleet_list_pods, fleet_list_deployments, fleet_compare_resource, "
+                    "fleet_query_metrics, fleet_compare_metrics, etc.) to query across clusters. "
+                    "For metrics, fleet_query_metrics routes through ACM Thanos. "
+                    "Do NOT use single-cluster tools unless the user specifies a cluster.]\n\n" + content
                 )
 
             # --- Auto-classify intent with sticky mode ---

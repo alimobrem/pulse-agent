@@ -107,6 +107,14 @@ spec:
             - name: PULSE_AGENT_MEMORY
               value: "1"
             {{- end }}
+            {{- if .Values.acm.enabled }}
+            - name: PULSE_AGENT_ACM_THANOS_ENABLED
+              value: "true"
+            {{- if .Values.acm.thanosUrl }}
+            - name: PULSE_AGENT_ACM_THANOS_URL
+              value: {{ .Values.acm.thanosUrl | quote }}
+            {{- end }}
+            {{- end }}
             - name: PULSE_AGENT_WS_TOKEN
               valueFrom:
                 secretKeyRef:

@@ -107,6 +107,18 @@ rules:
     resources:
       - securitycontextconstraints
     verbs: ["get", "list"]
+  {{- if .Values.acm.enabled }}
+  # ACM ManagedCluster access (fleet tools + metrics)
+  - apiGroups: ["cluster.open-cluster-management.io"]
+    resources:
+      - managedclusters
+    verbs: ["get", "list"]
+  # ACM Observability (for Thanos detection)
+  - apiGroups: ["observability.open-cluster-management.io"]
+    resources:
+      - multiclusterobservabilities
+    verbs: ["get", "list"]
+  {{- end }}
   {{- if .Values.rbac.allowSecretAccess }}
   # Secret access (opt-in, for security scanning)
   - apiGroups: [""]

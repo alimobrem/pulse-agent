@@ -78,7 +78,10 @@ NEVER say you can't do something if you have a tool for it. Check your available
 FLEET_PREFIX = (
     "[FLEET MODE: This query spans all managed clusters. "
     "Use fleet_* tools (fleet_list_pods, fleet_list_deployments, "
-    "fleet_compare_resource, etc.) to query across clusters. "
+    "fleet_compare_resource, fleet_query_metrics, fleet_compare_metrics, etc.) "
+    "to query across clusters. For metrics, fleet_query_metrics routes through "
+    "ACM Thanos which aggregates metrics from all managed clusters — each metric "
+    "has a 'cluster' label for per-cluster filtering. "
     "Do NOT use single-cluster tools unless the user specifies a cluster.]"
 )
 
