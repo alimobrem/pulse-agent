@@ -166,12 +166,7 @@ class PromQLRecipe:
     metric: str
     scope: str
     parameters: list[str] = field(default_factory=list)
-    acm_safe: bool | None = None
-
-    def __post_init__(self) -> None:
-        if self.acm_safe is None:
-            # Recording rules (colon-separated names) may not exist on ACM Thanos
-            self.acm_safe = ":" not in self.metric
+    acm_safe: bool = True
 
     def render(self, **params: str) -> str:
         """Substitute parameter placeholders in the query.
@@ -543,7 +538,6 @@ RECIPES: dict[str, list[PromQLRecipe]] = {
             description="Ratio of CPU usage to total cluster capacity",
             metric="cluster:node_cpu:ratio",
             scope="cluster",
-            acm_safe=True,
         ),
         PromQLRecipe(
             name="Cluster CPU Cores Used",
@@ -552,7 +546,6 @@ RECIPES: dict[str, list[PromQLRecipe]] = {
             description="Total CPU cores actively used across the cluster",
             metric="cluster:cpu_usage_cores:sum",
             scope="cluster",
-            acm_safe=True,
         ),
         PromQLRecipe(
             name="Cluster Memory Used",
@@ -561,7 +554,6 @@ RECIPES: dict[str, list[PromQLRecipe]] = {
             description="Total memory actively used across the cluster",
             metric="cluster:memory_usage_bytes:sum",
             scope="cluster",
-            acm_safe=True,
         ),
         PromQLRecipe(
             name="Workload vs Platform CPU",
@@ -951,6 +943,23 @@ RECIPES: dict[str, list[PromQLRecipe]] = {
 # ---------------------------------------------------------------------------
 
 
+# OCP-specific recording rules not available on ACM Thanos hub
+_OCP_ONLY_PREFIXES = (
+    "instance:",
+    "pod:",
+    "namespace:",
+    "workload:",
+    "code:",
+    "cluster_quantile:",
+    "instance_device:",
+    "cluster:usage:",
+)
+for _recipes in RECIPES.values():
+    for _r in _recipes:
+        if any(_r.metric.startswith(_p) for _p in _OCP_ONLY_PREFIXES):
+            _r.acm_safe = False
+
+
 def get_recipe(metric_name: str) -> PromQLRecipe | None:
     """Find first recipe that uses a given metric name."""
     for recipes in RECIPES.values():
@@ -966,11 +975,6 @@ def get_recipes_for_category(category: str, acm_only: bool = False) -> list[Prom
     if acm_only:
         recipes = [r for r in recipes if r.acm_safe]
     return recipes
-
-
-def get_acm_fleet_recipes() -> list[PromQLRecipe]:
-    """Get all ACM fleet recipes (known to work on ACM Thanos hub)."""
-    return list(RECIPES.get("acm_fleet", []))
 
 
 def get_fallback(category: str, scope: str = "cluster") -> PromQLRecipe | None:

@@ -186,10 +186,4 @@ Every dashboard should be **shaped by its topic**, not a fixed template. Never d
 
 ## ACM Thanos Compatibility
 
-On ACM hub clusters (when cluster context shows "ACM Thanos: Available"):
-- Use `fleet_query_metrics()` instead of `get_prometheus_query()` for chart widgets
-- Add `cluster` label to scope queries: `{cluster="cluster-name",...}`
-- Avoid `group_left`/`group_right` joins — use separate chart widgets instead
-- Prefer `acm_fleet` category recipes (e.g., `cluster:cpu_usage_cores:sum`) — these are tested on ACM Thanos
-- Recording rules from single-cluster Prometheus may not exist — use raw metrics with `rate()` as fallback
-- Always `verify_query()` before adding PromQL to dashboards — it warns about Thanos incompatibilities
+When "ACM Thanos: Available" appears in cluster context, follow the FLEET MODE instructions. Use `fleet_query_metrics()` for chart widgets, prefer `acm_fleet` recipes, and always `verify_query()` before adding PromQL — it warns about Thanos incompatibilities.

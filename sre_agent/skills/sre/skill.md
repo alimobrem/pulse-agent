@@ -146,11 +146,4 @@ When asked about alerts or when an alert fires:
 
 ## ACM Hub / Multi-Cluster Monitoring
 
-When the cluster context shows "ACM Thanos: Available", this is an ACM hub with multi-cluster metrics:
-
-- **Use fleet tools for monitoring**: `fleet_query_metrics(query, cluster)` and `fleet_compare_metrics(query)` instead of `get_prometheus_query()`. Fleet tools route through ACM Thanos which aggregates metrics from all managed clusters.
-- **Cluster label**: Every metric has a `cluster` label identifying its source. Use `fleet_query_metrics(query, cluster="cluster-name")` for single-cluster, or `cluster="ALL"` for fleet-wide.
-- **Avoid `group_left`/`group_right`**: These joins 422 on Thanos. Use separate queries instead.
-- **Metrics allowlist**: ACM only collects a subset of metrics. Use `discover_metrics()` to check what's available. If a recording rule returns no data, try the raw metric with `rate()` instead.
-- **Fleet recipes**: Use recipes from the `acm_fleet` category — these are tested on ACM Thanos (e.g., `cluster:capacity_cpu_cores:sum`, `cluster:cpu_usage_cores:sum`).
-- **Single-cluster tools still work** for K8s API queries (`list_pods`, `describe_pod`, etc.) — only metrics queries need fleet tools.
+When "ACM Thanos: Available" appears in cluster context, follow the FLEET MODE instructions in the system prompt. Key points: use `fleet_query_metrics`/`fleet_compare_metrics` for metrics (not `get_prometheus_query`), use `acm_fleet` recipes, avoid `group_left`/`group_right` joins. K8s API tools (`list_pods`, `describe_pod`) still work for the hub cluster.
