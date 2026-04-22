@@ -11,6 +11,7 @@ from sre_agent.k8s_tools import (
     MAX_REPLICAS,
     MAX_TAIL_LINES,
     WRITE_TOOLS,
+    apply_yaml,
     cordon_node,
     delete_pod,
     describe_deployment,
@@ -907,3 +908,67 @@ class TestGetResourceRecommendations:
 
         text = _text(result)
         assert "no" in text.lower() or "No" in text
+
+
+class TestApplyYaml:
+    VALID_CM = (
+        "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: test-cm\n  namespace: default\ndata:\n  key: value\n"
+    )
+
+    def test_apply_success(self, mock_k8s):
+        resp_data = SimpleNamespace(data=json.dumps({"metadata": {"name": "test-cm"}}).encode())
+        mock_k8s["core"].api_client.call_api.return_value = (resp_data,)
+        result = apply_yaml.call({"yaml_content": self.VALID_CM})
+        text = _text(result)
+        assert "Applied" in text
+        assert "test-cm" in text
+        mock_k8s["core"].api_client.call_api.assert_called_once()
+        call_args = mock_k8s["core"].api_client.call_api.call_args
+        assert call_args[0][1] == "PATCH"
+        assert ("fieldManager", "pulse-agent") in call_args[1]["query_params"]
+
+    def test_dry_run(self, mock_k8s):
+        resp_data = SimpleNamespace(data=json.dumps({"metadata": {"name": "test-cm"}}).encode())
+        mock_k8s["core"].api_client.call_api.return_value = (resp_data,)
+        result = apply_yaml.call({"yaml_content": self.VALID_CM, "dry_run": True})
+        text = _text(result)
+        assert "Dry-run" in text
+        call_args = mock_k8s["core"].api_client.call_api.call_args
+        assert ("dryRun", "All") in call_args[1]["query_params"]
+
+    def test_rejects_invalid_yaml(self, mock_k8s):
+        result = apply_yaml.call({"yaml_content": "not: valid: yaml: {{"})
+        text = _text(result)
+        assert "Error" in text
+
+    def test_rejects_missing_kind(self, mock_k8s):
+        result = apply_yaml.call({"yaml_content": "apiVersion: v1\nmetadata:\n  name: x\n"})
+        text = _text(result)
+        assert "Error" in text
+
+    def test_rejects_disallowed_kind(self, mock_k8s):
+        yaml = "apiVersion: v1\nkind: Secret\nmetadata:\n  name: bad\n  namespace: default\n"
+        result = apply_yaml.call({"yaml_content": yaml})
+        text = _text(result)
+        assert "not allowed" in text
+
+    def test_rejects_invalid_name(self, mock_k8s):
+        yaml = "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: 'INVALID NAME!'\n  namespace: default\n"
+        result = apply_yaml.call({"yaml_content": yaml})
+        text = _text(result)
+        assert "Error" in text or "Invalid" in text
+
+    def test_api_error_returned(self, mock_k8s):
+        from kubernetes.client.rest import ApiException
+
+        mock_k8s["core"].api_client.call_api.side_effect = ApiException(status=403, reason="Forbidden")
+        result = apply_yaml.call({"yaml_content": self.VALID_CM})
+        text = _text(result)
+        assert "403" in text
+        assert "Forbidden" in text
+
+    def test_uses_initialized_client(self, mock_k8s):
+        resp_data = SimpleNamespace(data=json.dumps({"metadata": {"name": "test-cm"}}).encode())
+        mock_k8s["core"].api_client.call_api.return_value = (resp_data,)
+        apply_yaml.call({"yaml_content": self.VALID_CM})
+        mock_k8s["core"].api_client.call_api.assert_called_once()

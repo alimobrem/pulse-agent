@@ -121,10 +121,8 @@ def apply_yaml(yaml_content: str, namespace: str = "", dry_run: bool = False):
     }
     plural = plural_map.get(kind, kind.lower() + "s")
 
-    # Use server-side apply
-    from kubernetes import client as k8s_client
-
-    api = k8s_client.ApiClient()
+    # Use server-side apply via the initialized API client
+    api = _kc.get_core_client().api_client
 
     try:
         # Try server-side apply (PATCH with application/apply-patch+yaml)
