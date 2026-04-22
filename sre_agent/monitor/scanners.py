@@ -237,7 +237,7 @@ def scan_firing_alerts() -> list[dict]:
     """Check Prometheus for firing alerts."""
     findings: list[dict[str, Any]] = []
     try:
-        data = get_prometheus_client()._request("api/v1/rules", {"type": "alert"}, 15, PrometheusBackend.LOCAL)
+        data = get_prometheus_client().request("api/v1/rules", {"type": "alert"}, 15, PrometheusBackend.LOCAL)
         if data.get("status") != "success":
             return findings
         for group in data.get("data", {}).get("groups", []):

@@ -677,7 +677,7 @@ class TestScanFiringAlerts:
 
     def _patch_prom(self, response):
         mock_client = MagicMock()
-        mock_client._request.return_value = response
+        mock_client.request.return_value = response
         return patch("sre_agent.monitor.scanners.get_prometheus_client", return_value=mock_client)
 
     def test_detects_firing_critical_alert(self):
@@ -756,7 +756,7 @@ class TestScanFiringAlerts:
 
     def test_api_error_returns_empty(self):
         mock_client = MagicMock()
-        mock_client._request.side_effect = Exception("no monitoring")
+        mock_client.request.side_effect = Exception("no monitoring")
         with patch("sre_agent.monitor.scanners.get_prometheus_client", return_value=mock_client):
             findings = scan_firing_alerts()
         assert findings == []

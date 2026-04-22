@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import json
+import logging
 from typing import Any
+
+logger = logging.getLogger("pulse_agent.monitoring")
 
 from kubernetes.client.rest import ApiException
 
@@ -186,7 +189,7 @@ def verify_query(query: str):
             if w:
                 thanos_warning = f"⚠ ACM Thanos: {w}\n"
     except Exception:
-        pass
+        logger.debug("Thanos compat check skipped", exc_info=True)
 
     try:
         data = prometheus_request("api/v1/query", params={"query": query}, timeout=15)

@@ -515,33 +515,27 @@ def fleet_query_metrics(
         title: Chart title (auto-generated if empty).
         description: What to watch for.
     """
-    from .prometheus import PrometheusBackend, get_prometheus_client
+    import time as _time
+
+    from .prometheus import (
+        ACM_NOT_AVAILABLE_MSG,
+        CHART_COLORS,
+        PrometheusBackend,
+        get_prometheus_client,
+        parse_time_range,
+    )
     from .promql_recipes import check_thanos_compatibility, inject_cluster_label
 
     prom = get_prometheus_client()
     if not prom.is_acm_available():
-        return (
-            "ACM multicluster-observability is not available on this cluster. "
-            "Fleet metrics require the ACM Observatorium stack. "
-            "Check that the open-cluster-management-observability namespace exists and Thanos is running."
-        )
+        return ACM_NOT_AVAILABLE_MSG
 
     warning = check_thanos_compatibility(query)
+    is_all = cluster.upper() == "ALL"
 
-    effective_query = query
-    if cluster.upper() != "ALL":
-        effective_query = inject_cluster_label(query, cluster)
+    effective_query = query if is_all else inject_cluster_label(query, cluster)
 
-    import time as _time
-
-    _UNITS = {"s": 1, "m": 60, "h": 3600, "d": 86400}
-    try:
-        unit = time_range[-1]
-        amount = int(time_range[:-1])
-        seconds = amount * _UNITS.get(unit, 3600)
-    except (ValueError, IndexError):
-        seconds = 3600
-
+    seconds = parse_time_range(time_range)
     now = int(_time.time())
     step = max(60, seconds // 120)
 
@@ -556,13 +550,11 @@ def fleet_query_metrics(
     results = data.get("data", {}).get("result", [])
     if not results:
         msg = f"No results for: {effective_query}"
-        if cluster.upper() != "ALL":
+        if not is_all:
             msg += f"\nMetric may not be in the ACM metrics allowlist, or cluster '{cluster}' has no data."
         return msg
 
-    _COLORS = ["#60a5fa", "#34d399", "#fbbf24", "#f87171", "#a78bfa", "#38bdf8", "#fb923c", "#e879f9"]
-
-    auto_title = title or f"Fleet: {query[:50]}" + (f" ({cluster})" if cluster.upper() != "ALL" else "")
+    auto_title = title or f"Fleet: {query[:50]}" + (f" ({cluster})" if not is_all else "")
 
     series = []
     text_lines = [f"{auto_title} — {len(results)} series, range {time_range}"]
@@ -571,15 +563,8 @@ def fleet_query_metrics(
         label = metric.get("cluster", metric.get("pod", metric.get("namespace", f"series-{i}")))
         values = r.get("values", [])
         if values:
-            latest = values[-1][1]
-            text_lines.append(f"  {label}: {latest}")
-        series.append(
-            {
-                "label": label,
-                "color": _COLORS[i % len(_COLORS)],
-                "values": values,
-            }
-        )
+            text_lines.append(f"  {label}: {values[-1][1]}")
+        series.append({"label": label, "color": CHART_COLORS[i % len(CHART_COLORS)], "values": values})
 
     if warning:
         text_lines.insert(0, f"⚠ {warning}")
@@ -588,7 +573,7 @@ def fleet_query_metrics(
         "kind": "chart",
         "chartType": "line",
         "title": auto_title,
-        "description": description or f"Fleet metrics across {'all clusters' if cluster.upper() == 'ALL' else cluster}",
+        "description": description or f"Fleet metrics across {'all clusters' if is_all else cluster}",
         "series": series,
         "timeRange": time_range,
     }
@@ -608,27 +593,23 @@ def fleet_compare_metrics(query: str, time_range: str = "1h", title: str = ""):
         time_range: Time range (e.g. '5m', '1h', '24h'). Defaults to '1h'.
         title: Chart title (auto-generated if empty).
     """
-    from .prometheus import PrometheusBackend, get_prometheus_client
+    import time as _time
+
+    from .prometheus import (
+        ACM_NOT_AVAILABLE_MSG,
+        CHART_COLORS,
+        PrometheusBackend,
+        get_prometheus_client,
+        parse_time_range,
+    )
 
     prom = get_prometheus_client()
     if not prom.is_acm_available():
-        return (
-            "ACM multicluster-observability is not available on this cluster. "
-            "Fleet metrics require the ACM Observatorium stack."
-        )
+        return ACM_NOT_AVAILABLE_MSG
 
     comparison_query = f"sum by (cluster) ({query})"
 
-    import time as _time
-
-    _UNITS = {"s": 1, "m": 60, "h": 3600, "d": 86400}
-    try:
-        unit = time_range[-1]
-        amount = int(time_range[:-1])
-        seconds = amount * _UNITS.get(unit, 3600)
-    except (ValueError, IndexError):
-        seconds = 3600
-
+    seconds = parse_time_range(time_range)
     now = int(_time.time())
     step = max(60, seconds // 120)
 
@@ -644,8 +625,6 @@ def fleet_compare_metrics(query: str, time_range: str = "1h", title: str = ""):
     if not results:
         return f"No results for fleet comparison: {query}"
 
-    _COLORS = ["#60a5fa", "#34d399", "#fbbf24", "#f87171", "#a78bfa", "#38bdf8", "#fb923c", "#e879f9"]
-
     auto_title = title or f"Fleet Comparison: {query[:50]}"
 
     series = []
@@ -655,13 +634,7 @@ def fleet_compare_metrics(query: str, time_range: str = "1h", title: str = ""):
         values = r.get("values", [])
         latest = values[-1][1] if values else "N/A"
         text_lines.append(f"  {cluster_name}: {latest}")
-        series.append(
-            {
-                "label": cluster_name,
-                "color": _COLORS[i % len(_COLORS)],
-                "values": values,
-            }
-        )
+        series.append({"label": cluster_name, "color": CHART_COLORS[i % len(CHART_COLORS)], "values": values})
 
     component = {
         "kind": "chart",

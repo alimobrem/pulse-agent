@@ -12,6 +12,7 @@ import json
 import logging
 import os
 import ssl
+import time as _time
 import urllib.parse
 import urllib.request
 
@@ -27,6 +28,28 @@ _CA_PATHS = [
     "/etc/pki/tls/certs/ca-bundle.crt",
 ]
 
+_TIME_UNITS = {"s": 1, "m": 60, "h": 3600, "d": 86400}
+
+CHART_COLORS = ["#60a5fa", "#34d399", "#fbbf24", "#f87171", "#a78bfa", "#38bdf8", "#fb923c", "#e879f9"]
+
+ACM_NOT_AVAILABLE_MSG = (
+    "ACM multicluster-observability is not available on this cluster. "
+    "Fleet metrics require the ACM Observatorium stack. "
+    "Check that the open-cluster-management-observability namespace exists and Thanos is running."
+)
+
+_TOKEN_TTL = 300
+
+
+def parse_time_range(time_range: str) -> int:
+    """Parse a time range string like '5m', '1h', '24h' into seconds."""
+    try:
+        unit = time_range[-1]
+        amount = int(time_range[:-1])
+        return amount * _TIME_UNITS.get(unit, 3600)
+    except (ValueError, IndexError):
+        return 3600
+
 
 class PrometheusBackend(enum.Enum):
     LOCAL = "local"
@@ -34,11 +57,17 @@ class PrometheusBackend(enum.Enum):
 
 
 class PrometheusClient:
-    """Unified Prometheus/Thanos HTTP client with dual-backend support."""
+    """Unified Prometheus/Thanos HTTP client with dual-backend support.
+
+    SSL context and SA token are cached. ACM detection is cached for the
+    process lifetime after first check.
+    """
 
     def __init__(self) -> None:
         self._acm_available: bool | None = None
         self._ssl_ctx: ssl.SSLContext | None = None
+        self._token: str | None = None
+        self._token_read_at: float = 0.0
 
     def _get_settings(self):
         from .config import get_settings
@@ -46,7 +75,7 @@ class PrometheusClient:
         return get_settings()
 
     def query(self, promql: str, *, backend: PrometheusBackend = PrometheusBackend.LOCAL, timeout: int = 30) -> dict:
-        return self._request("api/v1/query", {"query": promql}, timeout, backend)
+        return self.request("api/v1/query", {"query": promql}, timeout, backend)
 
     def query_range(
         self,
@@ -58,7 +87,7 @@ class PrometheusClient:
         backend: PrometheusBackend = PrometheusBackend.LOCAL,
         timeout: int = 30,
     ) -> dict:
-        return self._request(
+        return self.request(
             "api/v1/query_range",
             {"query": promql, "start": str(start), "end": str(end), "step": str(step)},
             timeout,
@@ -68,7 +97,7 @@ class PrometheusClient:
     def label_values(
         self, label: str, *, backend: PrometheusBackend = PrometheusBackend.LOCAL, timeout: int = 15
     ) -> list[str]:
-        data = self._request(f"api/v1/label/{label}/values", None, timeout, backend)
+        data = self.request(f"api/v1/label/{label}/values", None, timeout, backend)
         if data.get("status") == "success":
             return data.get("data", [])
         return []
@@ -132,13 +161,18 @@ class PrometheusClient:
         return ctx
 
     def _get_token(self) -> str:
+        now = _time.monotonic()
+        if self._token is not None and (now - self._token_read_at) < _TOKEN_TTL:
+            return self._token
         try:
             with open("/var/run/secrets/kubernetes.io/serviceaccount/token") as f:
-                return f.read().strip()
+                self._token = f.read().strip()
         except FileNotFoundError:
-            return ""
+            self._token = ""
+        self._token_read_at = now
+        return self._token
 
-    def _request(self, endpoint: str, params: dict | None, timeout: int, backend: PrometheusBackend) -> dict:
+    def request(self, endpoint: str, params: dict | None, timeout: int, backend: PrometheusBackend) -> dict:
         base_url = self._get_url(backend)
         url = f"{base_url}/{endpoint}"
         if params:
@@ -174,4 +208,4 @@ def _reset_prometheus_client() -> None:
 
 def prometheus_request(endpoint: str, params: dict | None = None, timeout: int = 30) -> dict:
     """Backward-compatible wrapper — routes to LOCAL backend."""
-    return get_prometheus_client()._request(endpoint, params, timeout, PrometheusBackend.LOCAL)
+    return get_prometheus_client().request(endpoint, params, timeout, PrometheusBackend.LOCAL)

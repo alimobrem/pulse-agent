@@ -83,12 +83,12 @@ class TestBackwardCompat:
     def test_prometheus_request_wrapper(self):
         with patch("sre_agent.prometheus.get_prometheus_client") as mock_get:
             mock_client = MagicMock()
-            mock_client._request.return_value = {"status": "success"}
+            mock_client.request.return_value = {"status": "success"}
             mock_get.return_value = mock_client
 
             result = prometheus_request("api/v1/query", {"query": "up"}, 15)
 
-            mock_client._request.assert_called_once_with("api/v1/query", {"query": "up"}, 15, PrometheusBackend.LOCAL)
+            mock_client.request.assert_called_once_with("api/v1/query", {"query": "up"}, 15, PrometheusBackend.LOCAL)
             assert result == {"status": "success"}
 
     def test_get_prometheus_client_singleton(self):
@@ -102,16 +102,16 @@ class TestBackwardCompat:
 
 
 class TestQueryMethods:
-    def test_query_calls_request(self):
+    def test_query_callsrequest(self):
         client = PrometheusClient()
-        with patch.object(client, "_request") as mock_req:
+        with patch.object(client, "request") as mock_req:
             mock_req.return_value = {"status": "success", "data": {"result": []}}
             client.query("up", backend=PrometheusBackend.ACM, timeout=10)
             mock_req.assert_called_once_with("api/v1/query", {"query": "up"}, 10, PrometheusBackend.ACM)
 
-    def test_query_range_calls_request(self):
+    def test_query_range_callsrequest(self):
         client = PrometheusClient()
-        with patch.object(client, "_request") as mock_req:
+        with patch.object(client, "request") as mock_req:
             mock_req.return_value = {"status": "success"}
             client.query_range("up", 1000, 2000, 60, backend=PrometheusBackend.LOCAL)
             mock_req.assert_called_once_with(
@@ -123,14 +123,14 @@ class TestQueryMethods:
 
     def test_label_values(self):
         client = PrometheusClient()
-        with patch.object(client, "_request") as mock_req:
+        with patch.object(client, "request") as mock_req:
             mock_req.return_value = {"status": "success", "data": ["up", "node_cpu"]}
             result = client.label_values("__name__")
             assert result == ["up", "node_cpu"]
 
     def test_label_values_failure(self):
         client = PrometheusClient()
-        with patch.object(client, "_request") as mock_req:
+        with patch.object(client, "request") as mock_req:
             mock_req.return_value = {"status": "error"}
             result = client.label_values("__name__")
             assert result == []
