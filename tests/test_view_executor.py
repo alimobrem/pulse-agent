@@ -258,3 +258,73 @@ class TestStaleness:
         assert len(header) >= 1
         cards = header[0]["props"]["cards"]
         assert any("Memory leak" in c["value"] for c in cards)
+
+
+# ---------------------------------------------------------------------------
+# Integration with inbox.py
+# ---------------------------------------------------------------------------
+
+
+class TestIntegrationWithInbox:
+    def test_generate_view_uses_view_plan(self):
+        from sre_agent.inbox import _generate_view_for_item
+
+        item = {
+            "id": "inb-test",
+            "title": "OOM killed",
+            "summary": "Pod OOM",
+            "severity": "critical",
+            "namespace": "prod",
+            "resources": [],
+            "metadata": {
+                "view_plan": [
+                    {"kind": "resolution_tracker", "title": "Steps", "props": {"steps": []}},
+                ],
+                "view_plan_at": int(time.time()),
+                "investigation_summary": "OOM due to memory leak",
+                "investigation_confidence": 0.85,
+            },
+        }
+
+        with (
+            patch("sre_agent.inbox.get_database") as mock_db,
+            patch("sre_agent.db.save_view") as mock_save,
+            patch("sre_agent.inbox._publish_event"),
+        ):
+            mock_db.return_value = MagicMock()
+            _generate_view_for_item("inb-test", item)
+
+        mock_save.assert_called_once()
+        call_kwargs = mock_save.call_args
+        layout = call_kwargs.kwargs.get("layout") or call_kwargs[1].get("layout")
+        assert any(c["kind"] == "confidence_badge" for c in layout)
+        assert any(c["kind"] == "resolution_tracker" for c in layout)
+
+    def test_generate_view_falls_back_without_view_plan(self):
+        from sre_agent.inbox import _generate_view_for_item
+
+        item = {
+            "id": "inb-old",
+            "title": "Old item",
+            "summary": "Legacy",
+            "severity": "warning",
+            "namespace": "prod",
+            "resources": [],
+            "metadata": {
+                "investigation_summary": "Something happened",
+            },
+        }
+
+        with (
+            patch("sre_agent.inbox.get_database") as mock_db,
+            patch("sre_agent.db.save_view") as mock_save,
+            patch("sre_agent.inbox._publish_event"),
+            patch(
+                "sre_agent.inbox._generate_smart_layout",
+                return_value=[{"kind": "info_card_grid", "title": "Old", "props": {}}],
+            ),
+        ):
+            mock_db.return_value = MagicMock()
+            _generate_view_for_item("inb-old", item)
+
+        mock_save.assert_called_once()

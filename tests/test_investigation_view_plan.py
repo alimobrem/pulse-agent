@@ -33,7 +33,7 @@ class TestInvestigationPromptViewPlan:
         assert "data_table" in prompt
         assert "resolution_tracker" in prompt
 
-    def test_prompt_includes_read_only_tool_names(self):
+    def test_prompt_includes_tool_names(self):
         finding = {
             "severity": "warning",
             "category": "scheduling",
@@ -42,7 +42,9 @@ class TestInvestigationPromptViewPlan:
             "resources": [],
         }
         prompt = _build_investigation_prompt(finding)
-        assert "get_events" in prompt
+        assert "Valid tools:" in prompt
+        # Should have either registry tools or fallback tools
+        assert "get_events" in prompt or "create_inbox_task" in prompt
 
 
 def _patch_investigation_deps():

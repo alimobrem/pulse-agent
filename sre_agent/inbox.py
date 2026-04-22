@@ -363,7 +363,7 @@ Reply ONLY with valid JSON, no markdown:
 def _generate_view_for_item(item_id: str, item: dict[str, Any], owner: str = "system") -> None:
     """Generate an investigation view when a user claims an item."""
     metadata = item.get("metadata", {})
-    if not metadata.get("investigation_summary") and not metadata.get("action_plan"):
+    if not metadata.get("investigation_summary") and not metadata.get("action_plan") and not metadata.get("view_plan"):
         return
 
     if item.get("view_id"):
@@ -378,7 +378,15 @@ def _generate_view_for_item(item_id: str, item: dict[str, Any], owner: str = "sy
         )
         db.commit()
 
-        layout = _generate_smart_layout(item, metadata)
+        view_plan = metadata.get("view_plan", [])
+        if view_plan:
+            from .view_executor import execute_view_plan
+
+            layout = execute_view_plan(view_plan, item)
+            if not layout:
+                layout = _fallback_layout(item, metadata)
+        else:
+            layout = _generate_smart_layout(item, metadata)
 
         from .db import save_view
 
@@ -962,6 +970,14 @@ def _phase_b_investigate() -> int:
                 metadata["evidence"] = result.get("evidence", [])
                 metadata["skill_used"] = "sre"
                 metadata["tools_offered"] = tools_offered[:20]
+
+                raw_view_plan = result.get("viewPlan", [])
+                if isinstance(raw_view_plan, list) and raw_view_plan:
+                    from .view_executor import validate_view_plan
+
+                    metadata["view_plan"] = validate_view_plan(raw_view_plan)
+                    if metadata["view_plan"]:
+                        metadata["view_plan_at"] = int(time.time())
 
                 try:
                     from .dependency_graph import get_graph
