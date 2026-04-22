@@ -295,7 +295,9 @@ def save_view(
         "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
         "ON CONFLICT (id) DO UPDATE SET "
         "title = EXCLUDED.title, description = EXCLUDED.description, icon = EXCLUDED.icon, "
-        "layout = EXCLUDED.layout, positions = EXCLUDED.positions, updated_at = EXCLUDED.updated_at "
+        "layout = EXCLUDED.layout, positions = EXCLUDED.positions, updated_at = EXCLUDED.updated_at, "
+        "view_type = EXCLUDED.view_type, status = EXCLUDED.status, trigger_source = EXCLUDED.trigger_source, "
+        "finding_id = EXCLUDED.finding_id, visibility = EXCLUDED.visibility "
         "WHERE views.owner = EXCLUDED.owner",
         (
             view_id,

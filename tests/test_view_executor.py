@@ -171,6 +171,57 @@ class TestToolBackedWidgets:
 
 
 # ---------------------------------------------------------------------------
+# validate_view_plan
+# ---------------------------------------------------------------------------
+
+
+class TestValidateViewPlan:
+    def test_accepts_valid_widgets(self):
+        from sre_agent.view_executor import validate_view_plan
+
+        plan = [
+            {"kind": "chart", "title": "CPU", "props": {"query": "up"}},
+            {"kind": "resolution_tracker", "title": "Steps", "props": {"steps": []}},
+        ]
+        validated = validate_view_plan(plan)
+        assert len(validated) == 2
+
+    def test_rejects_invalid_kind(self):
+        from sre_agent.view_executor import validate_view_plan
+
+        plan = [{"kind": "fake_widget", "title": "X", "props": {}}]
+        assert len(validate_view_plan(plan)) == 0
+
+    def test_rejects_write_tool(self):
+        from sre_agent.view_executor import validate_view_plan
+
+        plan = [{"kind": "action_button", "title": "Delete", "tool": "delete_pod", "args": {}}]
+        with patch("sre_agent.view_executor.WRITE_TOOL_NAMES", {"delete_pod"}):
+            with patch("sre_agent.view_executor.TOOL_REGISTRY", {"delete_pod": MagicMock()}):
+                assert len(validate_view_plan(plan)) == 0
+
+    def test_rejects_unknown_tool(self):
+        from sre_agent.view_executor import validate_view_plan
+
+        plan = [{"kind": "data_table", "title": "X", "tool": "nonexistent_tool", "args": {}}]
+        assert len(validate_view_plan(plan)) == 0
+
+    def test_caps_at_max_widgets(self):
+        from sre_agent.view_executor import validate_view_plan
+
+        plan = [{"kind": "chart", "title": f"W{i}", "props": {}} for i in range(10)]
+        assert len(validate_view_plan(plan)) <= 6
+
+    def test_passes_through_valid_props_and_tool(self):
+        from sre_agent.view_executor import validate_view_plan
+
+        plan = [{"kind": "chart", "title": "CPU", "props": {"query": "up"}, "extra": "preserved"}]
+        validated = validate_view_plan(plan)
+        assert len(validated) == 1
+        assert validated[0]["extra"] == "preserved"
+
+
+# ---------------------------------------------------------------------------
 # Staleness
 # ---------------------------------------------------------------------------
 
