@@ -124,7 +124,7 @@ class TestInboxActions:
     def test_acknowledge(self, client, auth_headers):
         create = client.post(
             "/inbox",
-            json={"title": "Ack me", "item_type": "finding"},
+            json={"title": "Ack me"},
             headers=auth_headers,
         )
         item_id = create.json()["id"]
@@ -133,7 +133,7 @@ class TestInboxActions:
         assert resp.status_code == 200
 
         item = client.get(f"/inbox/{item_id}", headers=auth_headers).json()
-        assert item["status"] == "acknowledged"
+        assert item["status"] == "triaged"
 
     def test_snooze(self, client, auth_headers):
         create = client.post("/inbox", json={"title": "Snooze me"}, headers=auth_headers)
@@ -159,11 +159,14 @@ class TestInboxActions:
     def test_resolve(self, client, auth_headers):
         create = client.post(
             "/inbox",
-            json={"title": "Resolve me", "item_type": "alert"},
+            json={"title": "Resolve me"},
             headers=auth_headers,
         )
         item_id = create.json()["id"]
+        # Follow the unified lifecycle: new → triaged → claimed → in_progress → resolved
         client.post(f"/inbox/{item_id}/acknowledge", headers=auth_headers)
+        client.post(f"/inbox/{item_id}/claim", headers=auth_headers)
+        client.patch(f"/inbox/{item_id}", json={"status": "in_progress"}, headers=auth_headers)
 
         resp = client.post(f"/inbox/{item_id}/resolve", headers=auth_headers)
         assert resp.status_code == 200
@@ -181,11 +184,10 @@ class TestInboxActions:
     def test_escalate(self, client, auth_headers):
         create = client.post(
             "/inbox",
-            json={"title": "Escalate me", "item_type": "assessment"},
+            json={"title": "Escalate me"},
             headers=auth_headers,
         )
         item_id = create.json()["id"]
-        client.post(f"/inbox/{item_id}/acknowledge", headers=auth_headers)
 
         resp = client.post(f"/inbox/{item_id}/escalate", headers=auth_headers)
         assert resp.status_code == 200

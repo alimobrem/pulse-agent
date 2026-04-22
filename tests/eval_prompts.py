@@ -428,6 +428,12 @@ EVAL_PROMPTS: list[tuple[str, list[str], str, str]] = [
         "sre",
         "ACM fleet CPU hotspot",
     ),
+    (
+        "create a task to rotate the TLS certificates next week",
+        ["create_inbox_task"],
+        "sre",
+        "Inbox task creation",
+    ),
     # ─── Security ─────────────────────────────────────────────────────────
     (
         "scan RBAC for overly permissive roles",

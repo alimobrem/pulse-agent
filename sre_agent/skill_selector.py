@@ -609,8 +609,9 @@ class SkillSelector:
                     scores[skill_name] = max(scores.get(skill_name, 0), 0.7)
 
         if signal.time_of_day in ("off_hours", "weekend"):
-            if "slo_management" in scores:
-                scores["slo_management"] = max(scores["slo_management"], 0.1)
+            for slo_key in ("slo-management", "slo_management"):
+                if slo_key in self._skills:
+                    scores[slo_key] = max(scores.get(slo_key, 0), 0.1)
             if not scores:
                 scores["sre"] = 0.4
                 scores["security"] = 0.3

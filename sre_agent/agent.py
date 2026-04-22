@@ -24,6 +24,7 @@ from .harness import (
     get_cluster_context,
     get_component_hint,
 )
+from .inbox import create_inbox_task
 from .k8s_tools import ALL_TOOLS as _K8S_TOOLS
 from .k8s_tools import WRITE_TOOLS
 from .predict_tools import PREDICT_TOOLS
@@ -71,6 +72,7 @@ ALL_TOOLS: list[Any] = (
         edit_skill,
         delete_skill,
         create_skill_from_template,
+        create_inbox_task,
     ]
 )
 

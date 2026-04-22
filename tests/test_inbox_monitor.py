@@ -37,7 +37,7 @@ class TestFindingToInbox:
         assert item_id is not None
 
         item = get_inbox_item(item_id)
-        assert item["item_type"] == "finding"
+        assert item["item_type"] == "task"
         assert item["finding_id"] == "f-test-001"
         assert item["severity"] == "critical"
 
@@ -82,10 +82,9 @@ class TestFindingToInbox:
             "namespace": "default",
         }
         item_id = bridge_finding_to_inbox(finding)
-        update_item_status(item_id, "acknowledged")
-        update_item_status(item_id, "investigating")
-        update_item_status(item_id, "action_taken")
-        update_item_status(item_id, "verifying")
+        update_item_status(item_id, "triaged")
+        update_item_status(item_id, "claimed")
+        update_item_status(item_id, "in_progress")
 
         resolve_finding_inbox_item("f-resolve-001")
 
@@ -100,7 +99,7 @@ class TestGeneratorScanIntegration:
 
         mock_generators.return_value = [
             {
-                "item_type": "assessment",
+                "item_type": "task",
                 "title": "Cert expiring in 48h",
                 "summary": "Renew cert",
                 "severity": "warning",
@@ -115,7 +114,7 @@ class TestGeneratorScanIntegration:
         ]
         run_generator_cycle()
 
-        items = list_inbox_items(item_type="assessment")
+        items = list_inbox_items(item_type="task")
         assert len(items["items"]) >= 1
 
     @patch("sre_agent.inbox_generators.run_all_generators")
@@ -124,7 +123,7 @@ class TestGeneratorScanIntegration:
 
         item_id = create_inbox_item(
             {
-                "item_type": "assessment",
+                "item_type": "task",
                 "title": "Was expiring",
                 "created_by": "system:monitor",
                 "correlation_key": "cert_expiry:old-cert:prod",

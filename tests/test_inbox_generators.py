@@ -16,7 +16,7 @@ class TestCertExpiryGenerator:
         items = gen_cert_expiry()
         assert len(items) == 1
         assert items[0]["severity"] in ("critical", "warning")
-        assert items[0]["item_type"] == "assessment"
+        assert items[0]["item_type"] == "task"
 
     @patch("sre_agent.inbox_generators._get_tls_secrets")
     def test_no_items_when_certs_healthy(self, mock_secrets):
@@ -45,7 +45,7 @@ class TestTrendPredictionGenerator:
         ]
         items = gen_trend_prediction()
         assert len(items) == 1
-        assert items[0]["item_type"] == "assessment"
+        assert items[0]["item_type"] == "task"
         assert items[0]["metadata"]["urgency_hours"] == 18
 
 

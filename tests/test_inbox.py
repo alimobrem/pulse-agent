@@ -317,11 +317,14 @@ class TestCorrelation:
 
 class TestCleanup:
     def test_prune_old_resolved(self):
+        import sre_agent.inbox as _inbox_mod
         from sre_agent.inbox import (
             create_inbox_item,
             prune_old_items,
             update_item_status,
         )
+
+        _inbox_mod._last_prune_time = 0
 
         item_id = create_inbox_item(_make_item(title="Old resolved"))
         update_item_status(item_id, "triaged")
