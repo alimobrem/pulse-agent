@@ -43,6 +43,7 @@ def _build_investigation_prompt(finding: dict) -> str:
         if not read_tools:
             read_tools = ["get_events", "list_pods", "list_deployments", "get_prometheus_query"]
     except Exception:
+        logger.debug("Registry unavailable for viewPlan hints, using fallback", exc_info=True)
         view_kinds = ["chart", "data_table", "resolution_tracker", "status_list", "metric_card"]
         read_tools = ["get_events", "list_pods", "list_deployments", "get_prometheus_query"]
 

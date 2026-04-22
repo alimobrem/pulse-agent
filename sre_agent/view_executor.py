@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import atexit
 import concurrent.futures
 import logging
 import time
@@ -16,10 +17,11 @@ _MAX_WIDGETS = 6
 _TOOL_TIMEOUT = 10
 _STALENESS_THRESHOLD = 1800
 _executor = concurrent.futures.ThreadPoolExecutor(max_workers=3, thread_name_prefix="view")
+atexit.register(_executor.shutdown, wait=False)
 
 
-def _resolve_tool(tool_name: str):
-    """Resolve a tool name to its registered tool object, or None."""
+def _resolve_tool(tool_name: str) -> Any:
+    """Resolve a tool name to its registered tool object, or None. Separate function for testability."""
     return TOOL_REGISTRY.get(tool_name)
 
 
@@ -86,7 +88,7 @@ def _execute_tool_widget(widget: dict[str, Any]) -> dict[str, Any] | None:
         future.cancel()
         return None
     except Exception:
-        logger.debug("Tool %s failed, skipping widget", tool_name, exc_info=True)
+        logger.warning("Tool %s failed, skipping widget", tool_name, exc_info=True)
         return None
 
     title = widget.get("title", "")
@@ -135,8 +137,6 @@ def execute_view_plan(view_plan: list[dict[str, Any]], item: dict[str, Any]) -> 
     Always prepends confidence badge + investigation summary header.
     Skips tool-backed widgets if plan is stale (>30min old).
     """
-    valid_kinds = get_valid_kinds()
-
     layout = _build_header_widgets(item)
 
     view_plan_at = item.get("metadata", {}).get("view_plan_at", 0)
@@ -158,12 +158,10 @@ def execute_view_plan(view_plan: list[dict[str, Any]], item: dict[str, Any]) -> 
             }
         )
 
+    valid_kinds = get_valid_kinds()
     for widget in view_plan[:_MAX_WIDGETS]:
-        kind = widget.get("kind", "")
-        if kind not in valid_kinds:
-            logger.debug("Skipping widget with invalid kind: %s", kind)
+        if widget.get("kind", "") not in valid_kinds:
             continue
-
         if "tool" in widget:
             if is_stale:
                 logger.debug("Skipping stale tool widget: %s", widget.get("title", ""))
@@ -172,6 +170,6 @@ def execute_view_plan(view_plan: list[dict[str, Any]], item: dict[str, Any]) -> 
             if component:
                 layout.append(component)
         elif "props" in widget:
-            layout.append({"kind": kind, "title": widget.get("title", ""), "props": widget["props"]})
+            layout.append({"kind": widget["kind"], "title": widget.get("title", ""), "props": widget["props"]})
 
     return layout
