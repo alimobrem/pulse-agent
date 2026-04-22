@@ -410,6 +410,24 @@ EVAL_PROMPTS: list[tuple[str, list[str], str, str]] = [
         "sre",
         "Fleet metrics comparison",
     ),
+    (
+        "show API server latency p99 for each ACM cluster",
+        ["fleet_query_metrics"],
+        "sre",
+        "ACM API server latency fleet query",
+    ),
+    (
+        "is etcd healthy on all managed clusters",
+        ["fleet_query_metrics", "fleet_list_clusters"],
+        "sre",
+        "ACM etcd health fleet check",
+    ),
+    (
+        "which cluster has the highest CPU utilization in the fleet",
+        ["fleet_compare_metrics"],
+        "sre",
+        "ACM fleet CPU hotspot",
+    ),
     # ─── Security ─────────────────────────────────────────────────────────
     (
         "scan RBAC for overly permissive roles",

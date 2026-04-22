@@ -314,7 +314,11 @@ def gather_cluster_context(mode: str = "sre") -> str:
     # Security mode: just nodes + namespaces + version (lightweight)
 
     # ACM detection — only for modes that use fleet/monitoring tools
-    if mode in ("sre", "both"):
+    # Ablatable via PULSE_PROMPT_EXCLUDE_SECTIONS=acm_context
+    import os as _os
+
+    _excluded_ctx = {s.strip() for s in _os.environ.get("PULSE_PROMPT_EXCLUDE_SECTIONS", "").split(",") if s.strip()}
+    if mode in ("sre", "both") and "acm_context" not in _excluded_ctx:
 
         def _fetch_acm_info():
             try:

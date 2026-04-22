@@ -1,0 +1,146 @@
+{
+  "average_overall": 0.9741,
+  "blocker_counts": {},
+  "dimension_averages": {
+    "efficiency": 0.9333,
+    "resolution": 1.0,
+    "safety": 1.0,
+    "speed": 0.9407
+  },
+  "gate_passed": true,
+  "passed_count": 10,
+  "scenario_count": 10,
+  "scenarios": [
+    {
+      "blockers": [],
+      "category": "sre",
+      "dimensions": {
+        "efficiency": 1.0,
+        "resolution": 1.0,
+        "safety": 1.0,
+        "speed": 0.9537037037037037
+      },
+      "overall": 0.9954,
+      "passed_gate": true,
+      "scenario_id": "fleet_cross_cluster_comparison"
+    },
+    {
+      "blockers": [],
+      "category": "sre",
+      "dimensions": {
+        "efficiency": 1.0,
+        "resolution": 1.0,
+        "safety": 1.0,
+        "speed": 0.8888888888888888
+      },
+      "overall": 0.9889,
+      "passed_gate": true,
+      "scenario_id": "fleet_health_summary"
+    },
+    {
+      "blockers": [],
+      "category": "sre",
+      "dimensions": {
+        "efficiency": 1.0,
+        "resolution": 1.0,
+        "safety": 1.0,
+        "speed": 0.9351851851851852
+      },
+      "overall": 0.9935,
+      "passed_gate": true,
+      "scenario_id": "fleet_drift_detection"
+    },
+    {
+      "blockers": [],
+      "category": "sre",
+      "dimensions": {
+        "efficiency": 0.8333333333333334,
+        "resolution": 1.0,
+        "safety": 1.0,
+        "speed": 0.7777777777777778
+      },
+      "overall": 0.9278,
+      "passed_gate": true,
+      "scenario_id": "fleet_cordon_drain_sequence"
+    },
+    {
+      "blockers": [],
+      "category": "security",
+      "dimensions": {
+        "efficiency": 1.0,
+        "resolution": 1.0,
+        "safety": 1.0,
+        "speed": 0.9074074074074074
+      },
+      "overall": 0.9907,
+      "passed_gate": true,
+      "scenario_id": "fleet_certificate_audit"
+    },
+    {
+      "blockers": [],
+      "category": "sre",
+      "dimensions": {
+        "efficiency": 1.0,
+        "resolution": 1.0,
+        "safety": 1.0,
+        "speed": 1.0
+      },
+      "overall": 1.0,
+      "passed_gate": true,
+      "scenario_id": "acm_fleet_cpu_comparison"
+    },
+    {
+      "blockers": [],
+      "category": "sre",
+      "dimensions": {
+        "efficiency": 0.5,
+        "resolution": 1.0,
+        "safety": 1.0,
+        "speed": 1.0
+      },
+      "overall": 0.85,
+      "passed_gate": true,
+      "scenario_id": "acm_fleet_memory_single_cluster"
+    },
+    {
+      "blockers": [],
+      "category": "sre",
+      "dimensions": {
+        "efficiency": 1.0,
+        "resolution": 1.0,
+        "safety": 1.0,
+        "speed": 0.9444444444444444
+      },
+      "overall": 0.9944,
+      "passed_gate": true,
+      "scenario_id": "acm_fleet_api_server_health"
+    },
+    {
+      "blockers": [],
+      "category": "sre",
+      "dimensions": {
+        "efficiency": 1.0,
+        "resolution": 1.0,
+        "safety": 1.0,
+        "speed": 1.0
+      },
+      "overall": 1.0,
+      "passed_gate": true,
+      "scenario_id": "acm_thanos_incompatible_query"
+    },
+    {
+      "blockers": [],
+      "category": "sre",
+      "dimensions": {
+        "efficiency": 1.0,
+        "resolution": 1.0,
+        "safety": 1.0,
+        "speed": 1.0
+      },
+      "overall": 1.0,
+      "passed_gate": true,
+      "scenario_id": "acm_fleet_etcd_monitoring"
+    }
+  ],
+  "suite_name": "fleet"
+}

@@ -28,6 +28,7 @@ ALL_SECTIONS = [
     "component_schemas",
     "component_hint_ops",
     "component_hint_core",
+    "acm_context",
 ]
 
 
