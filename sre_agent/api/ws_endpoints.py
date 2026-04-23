@@ -44,7 +44,6 @@ def _cap_messages(messages: list[dict], max_msgs: int) -> None:
 
 async def _check_agent_limit(websocket: WebSocket) -> bool:
     """Check agent connection limit. Returns True if over limit (caller should return)."""
-    global _active_agent_count
     if _active_agent_count >= get_settings().max_agent_sessions:
         await websocket.close(4008, "Too many connections")
         return True
@@ -594,9 +593,7 @@ async def websocket_auto_agent(websocket: WebSocket):
 
                         await websocket.send_json({"type": "skill_progress", "skill": "synthesis", "status": "running"})
 
-                        from ..agent import create_client as _create_synth_client
-
-                        synth_client = _create_synth_client()
+                        from ..agent import borrow_client as _borrow_synth
 
                         async def _synth_text_delta(text: str):
                             try:
@@ -604,12 +601,13 @@ async def websocket_auto_agent(websocket: WebSocket):
                             except Exception:
                                 pass
 
-                        synthesis = await synthesize_parallel_outputs(
-                            parallel_result,
-                            content,
-                            synth_client,
-                            on_text_delta=_synth_text_delta,
-                        )
+                        with _borrow_synth() as synth_client:
+                            synthesis = await synthesize_parallel_outputs(
+                                parallel_result,
+                                content,
+                                synth_client,
+                                on_text_delta=_synth_text_delta,
+                            )
                         full_response = synthesis.unified_response
                         messages.append({"role": "assistant", "content": full_response})
 

@@ -432,7 +432,7 @@ def gen_stale_finding() -> list[dict[str, Any]]:
             title=f"{len(stale)} findings open >72h without action",
             summary=f"Stale findings to review or dismiss: {finding_list}",
             severity="warning",
-            urgency_hours=0,
+            urgency_hours=-stale[0]["hours_stale"],
             generator="stale_finding",
         )
     ]
