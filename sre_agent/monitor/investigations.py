@@ -214,7 +214,7 @@ def _run_proactive_investigation_sync(finding: dict, *, client=None) -> dict[str
         WRITE_TOOLS as SRE_WRITE_TOOLS,
     )
     from ..agent import (
-        create_client,
+        borrow_client,
         run_agent_streaming,
     )
     from ..harness import build_cached_system_prompt, get_cluster_context, get_component_hint
@@ -257,12 +257,9 @@ def _run_proactive_investigation_sync(finding: dict, *, client=None) -> dict[str
         agent_mode="pipeline:investigate",
     )
 
-    _owns_client = client is None
-    if _owns_client:
-        client = create_client()
-    try:
+    with borrow_client(client) as c:
         response = run_agent_streaming(
-            client=client,
+            client=c,
             messages=[{"role": "user", "content": prompt}],
             system_prompt=effective_system,
             tool_defs=readonly_defs,
@@ -270,12 +267,6 @@ def _run_proactive_investigation_sync(finding: dict, *, client=None) -> dict[str
             write_tools=set(),
             on_tool_result=on_tool_result,
         )
-    finally:
-        if _owns_client:
-            try:
-                client.close()
-            except Exception:
-                pass
 
     # Use module-level mutation
     import sre_agent.monitor.actions as _actions_mod
@@ -315,7 +306,7 @@ def _run_proactive_investigation_sync(finding: dict, *, client=None) -> dict[str
 
 def _run_security_followup_sync(finding: dict, *, client=None) -> dict:
     """Run a lightweight security check on the namespace of a critical finding."""
-    from ..agent import create_client, run_agent_streaming
+    from ..agent import borrow_client, run_agent_streaming
     from ..harness import build_cached_system_prompt, get_cluster_context, get_component_hint
     from ..security_agent import (
         SECURITY_SYSTEM_PROMPT,
@@ -328,9 +319,6 @@ def _run_security_followup_sync(finding: dict, *, client=None) -> dict:
     )
     from ..skill_loader import select_tools
 
-    _owns_client = client is None
-    if _owns_client:
-        client = create_client()
     resources = finding.get("resources", [])
     namespace = resources[0].get("namespace", "") if resources else ""
 
@@ -370,21 +358,15 @@ def _run_security_followup_sync(finding: dict, *, client=None) -> dict:
         except Exception:
             pass
 
-    try:
+    with borrow_client(client) as c:
         response = run_agent_streaming(
-            client=client,
+            client=c,
             messages=[{"role": "user", "content": prompt}],
             system_prompt=effective_system,
             tool_defs=sec_tool_defs,
             tool_map=sec_tool_map,
-            write_tools=set(),  # read-only
+            write_tools=set(),
         )
-    finally:
-        if _owns_client:
-            try:
-                client.close()
-            except Exception:
-                pass
     parsed = _extract_json_object(response) or {}
     return {
         "security_issues": parsed.get("security_issues", []),

@@ -27,6 +27,18 @@ def get_current_user() -> str:
     return _get_current_user()
 
 
+def _resolve_view(view_id: str) -> tuple[dict | None, str]:
+    """Look up view, falling back to any owner if current user doesn't match."""
+    from . import db
+
+    owner = get_current_user()
+    view = db.get_view(view_id, owner)
+    if not view:
+        view = db.get_view(view_id)
+    actual_owner = view.get("owner", owner) if view else owner
+    return view, actual_owner
+
+
 @beta_tool
 def update_view_widgets(
     view_id: str,
@@ -57,14 +69,9 @@ def update_view_widgets(
     """
     from . import db
 
-    owner = get_current_user()
-    view = db.get_view(view_id, owner)
-    if not view:
-        # Retry without owner filter — view may belong to a different user identity
-        view = db.get_view(view_id)
+    view, actual_owner = _resolve_view(view_id)
     if not view:
         return f"View '{view_id}' not found."
-    actual_owner = view.get("owner", owner)
 
     # Helper for params_json parsing (used by mutation actions below)
     def _parse_params() -> dict | str:
@@ -307,8 +314,7 @@ def remove_widget_from_view(view_id: str, widget_title: str):
     """
     from . import db
 
-    owner = get_current_user()
-    view = db.get_view(view_id, owner)
+    view, actual_owner = _resolve_view(view_id)
     if not view:
         return f"View '{view_id}' not found."
 
@@ -328,8 +334,6 @@ def remove_widget_from_view(view_id: str, widget_title: str):
     idx, removed = matches[0]
     removed_title = removed.get("title", removed.get("kind", "widget"))
     new_layout = [w for i, w in enumerate(layout) if i != idx]
-    # Use the view's actual owner for the update (agent identity may differ)
-    actual_owner = view.get("owner", owner)
     updated = db.update_view(view_id, actual_owner, _snapshot=True, _action="remove_widget", layout=new_layout)
     if not updated:
         return f"Failed to remove '{removed_title}' — permission denied or view not found."
@@ -350,11 +354,9 @@ def undo_view_change(view_id: str, version: int = -1):
     """
     from . import db
 
-    owner = get_current_user()
-    view = db.get_view(view_id, owner)
+    view, actual_owner = _resolve_view(view_id)
     if not view:
-        view = db.get_view(view_id)
-    actual_owner = view.get("owner", owner) if view else owner
+        return f"View '{view_id}' not found."
     if version == -1:
         versions = db.list_view_versions(view_id, limit=1)
         if not versions:
@@ -376,10 +378,7 @@ def get_view_versions(view_id: str):
     """
     from . import db
 
-    owner = get_current_user()
-    view = db.get_view(view_id, owner)
-    if not view:
-        view = db.get_view(view_id)
+    view, _actual_owner = _resolve_view(view_id)
     if not view:
         return f"View '{view_id}' not found."
 
@@ -439,13 +438,9 @@ def optimize_view(view_id: str, strategy: str = "group") -> str:
             result.append(updated)
         return result, positions
 
-    owner = get_current_user()
-    view = db.get_view(view_id, owner)
-    if not view:
-        view = db.get_view(view_id)
+    view, actual_owner = _resolve_view(view_id)
     if not view:
         return f"View '{view_id}' not found."
-    actual_owner = view.get("owner", owner)
 
     layout = view.get("layout", [])
     if not layout:

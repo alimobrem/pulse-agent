@@ -295,10 +295,9 @@ def llm_pick_tools(
     Returns validated tool names (filtered against tool_names).
     """
     try:
-        from .agent import create_client
+        from .agent import borrow_client
 
-        client = create_client()
-        try:
+        with borrow_client() as client:
             tool_list = ", ".join(tool_names)
 
             response = client.messages.create(
@@ -311,11 +310,6 @@ def llm_pick_tools(
                     f"Reply with ONLY comma-separated tool names, nothing else."
                 ),
             )
-        finally:
-            try:
-                client.close()
-            except Exception:
-                pass
 
         raw = response.content[0].text.strip()
         valid_set = set(tool_names)

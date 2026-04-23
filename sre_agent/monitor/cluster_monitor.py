@@ -82,6 +82,16 @@ class ClusterMonitor:
 
         self._client = create_client()
 
+        # Initialize database schema once
+        from .. import db as db_module
+
+        try:
+            db = db_module.get_database()
+            db.executescript(db_schema.SCAN_RUNS_SCHEMA)
+            db.commit()
+        except Exception as e:
+            logger.debug("Failed to initialize scan_runs schema: %s", e, exc_info=True)
+
     # ── Subscriber management ─────────────────────────────────────────────
 
     async def subscribe(self, client: MonitorClient) -> None:
@@ -183,7 +193,7 @@ class ClusterMonitor:
         try:
             self._client.close()
         except Exception:
-            pass
+            logger.debug("Failed to close client", exc_info=True)
 
     # ── Auto-fix ──────────────────────────────────────────────────────────
 
@@ -239,9 +249,9 @@ class ClusterMonitor:
                 name = r.get("name", "")
                 kind = r.get("kind", "")
                 if kind == "Pod":
-                    parts = name.rsplit("-", 2)
-                    if len(parts) >= 3:
-                        name = parts[0]
+                    from .confidence import _strip_pod_hash
+
+                    name = _strip_pod_hash(name)
                 resource_key = f"{kind}:{r.get('namespace', '')}:{name}"
 
             from .fix_planner import (
@@ -1080,6 +1090,7 @@ class ClusterMonitor:
 
         eviction_cutoff = scan_start - 3600
         self._recent_fixes = {k: v for k, v in self._recent_fixes.items() if v > eviction_cutoff}
+        self._fix_attempt_counts = {k: v for k, v in self._fix_attempt_counts.items() if k in self._recent_fixes}
         self._recent_investigations = {k: v for k, v in self._recent_investigations.items() if v > eviction_cutoff}
         all_findings: list[dict] = []
         scanner_results: list[dict] = []
@@ -1266,7 +1277,6 @@ class ClusterMonitor:
 
         try:
             db = get_database()
-            db.executescript(db_schema.SCAN_RUNS_SCHEMA)
             db.execute(
                 "INSERT INTO scan_runs (duration_ms, total_findings, scanner_results, session_id) VALUES (?, ?, ?, ?)",
                 (scan_duration_ms, len(all_findings), json.dumps(scanner_results), self._session_id),

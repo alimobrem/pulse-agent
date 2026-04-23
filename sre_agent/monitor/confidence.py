@@ -10,6 +10,12 @@ from typing import Any
 from .registry import SEVERITY_CRITICAL, SEVERITY_INFO
 
 
+def _strip_pod_hash(name: str) -> str:
+    """Strip ReplicaSet hash suffix from pod name (e.g. 'web-5f58f69bd6-w4x22' → 'web')."""
+    parts = name.rsplit("-", 2)
+    return parts[0] if len(parts) >= 3 else name
+
+
 def _estimate_finding_confidence(finding: dict) -> float:
     """Estimate confidence that a finding is a real issue (not noise)."""
     severity = str(finding.get("severity", "warning"))
@@ -77,9 +83,7 @@ def _finding_key(finding: dict) -> str:
         # Strip ReplicaSet hash suffix so recreated pods share the same key
         # e.g. "operator-5f58f69bd6-w4x22" → "operator"
         if kind == "Pod":
-            parts = name.rsplit("-", 2)
-            if len(parts) >= 3:
-                name = parts[0]
+            name = _strip_pod_hash(name)
         resource_part = f"{kind}:{r.get('namespace', '')}:{name}"
     return f"{finding.get('category', '')}:{finding.get('title', '')}:{resource_part}"
 

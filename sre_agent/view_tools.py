@@ -645,12 +645,9 @@ def get_view_details(view_id: str):
     Args:
         view_id: The view ID (e.g. 'cv-abc123'). Use list_saved_views first to find IDs.
     """
-    from . import db
+    from .view_mutations import _resolve_view
 
-    owner = get_current_user()
-    view = db.get_view(view_id, owner)
-    if not view:
-        view = db.get_view(view_id)
+    view, _actual_owner = _resolve_view(view_id)
     if not view:
         return f"View '{view_id}' not found."
 
@@ -722,14 +719,11 @@ def delete_dashboard(view_id: str):
         view_id: The view ID to delete (e.g. 'cv-abc123'). Use list_saved_views to find IDs.
     """
     from . import db
+    from .view_mutations import _resolve_view
 
-    owner = get_current_user()
-    view = db.get_view(view_id, owner)
-    if not view:
-        view = db.get_view(view_id)
+    view, actual_owner = _resolve_view(view_id)
     if not view:
         return f"View '{view_id}' not found."
-    actual_owner = view.get("owner", owner)
     success = db.delete_view(view_id, actual_owner)
     if not success:
         return f"View '{view_id}' not found or you don't have permission to delete it."

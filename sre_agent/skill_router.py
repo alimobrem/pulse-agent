@@ -317,10 +317,9 @@ def _llm_classify(query: str):
                 return skill
 
     try:
-        from .agent import create_client
+        from .agent import borrow_client
 
-        client = create_client()
-        try:
+        with borrow_client() as client:
             skill_options = "\n".join(f"- {s.name}: {s.description}" for s in skills.values())
             response = client.messages.create(
                 model="claude-sonnet-4-6",
@@ -337,11 +336,6 @@ def _llm_classify(query: str):
                     }
                 ],
             )
-        finally:
-            try:
-                client.close()
-            except Exception:
-                pass
 
         name = response.content[0].text.strip().lower().replace(" ", "_")
         skill = skills.get(name)

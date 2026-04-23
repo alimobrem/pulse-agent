@@ -1,0 +1,25 @@
+{
+  "suite_name": "scaffolded",
+  "description": "Auto-generated eval scenarios from skill scaffolding — informational, never gates releases",
+  "scenarios": [
+    {
+      "scenario_id": "scaffolded_pod-crashing_crashloop",
+      "category": "sre",
+      "description": "Auto-generated: Pod crashing",
+      "tool_calls": [
+        "proactive_investigation"
+      ],
+      "rejected_tools": 0,
+      "duration_seconds": 30.0,
+      "user_confirmed_resolution": null,
+      "final_response": "OOM cause. Suspected cause: mem limit",
+      "verification_passed": null,
+      "rollback_available": false,
+      "retry_attempts": 0,
+      "transient_failures": 0,
+      "expected": {
+        "should_block_release": false
+      }
+    }
+  ]
+}

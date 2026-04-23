@@ -291,7 +291,7 @@ class PlanRuntime:
         )
 
         try:
-            from .agent import create_client, run_agent_streaming
+            from .agent import borrow_client, run_agent_streaming
             from .skill_loader import build_config_from_skill, get_skill
 
             skill = get_skill(phase.skill_name)
@@ -304,8 +304,6 @@ class PlanRuntime:
                 )
 
             config = build_config_from_skill(skill, query=prompt)
-            _owns_client = self._client is None
-            client = self._client or create_client()
 
             tools_called: list[str] = []
 
@@ -319,7 +317,7 @@ class PlanRuntime:
                 agent_mode=f"pipeline:plan:{phase.skill_name}",
             )
 
-            try:
+            with borrow_client(self._client) as client:
                 response = await asyncio.to_thread(
                     run_agent_streaming,
                     client,
@@ -332,12 +330,6 @@ class PlanRuntime:
                     on_tool_result=on_tool_result,
                     mode=phase.skill_name,
                 )
-            finally:
-                if _owns_client:
-                    try:
-                        client.close()
-                    except Exception:
-                        pass
 
             # Try to extract structured SkillOutput from response
             output = self._parse_skill_output(response, phase, tools_called)
@@ -736,13 +728,9 @@ async def run_parallel_skills(
     Uses SkillExecutor for full event pipeline (tool recording, components,
     confirmation flow for primary, memory augmentation per-skill).
     """
-    from .agent import create_client
+    from .agent import borrow_client
     from .context_bus import get_context_bus
     from .skill_loader import build_config_from_skill
-
-    _owns_client = client is None
-    if _owns_client:
-        client = create_client()
 
     start = time.monotonic()
     bus = get_context_bus()
@@ -756,138 +744,134 @@ async def run_parallel_skills(
     primary_components: list[dict] = []
     secondary_components: list[dict] = []
 
-    try:
-        primary_config = build_config_from_skill(primary, query=query)
-        secondary_config = build_config_from_skill(secondary, query=query)
+    with borrow_client(client) as c:
+        try:
+            primary_config = build_config_from_skill(primary, query=query)
+            secondary_config = build_config_from_skill(secondary, query=query)
 
-        sec_write_tools = secondary_config["write_tools"]
-        if primary_config["write_tools"] and sec_write_tools:
-            sec_write_tools = set()
+            sec_write_tools = secondary_config["write_tools"]
+            if primary_config["write_tools"] and sec_write_tools:
+                sec_write_tools = set()
 
-        if websocket is not None:
-            from .api.agent_ws import SkillExecutor
+            if websocket is not None:
+                from .api.agent_ws import SkillExecutor
 
-            loop = asyncio.get_running_loop()
-            executor = SkillExecutor(websocket, session_id, loop)
+                loop = asyncio.get_running_loop()
+                executor = SkillExecutor(websocket, session_id, loop)
 
-            primary_task = asyncio.create_task(
-                executor.run(
-                    primary_config,
-                    messages,
-                    client,
-                    primary_config["write_tools"],
-                    primary.name,
-                    skill_tag=primary.name,
-                )
-            )
-            secondary_task = asyncio.create_task(
-                executor.run(
-                    secondary_config, messages, client, sec_write_tools, secondary.name, skill_tag=secondary.name
-                )
-            )
-
-            tasks = {primary_task: primary.name, secondary_task: secondary.name}
-            results: dict[str, object] = {}
-
-            try:
-                remaining = set(tasks)
-                deadline = asyncio.get_event_loop().time() + 120
-
-                while remaining:
-                    timeout_left = max(deadline - asyncio.get_event_loop().time(), 0)
-                    done, remaining = await asyncio.wait(
-                        remaining, return_when=asyncio.FIRST_COMPLETED, timeout=timeout_left
+                primary_task = asyncio.create_task(
+                    executor.run(
+                        primary_config,
+                        messages,
+                        c,
+                        primary_config["write_tools"],
+                        primary.name,
+                        skill_tag=primary.name,
                     )
+                )
+                secondary_task = asyncio.create_task(
+                    executor.run(
+                        secondary_config, messages, c, sec_write_tools, secondary.name, skill_tag=secondary.name
+                    )
+                )
 
-                    if not done and remaining:
-                        logger.warning("Parallel skills timed out — cancelling remaining")
-                        for t in remaining:
-                            t.cancel()
-                        break
+                tasks = {primary_task: primary.name, secondary_task: secondary.name}
+                results: dict[str, object] = {}
 
-                    for task in done:
-                        skill_name = tasks[task]
-                        try:
-                            output = task.result()
-                            results[skill_name] = output
-                        except Exception as e:
-                            logger.warning("Parallel skill %s failed: %s", skill_name, e)
-                            results[skill_name] = None
+                try:
+                    remaining = set(tasks)
+                    deadline = asyncio.get_event_loop().time() + 120
 
-                        try:
-                            await websocket.send_json(
-                                {"type": "skill_progress", "skill": skill_name, "status": "complete"}
-                            )
-                        except Exception:
-                            pass
+                    while remaining:
+                        timeout_left = max(deadline - asyncio.get_event_loop().time(), 0)
+                        done, remaining = await asyncio.wait(
+                            remaining, return_when=asyncio.FIRST_COMPLETED, timeout=timeout_left
+                        )
 
-                        if remaining and output and output.text.strip():
+                        if not done and remaining:
+                            logger.warning("Parallel skills timed out — cancelling remaining")
+                            for t in remaining:
+                                t.cancel()
+                            break
+
+                        for task in done:
+                            skill_name = tasks[task]
+                            try:
+                                output = task.result()
+                                results[skill_name] = output
+                            except Exception as e:
+                                logger.warning("Parallel skill %s failed: %s", skill_name, e)
+                                results[skill_name] = None
+
                             try:
                                 await websocket.send_json(
-                                    {
-                                        "type": "text_delta",
-                                        "text": f"## {skill_name.upper()} Analysis\n\n{output.text}\n\n*{tasks[next(iter(remaining))]} analysis still running...*\n\n",
-                                    }
+                                    {"type": "skill_progress", "skill": skill_name, "status": "complete"}
                                 )
                             except Exception:
                                 pass
 
-            except TimeoutError:
-                for t in tasks:
-                    if not t.done():
-                        t.cancel()
+                            if remaining and output and output.text.strip():
+                                try:
+                                    await websocket.send_json(
+                                        {
+                                            "type": "text_delta",
+                                            "text": f"## {skill_name.upper()} Analysis\n\n{output.text}\n\n*{tasks[next(iter(remaining))]} analysis still running...*\n\n",
+                                        }
+                                    )
+                                except Exception:
+                                    pass
 
-            from .api.agent_ws import SkillOutput
+                except TimeoutError:
+                    for t in tasks:
+                        if not t.done():
+                            t.cancel()
 
-            p_result = results.get(primary.name)
-            s_result = results.get(secondary.name)
-            p = p_result if isinstance(p_result, SkillOutput) else None
-            s = s_result if isinstance(s_result, SkillOutput) else None
-            primary_output = p.text if p else ""
-            secondary_output = s.text if s else ""
-            primary_tokens = p.token_usage if p else {}
-            secondary_tokens = s.token_usage if s else {}
-            primary_components = p.components if p else []
-            secondary_components = s.components if s else []
+                from .api.agent_ws import SkillOutput
 
-        else:
-            from .agent import run_agent_streaming
+                p_result = results.get(primary.name)
+                s_result = results.get(secondary.name)
+                p = p_result if isinstance(p_result, SkillOutput) else None
+                s = s_result if isinstance(s_result, SkillOutput) else None
+                primary_output = p.text if p else ""
+                secondary_output = s.text if s else ""
+                primary_tokens = p.token_usage if p else {}
+                secondary_tokens = s.token_usage if s else {}
+                primary_components = p.components if p else []
+                secondary_components = s.components if s else []
 
-            async def _run_bare(config, skill_name, write_tools):
-                try:
-                    result = await asyncio.to_thread(
-                        run_agent_streaming,
-                        client=client,
-                        messages=list(messages),
-                        system_prompt=config["system_prompt"],
-                        tool_defs=config["tool_defs"],
-                        tool_map=config["tool_map"],
-                        write_tools=write_tools,
-                        mode=skill_name,
-                    )
-                    return result if isinstance(result, str) else result[0]
-                except Exception:
-                    logger.warning("Parallel skill %s failed", skill_name, exc_info=True)
-                    return ""
+            else:
+                from .agent import run_agent_streaming
 
-            gathered = await asyncio.wait_for(
-                asyncio.gather(
-                    _run_bare(primary_config, primary.name, primary_config["write_tools"]),
-                    _run_bare(secondary_config, secondary.name, sec_write_tools),
-                    return_exceptions=True,
-                ),
-                timeout=120,
-            )
-            primary_output = gathered[0] if isinstance(gathered[0], str) else ""
-            secondary_output = gathered[1] if isinstance(gathered[1], str) else ""
+                async def _run_bare(config, skill_name, write_tools):
+                    try:
+                        result = await asyncio.to_thread(
+                            run_agent_streaming,
+                            client=c,
+                            messages=list(messages),
+                            system_prompt=config["system_prompt"],
+                            tool_defs=config["tool_defs"],
+                            tool_map=config["tool_map"],
+                            write_tools=write_tools,
+                            mode=skill_name,
+                        )
+                        return result if isinstance(result, str) else result[0]
+                    except Exception:
+                        logger.warning("Parallel skill %s failed", skill_name, exc_info=True)
+                        return ""
 
-    finally:
-        bus.flush_buffer(task_id)
-        if _owns_client:
-            try:
-                client.close()
-            except Exception:
-                pass
+                gathered = await asyncio.wait_for(
+                    asyncio.gather(
+                        _run_bare(primary_config, primary.name, primary_config["write_tools"]),
+                        _run_bare(secondary_config, secondary.name, sec_write_tools),
+                        return_exceptions=True,
+                    ),
+                    timeout=120,
+                )
+                primary_output = gathered[0] if isinstance(gathered[0], str) else ""
+                secondary_output = gathered[1] if isinstance(gathered[1], str) else ""
+
+        finally:
+            bus.flush_buffer(task_id)
 
     elapsed_ms = int((time.monotonic() - start) * 1000)
 

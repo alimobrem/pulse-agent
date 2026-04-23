@@ -321,7 +321,7 @@ async def _run_agent_ws(
         try:
             client.close()
         except Exception:
-            pass
+            logger.debug("Failed to close client", exc_info=True)
 
 
 async def _run_agent_ws_inner(

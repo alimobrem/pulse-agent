@@ -471,35 +471,29 @@ def _generate_smart_layout(item: dict[str, Any], metadata: dict[str, Any]) -> li
     )
 
     try:
-        from .agent import create_client
+        from .agent import borrow_client
         from .config import get_settings
 
-        client = create_client()
-        try:
+        with borrow_client() as client:
             response = client.messages.create(
                 model=get_settings().model,
                 max_tokens=1500,
                 messages=[{"role": "user", "content": prompt}],
             )
-        finally:
-            try:
-                client.close()
-            except Exception:
-                pass
-        text = response.content[0].text.strip()
+            text = response.content[0].text.strip()
 
-        match = _re.search(r"\{.*\}", text, _re.DOTALL)
-        if match:
-            try:
-                data = json.loads(match.group())
-                components = data.get("components", [])
-                if components:
-                    valid = [c for c in components if c.get("kind") in _COMPONENT_KINDS]
-                    if valid:
-                        _inbox_logger.info("Agent designed %d-component view layout", len(valid))
-                        return valid
-            except json.JSONDecodeError:
-                _inbox_logger.warning("View layout JSON parse failed, using fallback")
+            match = _re.search(r"\{.*\}", text, _re.DOTALL)
+            if match:
+                try:
+                    data = json.loads(match.group())
+                    components = data.get("components", [])
+                    if components:
+                        valid = [c for c in components if c.get("kind") in _COMPONENT_KINDS]
+                        if valid:
+                            _inbox_logger.info("Agent designed %d-component view layout", len(valid))
+                            return valid
+                except json.JSONDecodeError:
+                    _inbox_logger.warning("View layout JSON parse failed, using fallback")
     except Exception:
         _inbox_logger.exception("Smart layout generation failed, using fallback")
 
@@ -881,73 +875,75 @@ def _phase_a_triage() -> int:
         _inbox_logger.exception("Failed to get settings for triage")
         return 0
 
-    from .agent import create_client
+    from .agent import borrow_client
 
-    client = create_client()
     triaged = 0
-    for row in rows:
-        item = _deserialize_row(row)
-        if item.get("metadata", {}).get("triaged"):
-            continue
-
-        is_user_created = item["created_by"] not in ("system:monitor", "system:agent")
-        resources_str = ", ".join(f"{r['kind']}/{r['name']}" for r in item.get("resources", []))
-        prompt = (
-            f"Triage this {item['item_type']}: {item['title']}. "
-            f"{item.get('summary', '')} "
-            f"Resources: {resources_str or 'none'}. "
-            f"Namespace: {item.get('namespace') or 'cluster-wide'}. "
-            f"Severity: {item.get('severity', 'unknown')}. "
-            f"{'This was manually created by a user — default to investigate, do not dismiss.' if is_user_created else ''}"
-            f"Provide: (1) a one-sentence assessment, (2) recommended action (investigate/dismiss/monitor), "
-            f"(3) urgency (immediate/soon/can-wait), (4) confidence 0-1. Reply in JSON: "
-            f'{{"assessment": "...", "action": "investigate|dismiss|monitor", "urgency": "immediate|soon|can-wait", "confidence": 0.8}}'
-        )
-
-        try:
-            response = client.messages.create(
-                model=model, max_tokens=200, messages=[{"role": "user", "content": prompt}]
-            )
-            text = response.content[0].text.strip()
-
-            match = _re.search(r"\{.*\}", text, _re.DOTALL)
-            if not match:
+    with borrow_client() as client:
+        for row in rows:
+            item = _deserialize_row(row)
+            if item.get("metadata", {}).get("triaged"):
                 continue
 
-            triage = json.loads(match.group())
-            metadata = item.get("metadata", {})
-            metadata["triaged"] = True
-            metadata["triage_assessment"] = triage.get("assessment", "")
-            metadata["triage_action"] = triage.get("action", "monitor")
-            metadata["triage_urgency"] = triage.get("urgency", "can-wait")
-            metadata["triage_confidence"] = triage.get("confidence", 0.5)
-
-            action = triage.get("action", "monitor")
-            confidence = float(triage.get("confidence", 0.5))
-
-            if action == "dismiss" and confidence >= 0.7 and not is_user_created:
-                new_status = "agent_cleared"
-                metadata["dismiss_reason"] = triage.get("assessment", "")
-            else:
-                new_status = "agent_reviewing"
-
-            now = int(time.time())
-            db.execute(
-                "UPDATE inbox_items SET status = ?, metadata = ?, summary = ?, updated_at = ? WHERE id = ?",
-                (new_status, json.dumps(metadata), triage.get("assessment", item.get("summary", "")), now, item["id"]),
+            is_user_created = item["created_by"] not in ("system:monitor", "system:agent")
+            resources_str = ", ".join(f"{r['kind']}/{r['name']}" for r in item.get("resources", []))
+            prompt = (
+                f"Triage this {item['item_type']}: {item['title']}. "
+                f"{item.get('summary', '')} "
+                f"Resources: {resources_str or 'none'}. "
+                f"Namespace: {item.get('namespace') or 'cluster-wide'}. "
+                f"Severity: {item.get('severity', 'unknown')}. "
+                f"{'This was manually created by a user — default to investigate, do not dismiss.' if is_user_created else ''}"
+                f"Provide: (1) a one-sentence assessment, (2) recommended action (investigate/dismiss/monitor), "
+                f"(3) urgency (immediate/soon/can-wait), (4) confidence 0-1. Reply in JSON: "
+                f'{{"assessment": "...", "action": "investigate|dismiss|monitor", "urgency": "immediate|soon|can-wait", "confidence": 0.8}}'
             )
-            db.commit()
-            _publish_event("inbox_item_updated", item["id"], {"status": new_status})
-            triaged += 1
-            _inbox_logger.info("Triaged %s → %s (%s)", item["id"], new_status, action)
-        except Exception:
-            _inbox_logger.exception("Triage failed for %s", item["id"])
-            update_item_status(item["id"], "agent_review_failed")
 
-    try:
-        client.close()
-    except Exception:
-        pass
+            try:
+                response = client.messages.create(
+                    model=model, max_tokens=200, messages=[{"role": "user", "content": prompt}]
+                )
+                text = response.content[0].text.strip()
+
+                match = _re.search(r"\{.*\}", text, _re.DOTALL)
+                if not match:
+                    continue
+
+                triage = json.loads(match.group())
+                metadata = item.get("metadata", {})
+                metadata["triaged"] = True
+                metadata["triage_assessment"] = triage.get("assessment", "")
+                metadata["triage_action"] = triage.get("action", "monitor")
+                metadata["triage_urgency"] = triage.get("urgency", "can-wait")
+                metadata["triage_confidence"] = triage.get("confidence", 0.5)
+
+                action = triage.get("action", "monitor")
+                confidence = float(triage.get("confidence", 0.5))
+
+                if action == "dismiss" and confidence >= 0.7 and not is_user_created:
+                    new_status = "agent_cleared"
+                    metadata["dismiss_reason"] = triage.get("assessment", "")
+                else:
+                    new_status = "agent_reviewing"
+
+                now = int(time.time())
+                db.execute(
+                    "UPDATE inbox_items SET status = ?, metadata = ?, summary = ?, updated_at = ? WHERE id = ?",
+                    (
+                        new_status,
+                        json.dumps(metadata),
+                        triage.get("assessment", item.get("summary", "")),
+                        now,
+                        item["id"],
+                    ),
+                )
+                db.commit()
+                _publish_event("inbox_item_updated", item["id"], {"status": new_status})
+                triaged += 1
+                _inbox_logger.info("Triaged %s → %s (%s)", item["id"], new_status, action)
+            except Exception:
+                _inbox_logger.exception("Triage failed for %s", item["id"])
+                update_item_status(item["id"], "agent_review_failed")
+
     return triaged
 
 
@@ -1093,76 +1089,72 @@ def _phase_c_plan() -> int:
         _inbox_logger.exception("Failed to get settings for plan generation")
         return 0
 
-    from .agent import create_client
+    from .agent import borrow_client
 
-    client = create_client()
     planned = 0
-    for row in rows:
-        item = _deserialize_row(row)
-        if item.get("metadata", {}).get("action_plan"):
-            continue
-
-        investigation = item.get("metadata", {}).get("investigation_summary", "")
-        cause = item.get("metadata", {}).get("suspected_cause", "")
-        fix = item.get("metadata", {}).get("recommended_fix", "")
-        resources_str = ", ".join(f"{r['kind']}/{r['name']}" for r in item.get("resources", []))
-
-        if not investigation and not fix:
-            continue
-
-        prompt = (
-            f"Based on this investigation of '{item['title']}':\n"
-            f"- Summary: {investigation}\n"
-            f"- Cause: {cause}\n"
-            f"- Fix: {fix}\n"
-            f"- Resources: {resources_str or 'none'}\n"
-            f"- Namespace: {item.get('namespace') or 'cluster-wide'}\n\n"
-            f"Generate 2-4 action steps. Reply ONLY with valid JSON, no markdown:\n"
-            f'{{"steps": [{{"title": "short title", "description": "what to do", '
-            f'"tool": null, "risk": "low"}}]}}'
-        )
-
-        try:
-            response = client.messages.create(
-                model=model, max_tokens=1000, messages=[{"role": "user", "content": prompt}]
-            )
-            text = response.content[0].text.strip()
-
-            match = _re.search(r"\{.*\}", text, _re.DOTALL)
-            if not match:
+    with borrow_client() as client:
+        for row in rows:
+            item = _deserialize_row(row)
+            if item.get("metadata", {}).get("action_plan"):
                 continue
+
+            investigation = item.get("metadata", {}).get("investigation_summary", "")
+            cause = item.get("metadata", {}).get("suspected_cause", "")
+            fix = item.get("metadata", {}).get("recommended_fix", "")
+            resources_str = ", ".join(f"{r['kind']}/{r['name']}" for r in item.get("resources", []))
+
+            if not investigation and not fix:
+                continue
+
+            prompt = (
+                f"Based on this investigation of '{item['title']}':\n"
+                f"- Summary: {investigation}\n"
+                f"- Cause: {cause}\n"
+                f"- Fix: {fix}\n"
+                f"- Resources: {resources_str or 'none'}\n"
+                f"- Namespace: {item.get('namespace') or 'cluster-wide'}\n\n"
+                f"Generate 2-4 action steps. Reply ONLY with valid JSON, no markdown:\n"
+                f'{{"steps": [{{"title": "short title", "description": "what to do", '
+                f'"tool": null, "risk": "low"}}]}}'
+            )
 
             try:
-                plan_data = json.loads(match.group())
-            except json.JSONDecodeError:
-                _inbox_logger.warning("Plan JSON parse failed for %s, skipping", item["id"])
-                continue
-            steps = plan_data.get("steps", [])
-            if not steps:
-                continue
+                response = client.messages.create(
+                    model=model, max_tokens=1000, messages=[{"role": "user", "content": prompt}]
+                )
+                text = response.content[0].text.strip()
 
-            for step in steps:
-                step["status"] = "pending"
+                match = _re.search(r"\{.*\}", text, _re.DOTALL)
+                if not match:
+                    continue
 
-            metadata = item.get("metadata", {})
-            metadata["action_plan"] = steps
+                try:
+                    plan_data = json.loads(match.group())
+                except json.JSONDecodeError:
+                    _inbox_logger.warning("Plan JSON parse failed for %s, skipping", item["id"])
+                    continue
+                steps = plan_data.get("steps", [])
+                if not steps:
+                    continue
 
-            now = int(time.time())
-            db.execute(
-                "UPDATE inbox_items SET metadata = ?, updated_at = ? WHERE id = ?",
-                (json.dumps(metadata), now, item["id"]),
-            )
-            db.commit()
-            _publish_event("inbox_item_updated", item["id"], {"has_plan": True})
-            planned += 1
-            _inbox_logger.info("Generated %d-step plan for %s", len(steps), item["id"])
-        except Exception:
-            _inbox_logger.exception("Plan generation failed for %s", item["id"])
+                for step in steps:
+                    step["status"] = "pending"
 
-    try:
-        client.close()
-    except Exception:
-        pass
+                metadata = item.get("metadata", {})
+                metadata["action_plan"] = steps
+
+                now = int(time.time())
+                db.execute(
+                    "UPDATE inbox_items SET metadata = ?, updated_at = ? WHERE id = ?",
+                    (json.dumps(metadata), now, item["id"]),
+                )
+                db.commit()
+                _publish_event("inbox_item_updated", item["id"], {"has_plan": True})
+                planned += 1
+                _inbox_logger.info("Generated %d-step plan for %s", len(steps), item["id"])
+            except Exception:
+                _inbox_logger.exception("Plan generation failed for %s", item["id"])
+
     return planned
 
 

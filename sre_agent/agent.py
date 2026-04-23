@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import atexit
 import concurrent.futures
+import contextlib
 import json
 import logging
 import os
@@ -256,6 +257,22 @@ def create_client():
         return anthropic.AnthropicVertex(region=region, project_id=project)
 
     return anthropic.Anthropic()
+
+
+@contextlib.contextmanager
+def borrow_client(client=None):
+    """Yield an Anthropic client, closing it only if we created it."""
+    owns = client is None
+    if owns:
+        client = create_client()
+    try:
+        yield client
+    finally:
+        if owns:
+            try:
+                client.close()
+            except Exception:
+                logger.debug("Failed to close borrowed client", exc_info=True)
 
 
 def _sanitize_content(content) -> list[dict]:
