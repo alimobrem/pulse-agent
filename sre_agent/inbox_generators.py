@@ -226,13 +226,20 @@ def _get_network_policy_gaps() -> list[dict]:
         namespaces = safe(lambda: get_core_client().list_namespace())
         if isinstance(namespaces, str):
             return []
+
+        # Fetch all network policies cluster-wide in a single call
+        all_policies = safe(lambda: get_networking_client().list_network_policy_for_all_namespaces())
+        if isinstance(all_policies, str):
+            return []
+
+        ns_with_policies = {p.metadata.namespace for p in all_policies.items}
+
         gaps = []
         for ns in namespaces.items:
             name = ns.metadata.name
             if name.startswith("openshift-") or name.startswith("kube-"):
                 continue
-            policies = safe(lambda n=name: get_networking_client().list_namespaced_network_policy(n))
-            if isinstance(policies, str) or len(policies.items) == 0:
+            if name not in ns_with_policies:
                 gaps.append({"namespace": name})
         return gaps
     except Exception:

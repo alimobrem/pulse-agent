@@ -104,6 +104,12 @@ class PulseAgentSettings(BaseSettings):
     chain_min_probability: float = 0.6
     chain_min_frequency: int = 3
 
+    # Investigation settings
+    investigation_categories: str = (
+        "crashloop,workloads,nodes,alerts,cert_expiry,scheduling,oom,image_pull,operators,daemonsets,hpa"
+    )
+    max_concurrent_investigations: int = 3
+
     @field_validator("model")
     @classmethod
     def model_must_be_claude(cls, v: str) -> str:

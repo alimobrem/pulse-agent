@@ -95,7 +95,7 @@ def _finding_content_hash(finding: dict) -> str:
         finding.get("title", ""),
         finding.get("summary", ""),
     ]
-    return hashlib.md5("|".join(parts).encode()).hexdigest()[:12]
+    return hashlib.md5("|".join(parts).encode(), usedforsecurity=False).hexdigest()[:12]
 
 
 def _extract_json_object(text: str) -> dict[str, Any] | None:

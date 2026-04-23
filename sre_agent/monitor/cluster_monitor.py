@@ -10,7 +10,6 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import os
 import time
 import uuid
 from typing import TYPE_CHECKING, Any
@@ -68,13 +67,13 @@ class ClusterMonitor:
         self._last_security_followup: float = 0.0
         self._recent_fix_ids: set[str] = set()
         self._investigation_tasks: list[asyncio.Task] = []
-        self._max_concurrent_investigations = 3
         self._generator_task: asyncio.Task | None = None
         self._last_daily_run: float = 0.0
         self._last_weekly_run: float = 0.0
         self._transient_counts: dict[str, int] = {}
         self._noise_threshold = get_settings().noise_threshold
         self._noise_suppressed = 0
+        self._noise_suppressed_last_scan = 0
         self._session_id = f"mon-{uuid.uuid4().hex[:12]}"
 
         # Shared Anthropic client
@@ -180,6 +179,7 @@ class ClusterMonitor:
             "investigation_tasks": len(self._investigation_tasks),
             "scan_counter": self._scan_counter,
             "noise_suppressed": self._noise_suppressed,
+            "noise_suppressed_last_scan": self._noise_suppressed_last_scan,
             "subscribers": len(self._subscribers),
         }
 
@@ -683,14 +683,7 @@ class ClusterMonitor:
         max_per_scan = _settings.investigations_max_per_scan
         timeout_seconds = _settings.investigation_timeout
         cooldown_seconds = _settings.investigation_cooldown
-        allowed_categories = {
-            item.strip()
-            for item in os.environ.get(
-                "PULSE_AGENT_INVESTIGATION_CATEGORIES",
-                "crashloop,workloads,nodes,alerts,cert_expiry,scheduling,oom,image_pull,operators,daemonsets,hpa",
-            ).split(",")
-            if item.strip()
-        }
+        allowed_categories = {item.strip() for item in _settings.investigation_categories.split(",") if item.strip()}
 
         security_followup_enabled = _settings.security_followup
         security_followup_cooldown = 600
@@ -714,6 +707,7 @@ class ClusterMonitor:
                     noise_score,
                 )
                 self._noise_suppressed += 1
+                self._noise_suppressed_last_scan += 1
                 continue
 
             key = _finding_key(finding)
@@ -754,7 +748,7 @@ class ClusterMonitor:
                 template = match_template(category=finding.get("category", ""))
                 if template:
                     self._investigation_tasks = [t for t in self._investigation_tasks if not t.done()]
-                    if len(self._investigation_tasks) >= self._max_concurrent_investigations:
+                    if len(self._investigation_tasks) >= get_settings().max_concurrent_investigations:
                         logger.info(
                             "Skipping investigation for %s — %d tasks already running",
                             finding.get("title", "")[:40],
@@ -1078,6 +1072,7 @@ class ClusterMonitor:
         logger.info("Running cluster scan...")
         scan_start = time.time()
         self._scan_counter += 1
+        self._noise_suppressed_last_scan = 0
 
         self._investigation_tasks = [t for t in self._investigation_tasks if not t.done()]
 
@@ -1179,6 +1174,7 @@ class ClusterMonitor:
                         transient_count,
                     )
                     self._noise_suppressed += 1
+                    self._noise_suppressed_last_scan += 1
                     self._last_findings[key] = f
                     continue
 
@@ -1324,6 +1320,15 @@ class ClusterMonitor:
 
             if self._generator_task is None or self._generator_task.done():
                 self._generator_task = asyncio.create_task(asyncio.to_thread(run_generator_cycle))
+
+                def _on_generator_done(t: asyncio.Task) -> None:
+                    if t.cancelled():
+                        return
+                    exc = t.exception()
+                    if exc:
+                        logger.warning("Inbox generator cycle failed: %s", exc)
+
+                self._generator_task.add_done_callback(_on_generator_done)
         except Exception:
             logger.exception("Failed to start inbox generator cycle")
 
