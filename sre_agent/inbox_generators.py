@@ -292,24 +292,30 @@ def _get_readiness_regressions() -> list[dict]:
 
 def gen_cert_expiry() -> list[dict[str, Any]]:
     secrets = _get_tls_secrets()
-    items = []
+    expiring = []
     for s in secrets:
         hours = (s["expiry_timestamp"] - time.time()) / 3600
-        if hours > 168:
-            continue
-        severity = "critical" if hours <= 24 else "warning" if hours <= 72 else "info"
-        items.append(
-            _make_assessment(
-                title=f"TLS cert '{s['name']}' expires in {int(hours)}h",
-                summary=f"Certificate in namespace {s['namespace']} will expire. Renew or rotate.",
-                severity=severity,
-                urgency_hours=hours,
-                generator="cert_expiry",
-                namespace=s["namespace"],
-                resources=[{"kind": "Secret", "name": s["name"], "namespace": s["namespace"]}],
-            )
+        if hours <= 168:
+            expiring.append({**s, "_hours": hours})
+    if not expiring:
+        return []
+    expiring.sort(key=lambda x: x["_hours"])
+    worst_hours = expiring[0]["_hours"]
+    severity = "critical" if worst_hours <= 24 else "warning" if worst_hours <= 72 else "info"
+    cert_list = ", ".join(f"{s['namespace']}/{s['name']} ({int(s['_hours'])}h)" for s in expiring[:10])
+    if len(expiring) > 10:
+        cert_list += f" (+{len(expiring) - 10} more)"
+    resources = [{"kind": "Secret", "name": s["name"], "namespace": s["namespace"]} for s in expiring[:20]]
+    return [
+        _make_assessment(
+            title=f"{len(expiring)} TLS certificates expiring soon (nearest: {int(worst_hours)}h)",
+            summary=f"Certificates to renew: {cert_list}",
+            severity=severity,
+            urgency_hours=worst_hours,
+            generator="cert_expiry",
+            resources=resources,
         )
-    return items
+    ]
 
 
 def gen_trend_prediction() -> list[dict[str, Any]]:
@@ -333,19 +339,22 @@ def gen_trend_prediction() -> list[dict[str, Any]]:
 
 def gen_degraded_operator() -> list[dict[str, Any]]:
     operators = _get_degraded_operators()
-    items = []
-    for op in operators:
-        items.append(
-            _make_assessment(
-                title=f"ClusterOperator '{op['name']}' degraded",
-                summary=f"Operator has been degraded for {op['degraded_duration_hours']}h. Investigate conditions.",
-                severity="critical",
-                urgency_hours=0,
-                generator="degraded_operator",
-                resources=[{"kind": "ClusterOperator", "name": op["name"], "namespace": ""}],
-            )
+    if not operators:
+        return []
+    names = ", ".join(op["name"] for op in operators[:10])
+    if len(operators) > 10:
+        names += f" (+{len(operators) - 10} more)"
+    resources = [{"kind": "ClusterOperator", "name": op["name"], "namespace": ""} for op in operators[:20]]
+    return [
+        _make_assessment(
+            title=f"{len(operators)} ClusterOperators degraded",
+            summary=f"Degraded operators: {names}",
+            severity="critical",
+            urgency_hours=0,
+            generator="degraded_operator",
+            resources=resources,
         )
-    return items
+    ]
 
 
 def gen_upgrade_available() -> list[dict[str, Any]]:
@@ -384,126 +393,143 @@ def gen_slo_burn() -> list[dict[str, Any]]:
 
 def gen_capacity_projection() -> list[dict[str, Any]]:
     nodes = _get_node_capacity()
-    items = []
-    for n in nodes:
-        items.append(
-            _make_assessment(
-                title=f"Node '{n['node']}' at {n['cpu_pct']}% capacity",
-                summary=f"Projected to hit limit in {n['hours_to_full']}h. Scale node pool or redistribute.",
-                severity="warning",
-                urgency_hours=n["hours_to_full"],
-                generator="capacity_projection",
-                resources=[{"kind": "Node", "name": n["node"], "namespace": ""}],
-            )
+    if not nodes:
+        return []
+    nodes.sort(key=lambda n: n["hours_to_full"])
+    node_list = ", ".join(f"{n['node']} ({n['cpu_pct']}%)" for n in nodes[:10])
+    if len(nodes) > 10:
+        node_list += f" (+{len(nodes) - 10} more)"
+    resources = [{"kind": "Node", "name": n["node"], "namespace": ""} for n in nodes[:20]]
+    return [
+        _make_assessment(
+            title=f"{len(nodes)} nodes approaching capacity (nearest: {nodes[0]['hours_to_full']}h)",
+            summary=f"Nodes at high utilization: {node_list}",
+            severity="warning",
+            urgency_hours=nodes[0]["hours_to_full"],
+            generator="capacity_projection",
+            resources=resources,
         )
-    return items
+    ]
 
 
 def gen_stale_finding() -> list[dict[str, Any]]:
     stale = _get_stale_findings()
-    items = []
-    for s in stale:
-        urgency = -s["hours_stale"]
-        items.append(
-            _make_assessment(
-                title=f"Stale finding: {s['title']} ({int(s['hours_stale'])}h without action)",
-                summary="Finding has been open without action for over 72 hours. Investigate or dismiss.",
-                severity="warning",
-                urgency_hours=urgency,
-                generator="stale_finding",
-                correlation_key=f"stale:{s['finding_id']}",
-            )
+    if not stale:
+        return []
+    stale.sort(key=lambda s: -s["hours_stale"])
+    finding_list = ", ".join(f"{s['title']} ({int(s['hours_stale'])}h)" for s in stale[:10])
+    if len(stale) > 10:
+        finding_list += f" (+{len(stale) - 10} more)"
+    return [
+        _make_assessment(
+            title=f"{len(stale)} findings open >72h without action",
+            summary=f"Stale findings to review or dismiss: {finding_list}",
+            severity="warning",
+            urgency_hours=0,
+            generator="stale_finding",
         )
-    return items
+    ]
 
 
 def gen_privileged_workloads() -> list[dict[str, Any]]:
     workloads = _get_privileged_workloads()
-    items = []
-    for w in workloads:
-        items.append(
-            _make_assessment(
-                title=f"Privileged container: {w['container']} in {w['pod']}",
-                summary="Running with elevated privileges. Review if required.",
-                severity="warning",
-                urgency_hours=24,
-                generator="privileged_workloads",
-                namespace=w["namespace"],
-                resources=[{"kind": "Pod", "name": w["pod"], "namespace": w["namespace"]}],
-                correlation_key=f"privileged:{w['namespace']}",
-            )
+    if not workloads:
+        return []
+    namespaces = sorted({w["namespace"] for w in workloads})
+    resources = [{"kind": "Pod", "name": w["pod"], "namespace": w["namespace"]} for w in workloads[:20]]
+    details = ", ".join(f"{w['container']}@{w['namespace']}/{w['pod']}" for w in workloads[:10])
+    if len(workloads) > 10:
+        details += f" (+{len(workloads) - 10} more)"
+    return [
+        _make_assessment(
+            title=f"{len(workloads)} privileged containers across {len(namespaces)} namespaces",
+            summary=f"Containers running with elevated privileges: {details}",
+            severity="warning",
+            urgency_hours=24,
+            generator="privileged_workloads",
+            resources=resources,
+            correlation_key="privileged:cluster",
         )
-    return items
+    ]
 
 
 def gen_rbac_drift() -> list[dict[str, Any]]:
     drift = _get_rbac_drift()
-    items = []
-    for d in drift:
-        items.append(
-            _make_assessment(
-                title=f"cluster-admin binding: {d['binding']} (user: {d['user']})",
-                summary="User has cluster-admin access. Verify this is still required.",
-                severity="warning",
-                urgency_hours=12,
-                generator="rbac_drift",
-                resources=[{"kind": "ClusterRoleBinding", "name": d["binding"], "namespace": ""}],
-            )
+    if not drift:
+        return []
+    users = ", ".join(d["user"] for d in drift[:10])
+    if len(drift) > 10:
+        users += f" (+{len(drift) - 10} more)"
+    resources = [{"kind": "ClusterRoleBinding", "name": d["binding"], "namespace": ""} for d in drift[:20]]
+    return [
+        _make_assessment(
+            title=f"{len(drift)} cluster-admin bindings to review",
+            summary=f"Users with cluster-admin access: {users}",
+            severity="warning",
+            urgency_hours=12,
+            generator="rbac_drift",
+            resources=resources,
         )
-    return items
+    ]
 
 
 def gen_network_policy_gaps() -> list[dict[str, Any]]:
     gaps = _get_network_policy_gaps()
-    items = []
-    for g in gaps:
-        items.append(
-            _make_assessment(
-                title=f"No NetworkPolicy in namespace '{g['namespace']}'",
-                summary="Namespace has no network policies. All traffic is allowed.",
-                severity="info",
-                urgency_hours=48,
-                generator="network_policy_gaps",
-                namespace=g["namespace"],
-            )
+    if not gaps:
+        return []
+    ns_list = ", ".join(g["namespace"] for g in gaps[:15])
+    if len(gaps) > 15:
+        ns_list += f" (+{len(gaps) - 15} more)"
+    return [
+        _make_assessment(
+            title=f"{len(gaps)} namespaces missing NetworkPolicy",
+            summary=f"All traffic is allowed in: {ns_list}",
+            severity="info",
+            urgency_hours=48,
+            generator="network_policy_gaps",
         )
-    return items
+    ]
 
 
 def gen_route_cert_expiry() -> list[dict[str, Any]]:
     routes = _get_route_cert_expiry()
-    items = []
-    for r in routes:
-        items.append(
-            _make_assessment(
-                title=f"Route TLS cert expiring: {r['name']}",
-                summary="Route has embedded TLS certificate approaching expiry.",
-                severity="warning",
-                urgency_hours=r["hours_until_expiry"],
-                generator="route_cert_expiry",
-                namespace=r["namespace"],
-                resources=[{"kind": "Route", "name": r["name"], "namespace": r["namespace"]}],
-            )
+    if not routes:
+        return []
+    routes.sort(key=lambda r: r["hours_until_expiry"])
+    route_list = ", ".join(f"{r['namespace']}/{r['name']} ({int(r['hours_until_expiry'])}h)" for r in routes[:10])
+    if len(routes) > 10:
+        route_list += f" (+{len(routes) - 10} more)"
+    resources = [{"kind": "Route", "name": r["name"], "namespace": r["namespace"]} for r in routes[:20]]
+    return [
+        _make_assessment(
+            title=f"{len(routes)} route TLS certs expiring (nearest: {int(routes[0]['hours_until_expiry'])}h)",
+            summary=f"Routes with expiring certs: {route_list}",
+            severity="warning",
+            urgency_hours=routes[0]["hours_until_expiry"],
+            generator="route_cert_expiry",
+            resources=resources,
         )
-    return items
+    ]
 
 
 def gen_service_endpoint_gaps() -> list[dict[str, Any]]:
     gaps = _get_service_endpoint_gaps()
-    items = []
-    for g in gaps:
-        items.append(
-            _make_assessment(
-                title=f"Service '{g['service']}' has 0 ready endpoints",
-                summary="No pods backing this service. Traffic will fail.",
-                severity="warning",
-                urgency_hours=1,
-                generator="service_endpoint_gaps",
-                namespace=g["namespace"],
-                resources=[{"kind": "Service", "name": g["service"], "namespace": g["namespace"]}],
-            )
+    if not gaps:
+        return []
+    svc_list = ", ".join(f"{g['namespace']}/{g['service']}" for g in gaps[:10])
+    if len(gaps) > 10:
+        svc_list += f" (+{len(gaps) - 10} more)"
+    resources = [{"kind": "Service", "name": g["service"], "namespace": g["namespace"]} for g in gaps[:20]]
+    return [
+        _make_assessment(
+            title=f"{len(gaps)} services with 0 ready endpoints",
+            summary=f"No pods backing these services — traffic will fail: {svc_list}",
+            severity="warning",
+            urgency_hours=1,
+            generator="service_endpoint_gaps",
+            resources=resources,
         )
-    return items
+    ]
 
 
 def gen_readiness_regressions() -> list[dict[str, Any]]:
