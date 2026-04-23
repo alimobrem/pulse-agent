@@ -18,7 +18,7 @@ from sre_agent.monitor import (
     _make_finding,
     _make_prediction,
     _make_rollback_info,
-    _run_security_followup_sync,
+    _run_security_followup,
     _skip_namespace,
     get_action_detail,
     get_fix_history,
@@ -279,8 +279,8 @@ class TestFindingSeverity:
 
 
 class TestSecurityFollowup:
-    def test_run_security_followup_sync_returns_parsed(self):
-        """_run_security_followup_sync calls the security agent and parses JSON."""
+    def test_run_security_followup_returns_parsed(self):
+        """_run_security_followup calls the security agent and parses JSON."""
         finding = _make_finding(
             severity="critical",
             category="crashloop",
@@ -288,14 +288,23 @@ class TestSecurityFollowup:
             summary="restarts",
             resources=[{"kind": "Pod", "name": "web-1", "namespace": "prod"}],
         )
-        with (
-            patch("sre_agent.agent.create_client", return_value=MagicMock()),
-            patch(
-                "sre_agent.agent.run_agent_streaming",
-                return_value='{"security_issues": [{"issue": "no netpol"}], "risk_level": "high"}',
-            ) as mock_run,
-        ):
-            result = _run_security_followup_sync(finding)
+
+        async def _run():
+            with (
+                patch("sre_agent.agent.create_async_client", return_value=MagicMock()),
+                patch(
+                    "sre_agent.agent.run_agent_streaming",
+                    return_value='{"security_issues": [{"issue": "no netpol"}], "risk_level": "high"}',
+                ) as mock_run,
+            ):
+                result = await _run_security_followup(finding)
+            return result, mock_run
+
+        loop = asyncio.new_event_loop()
+        try:
+            result, mock_run = loop.run_until_complete(_run())
+        finally:
+            loop.close()
 
         assert result["risk_level"] == "high"
         assert len(result["security_issues"]) == 1
@@ -306,8 +315,8 @@ class TestSecurityFollowup:
         # Verify read-only mode
         assert call_kwargs.kwargs.get("write_tools") == set() or call_kwargs[1].get("write_tools") == set()
 
-    def test_run_security_followup_sync_handles_bad_json(self):
-        """_run_security_followup_sync returns empty defaults on unparseable response."""
+    def test_run_security_followup_handles_bad_json(self):
+        """_run_security_followup returns empty defaults on unparseable response."""
         finding = _make_finding(
             severity="critical",
             category="crashloop",
@@ -315,11 +324,19 @@ class TestSecurityFollowup:
             summary="s",
             resources=[{"kind": "Pod", "name": "x", "namespace": "ns"}],
         )
-        with (
-            patch("sre_agent.agent.create_client", return_value=MagicMock()),
-            patch("sre_agent.agent.run_agent_streaming", return_value="not json at all"),
-        ):
-            result = _run_security_followup_sync(finding)
+
+        async def _run():
+            with (
+                patch("sre_agent.agent.create_async_client", return_value=MagicMock()),
+                patch("sre_agent.agent.run_agent_streaming", return_value="not json at all"),
+            ):
+                return await _run_security_followup(finding)
+
+        loop = asyncio.new_event_loop()
+        try:
+            result = loop.run_until_complete(_run())
+        finally:
+            loop.close()
         assert result["security_issues"] == []
         assert result["risk_level"] == "unknown"
 
@@ -365,10 +382,8 @@ class TestSecurityFollowup:
         }
 
         with (
-            patch("sre_agent.monitor.cluster_monitor._run_proactive_investigation_sync", return_value=mock_inv_result),
-            patch(
-                "sre_agent.monitor.cluster_monitor._run_security_followup_sync", return_value=mock_sec_result
-            ) as mock_sec,
+            patch("sre_agent.monitor.cluster_monitor._run_proactive_investigation", return_value=mock_inv_result),
+            patch("sre_agent.monitor.cluster_monitor._run_security_followup", return_value=mock_sec_result) as mock_sec,
             patch("sre_agent.agent._circuit_breaker") as mock_cb,
             patch.object(monitor, "_try_plan_execution", return_value=False),
             patch("sre_agent.plan_templates.match_template", return_value=None),
@@ -420,8 +435,8 @@ class TestSecurityFollowup:
         }
 
         with (
-            patch("sre_agent.monitor.cluster_monitor._run_proactive_investigation_sync", return_value=mock_inv_result),
-            patch("sre_agent.monitor.cluster_monitor._run_security_followup_sync") as mock_sec,
+            patch("sre_agent.monitor.cluster_monitor._run_proactive_investigation", return_value=mock_inv_result),
+            patch("sre_agent.monitor.cluster_monitor._run_security_followup") as mock_sec,
             patch("sre_agent.agent._circuit_breaker") as mock_cb,
             patch.object(monitor, "_try_plan_execution", return_value=False),
             patch("sre_agent.plan_templates.match_template", return_value=None),
@@ -481,10 +496,8 @@ class TestSecurityFollowup:
         }
 
         with (
-            patch("sre_agent.monitor.cluster_monitor._run_proactive_investigation_sync", return_value=mock_inv_result),
-            patch(
-                "sre_agent.monitor.cluster_monitor._run_security_followup_sync", return_value=mock_sec_result
-            ) as mock_sec,
+            patch("sre_agent.monitor.cluster_monitor._run_proactive_investigation", return_value=mock_inv_result),
+            patch("sre_agent.monitor.cluster_monitor._run_security_followup", return_value=mock_sec_result) as mock_sec,
             patch("sre_agent.agent._circuit_breaker") as mock_cb,
             patch.object(monitor, "_try_plan_execution", return_value=False),
             patch("sre_agent.plan_templates.match_template", return_value=None),
@@ -540,7 +553,7 @@ class TestMonitorAutoLearn:
         }
 
         with (
-            patch("sre_agent.monitor.cluster_monitor._run_proactive_investigation_sync", return_value=mock_inv_result),
+            patch("sre_agent.monitor.cluster_monitor._run_proactive_investigation", return_value=mock_inv_result),
             patch("sre_agent.agent._circuit_breaker") as mock_cb,
             patch.object(monitor, "_try_plan_execution", return_value=False),
             patch("sre_agent.plan_templates.match_template", return_value=None),
@@ -599,7 +612,7 @@ class TestMonitorAutoLearn:
         }
 
         with (
-            patch("sre_agent.monitor.cluster_monitor._run_proactive_investigation_sync", return_value=mock_inv_result),
+            patch("sre_agent.monitor.cluster_monitor._run_proactive_investigation", return_value=mock_inv_result),
             patch("sre_agent.agent._circuit_breaker") as mock_cb,
             patch("sre_agent.plan_templates.match_template", return_value=None),
         ):
@@ -653,7 +666,7 @@ class TestMonitorAutoLearn:
         }
 
         with (
-            patch("sre_agent.monitor.cluster_monitor._run_proactive_investigation_sync", return_value=mock_inv_result),
+            patch("sre_agent.monitor.cluster_monitor._run_proactive_investigation", return_value=mock_inv_result),
             patch("sre_agent.agent._circuit_breaker") as mock_cb,
             patch.object(monitor, "_try_plan_execution", return_value=False),
             patch("sre_agent.plan_templates.match_template", return_value=None),
@@ -1273,7 +1286,7 @@ class TestEvalScaffoldingIntegration:
         eval_mock = MagicMock()
         fake_bus = MagicMock()
         with (
-            patch("sre_agent.monitor.cluster_monitor._run_proactive_investigation_sync", return_value=mock_inv_result),
+            patch("sre_agent.monitor.cluster_monitor._run_proactive_investigation", return_value=mock_inv_result),
             patch("sre_agent.agent._circuit_breaker") as mock_cb,
             patch.object(monitor, "_try_plan_execution", return_value=False),
             patch("sre_agent.context_bus.get_context_bus", return_value=fake_bus),

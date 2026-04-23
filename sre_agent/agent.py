@@ -285,6 +285,22 @@ def borrow_client(client=None):
                 logger.debug("Failed to close borrowed client", exc_info=True)
 
 
+@contextlib.asynccontextmanager
+async def borrow_async_client(client=None):
+    """Yield an async Anthropic client, closing it only if we created it."""
+    owns = client is None
+    if owns:
+        client = create_async_client()
+    try:
+        yield client
+    finally:
+        if owns:
+            try:
+                await client.close()
+            except Exception:
+                logger.debug("Failed to close borrowed async client", exc_info=True)
+
+
 def _sanitize_content(content) -> list[dict]:
     """Convert response content blocks to plain dicts safe for round-tripping.
 
