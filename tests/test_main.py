@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 import sys
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -21,32 +22,32 @@ class TestConfirmAction:
     def test_confirm_yes(self):
         with patch("sre_agent.main.console") as mock_console:
             mock_console.input.return_value = "y"
-            assert _confirm_action("delete_pod", {"pod_name": "x"}) is True
+            assert asyncio.run(_confirm_action("delete_pod", {"pod_name": "x"})) is True
 
     def test_confirm_yes_full(self):
         with patch("sre_agent.main.console") as mock_console:
             mock_console.input.return_value = "yes"
-            assert _confirm_action("delete_pod", {}) is True
+            assert asyncio.run(_confirm_action("delete_pod", {})) is True
 
     def test_confirm_no(self):
         with patch("sre_agent.main.console") as mock_console:
             mock_console.input.return_value = "n"
-            assert _confirm_action("delete_pod", {}) is False
+            assert asyncio.run(_confirm_action("delete_pod", {})) is False
 
     def test_confirm_empty(self):
         with patch("sre_agent.main.console") as mock_console:
             mock_console.input.return_value = ""
-            assert _confirm_action("delete_pod", {}) is False
+            assert asyncio.run(_confirm_action("delete_pod", {})) is False
 
     def test_confirm_eof(self):
         with patch("sre_agent.main.console") as mock_console:
             mock_console.input.side_effect = EOFError
-            assert _confirm_action("delete_pod", {}) is False
+            assert asyncio.run(_confirm_action("delete_pod", {})) is False
 
     def test_confirm_keyboard_interrupt(self):
         with patch("sre_agent.main.console") as mock_console:
             mock_console.input.side_effect = KeyboardInterrupt
-            assert _confirm_action("delete_pod", {}) is False
+            assert asyncio.run(_confirm_action("delete_pod", {})) is False
 
 
 class TestModes:
@@ -90,11 +91,11 @@ class TestRunRepl:
         with (
             patch("sre_agent.main.console", mock_console),
             patch("sre_agent.memory.is_memory_enabled", return_value=False),
-            patch("sre_agent.main.create_client", return_value=MagicMock()),
+            patch("sre_agent.main.create_async_client", return_value=MagicMock()),
             patch("sre_agent.k8s_client.get_core_client") as mock_k8s,
         ):
             mock_k8s.return_value.list_namespace.return_value = MagicMock()
-            return run_repl(mode), mock_console
+            return asyncio.run(run_repl(mode)), mock_console
 
     def test_quit_command(self):
         result, _ = self._run_repl_with_inputs(["quit"])
@@ -130,21 +131,21 @@ class TestRunRepl:
         with (
             patch("sre_agent.main.console", mock_console),
             patch("sre_agent.memory.is_memory_enabled", return_value=False),
-            patch("sre_agent.main.create_client", return_value=MagicMock()),
+            patch("sre_agent.main.create_async_client", return_value=MagicMock()),
             patch("sre_agent.k8s_client.get_core_client") as mock_k8s,
         ):
             mock_k8s.return_value.list_namespace.return_value = MagicMock()
-            result = run_repl("sre")
+            result = asyncio.run(run_repl("sre"))
         assert result == "quit"
 
     def test_client_init_failure_exits(self):
         with (
             patch("sre_agent.main.console"),
             patch("sre_agent.memory.is_memory_enabled", return_value=False),
-            patch("sre_agent.main.create_client", side_effect=RuntimeError("no key")),
+            patch("sre_agent.main.create_async_client", side_effect=RuntimeError("no key")),
             pytest.raises(SystemExit),
         ):
-            run_repl("sre")
+            asyncio.run(run_repl("sre"))
 
     def test_feedback_no_previous_interaction(self):
         result, _ = self._run_repl_with_inputs(["feedback", "quit"])
@@ -153,24 +154,27 @@ class TestRunRepl:
 
 class TestMainEntrypoint:
     def test_default_sre_mode(self):
+        mock_repl = AsyncMock(return_value="quit")
         with (
-            patch("sre_agent.main.run_repl", return_value="quit") as mock_repl,
+            patch("sre_agent.main.run_repl", mock_repl),
             patch.object(sys, "argv", ["main.py"]),
         ):
             main()
             mock_repl.assert_called_once_with("sre")
 
     def test_security_mode_from_argv(self):
+        mock_repl = AsyncMock(return_value="quit")
         with (
-            patch("sre_agent.main.run_repl", return_value="quit") as mock_repl,
+            patch("sre_agent.main.run_repl", mock_repl),
             patch.object(sys, "argv", ["main.py", "security"]),
         ):
             main()
             mock_repl.assert_called_once_with("security")
 
     def test_mode_switch_loop(self):
+        mock_repl = AsyncMock(side_effect=["switch", "quit"])
         with (
-            patch("sre_agent.main.run_repl", side_effect=["switch", "quit"]) as mock_repl,
+            patch("sre_agent.main.run_repl", mock_repl),
             patch.object(sys, "argv", ["main.py"]),
         ):
             main()
@@ -179,8 +183,9 @@ class TestMainEntrypoint:
             mock_repl.assert_any_call("security")
 
     def test_invalid_mode_ignored(self):
+        mock_repl = AsyncMock(return_value="quit")
         with (
-            patch("sre_agent.main.run_repl", return_value="quit") as mock_repl,
+            patch("sre_agent.main.run_repl", mock_repl),
             patch.object(sys, "argv", ["main.py", "invalid"]),
         ):
             main()
