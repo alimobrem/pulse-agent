@@ -50,6 +50,7 @@ class MonitorSession:
         self._MAX_FIX_ATTEMPTS = 2  # stop retrying after this many failed fixes
         self._pending_action_approvals: dict[str, asyncio.Future] = {}
         self._recent_investigations: dict[str, float] = {}
+        self._investigation_fingerprints: dict[str, str] = {}  # finding_key → content_hash
         self._scan_counter = 0
         self._pending_verifications: dict[str, dict[str, Any]] = {}
         self._daily_investigation_count = 0
@@ -66,6 +67,7 @@ class MonitorSession:
         # Noise learning: track findings that appear then quickly disappear
         self._transient_counts: dict[str, int] = {}  # finding_key -> count of transient appearances
         self._noise_threshold = get_settings().noise_threshold
+        self._noise_suppressed = 0  # Count of findings/investigations suppressed due to high noise
         self._session_id = f"mon-{uuid.uuid4().hex[:12]}"  # Unique session ID for DB tracking
         self.disabled_scanners: set[str] = set()  # Scanner IDs disabled by the client
         # Shared Anthropic client — avoids creating a new httpx session per investigation
@@ -98,11 +100,13 @@ class MonitorSession:
             "fix_attempt_counts": len(self._fix_attempt_counts),
             "pending_approvals": len(self._pending_action_approvals),
             "recent_investigations": len(self._recent_investigations),
+            "investigation_fingerprints": len(self._investigation_fingerprints),
             "pending_verifications": len(self._pending_verifications),
             "transient_counts": len(self._transient_counts),
             "recent_fix_ids": len(self._recent_fix_ids),
             "investigation_tasks": len(self._investigation_tasks),
             "scan_counter": self._scan_counter,
+            "noise_suppressed": self._noise_suppressed,
         }
 
     async def cancel_pending_investigations(self) -> None:
@@ -644,9 +648,33 @@ class MonitorSession:
             if finding.get("category") not in allowed_categories:
                 continue
 
+            # Noise gate: skip investigations for high-noise findings
+            noise_score = finding.get("noiseScore", 0.0)
+            if noise_score >= self._noise_threshold:
+                logger.info(
+                    "Skipping investigation for noisy finding: %s (noiseScore=%.2f)",
+                    finding.get("title", "")[:40],
+                    noise_score,
+                )
+                self._noise_suppressed += 1
+                continue
+
             key = _finding_key(finding)
             last_time = self._recent_investigations.get(key, 0.0)
             if now - last_time < cooldown_seconds:
+                continue
+
+            # Content-hash dedup: skip if finding content hasn't changed since last investigation
+            from .confidence import _finding_content_hash
+
+            content_hash = _finding_content_hash(finding)
+            prev_hash = self._investigation_fingerprints.get(key)
+            if prev_hash == content_hash:
+                logger.info(
+                    "Skipping investigation for unchanged finding: %s (hash=%s)",
+                    finding.get("title", "")[:40],
+                    content_hash,
+                )
                 continue
 
             # Pre-classify log fingerprints for routing context
@@ -681,6 +709,7 @@ class MonitorSession:
                         )
                         continue
                     self._recent_investigations[key] = now
+                    self._investigation_fingerprints[key] = content_hash
                     investigations_run += 1
                     self._daily_investigation_count += 1
                     task = asyncio.create_task(
@@ -741,6 +770,7 @@ class MonitorSession:
                 investigations_run += 1
                 self._daily_investigation_count += 1
                 self._recent_investigations[key] = now
+                self._investigation_fingerprints[key] = content_hash
 
                 # Publish investigation result to shared context bus
                 from ..context_bus import ContextEntry, get_context_bus
@@ -1092,6 +1122,29 @@ class MonitorSession:
             key = _finding_key(f)
             current_keys.add(key)
             if key not in self._last_findings:
+                # Compute noise score from transient history BEFORE adding to new_findings
+                transient_count = self._transient_counts.get(key, 0)
+                if transient_count >= 3:
+                    noise_score = min(1.0, round(transient_count * 0.2, 2))
+                elif transient_count > 0:
+                    noise_score = round(transient_count * 0.1, 2)
+                else:
+                    noise_score = 0.0
+                f["noiseScore"] = noise_score
+
+                # Noise gate: suppress high-noise findings
+                if noise_score >= self._noise_threshold:
+                    logger.debug(
+                        "Suppressing noisy finding: %s (noiseScore=%.2f, transient_count=%d)",
+                        f.get("title", "")[:40],
+                        noise_score,
+                        transient_count,
+                    )
+                    self._noise_suppressed += 1
+                    # Still track in _last_findings for dedup, but don't emit
+                    self._last_findings[key] = f
+                    continue
+
                 new_findings.append(f)
                 self._last_findings[key] = f
 
@@ -1128,6 +1181,8 @@ class MonitorSession:
         # Track transient findings for noise learning
         for key in stale_keys:
             self._transient_counts[key] = self._transient_counts.get(key, 0) + 1
+            # Evict investigation fingerprints for resolved findings
+            self._investigation_fingerprints.pop(key, None)
 
         # Cap _recent_fix_ids to prevent unbounded growth on long-running sessions
         if len(self._recent_fix_ids) > 500:
@@ -1137,18 +1192,16 @@ class MonitorSession:
             # Keep only the most frequent
             sorted_keys = sorted(self._transient_counts, key=self._transient_counts.get, reverse=True)  # type: ignore[arg-type]
             self._transient_counts = {k: self._transient_counts[k] for k in sorted_keys[:500]}
+        # Cap investigation fingerprints
+        if len(self._investigation_fingerprints) > 1000:
+            self._investigation_fingerprints = {
+                k: v for k, v in self._investigation_fingerprints.items() if k in self._last_findings
+            }
 
-        # Enrich findings with confidence and noise scores (before context bus so consumers get scores)
+        # Enrich findings with confidence scores (noise scores already computed in dedup loop)
         for f in new_findings:
             if "confidence" not in f:
                 f["confidence"] = _estimate_finding_confidence(f)
-            # Compute noise score from transient history
-            fkey = _finding_key(f)
-            transient_count = self._transient_counts.get(fkey, 0)
-            if transient_count >= 3:
-                f["noiseScore"] = min(1.0, round(transient_count * 0.2, 2))
-            elif transient_count > 0:
-                f["noiseScore"] = round(transient_count * 0.1, 2)
 
         # Publish critical new findings to shared context bus
         from ..context_bus import ContextEntry, get_context_bus

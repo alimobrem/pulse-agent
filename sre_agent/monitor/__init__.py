@@ -30,6 +30,7 @@ from .confidence import (
     _estimate_auto_fix_confidence,
     _estimate_finding_confidence,
     _extract_json_object,
+    _finding_content_hash,
     _finding_key,
     _sanitize_for_prompt,
 )
@@ -94,6 +95,7 @@ __all__ = [
     # confidence
     "_estimate_finding_confidence",
     "_extract_json_object",
+    "_finding_content_hash",
     "_finding_key",
     # autofix
     "_fix_crashloop",

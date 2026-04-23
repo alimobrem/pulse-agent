@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 from typing import Any
@@ -81,6 +82,16 @@ def _finding_key(finding: dict) -> str:
                 name = parts[0]
         resource_part = f"{kind}:{r.get('namespace', '')}:{name}"
     return f"{finding.get('category', '')}:{finding.get('title', '')}:{resource_part}"
+
+
+def _finding_content_hash(finding: dict) -> str:
+    """Hash the mutable content of a finding to detect changes."""
+    parts = [
+        finding.get("severity", ""),
+        finding.get("title", ""),
+        finding.get("summary", ""),
+    ]
+    return hashlib.md5("|".join(parts).encode()).hexdigest()[:12]
 
 
 def _extract_json_object(text: str) -> dict[str, Any] | None:
