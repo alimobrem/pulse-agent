@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import json
 from types import SimpleNamespace
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 
 from sre_agent.evals.judge import JUDGE_PROMPT_TEMPLATE, judge_response
 
@@ -32,7 +34,8 @@ class TestJudgePromptTemplate:
 
 
 class TestJudgeResponse:
-    def test_successful_judge(self):
+    @pytest.mark.asyncio
+    async def test_successful_judge(self):
         mock_msg = SimpleNamespace(
             content=[
                 SimpleNamespace(
@@ -50,9 +53,9 @@ class TestJudgeResponse:
             ]
         )
         client = MagicMock()
-        client.messages.create.return_value = mock_msg
+        client.messages.create = AsyncMock(return_value=mock_msg)
 
-        result = judge_response(
+        result = await judge_response(
             prompt="Why is my pod crashing?",
             response="OOMKilled — increase memory limits.",
             tool_calls=["list_pods", "describe_pod"],
@@ -62,7 +65,8 @@ class TestJudgeResponse:
         assert result["total"] == 78
         assert result["correctness"] == 25
 
-    def test_strips_markdown_fences(self):
+    @pytest.mark.asyncio
+    async def test_strips_markdown_fences(self):
         text_with_fences = (
             "```json\n"
             + json.dumps(
@@ -79,31 +83,35 @@ class TestJudgeResponse:
         )
         mock_msg = SimpleNamespace(content=[SimpleNamespace(text=text_with_fences)])
         client = MagicMock()
-        client.messages.create.return_value = mock_msg
+        client.messages.create = AsyncMock(return_value=mock_msg)
 
-        result = judge_response("q", "a", ["t"], client=client)
+        result = await judge_response("q", "a", ["t"], client=client)
         assert result is not None
         assert result["total"] == 80
 
-    def test_no_client_no_api_key(self):
-        with patch("sre_agent.agent.create_client", side_effect=RuntimeError("no key")):
-            result = judge_response("q", "a", ["t"], client=None)
+    @pytest.mark.asyncio
+    async def test_no_client_no_api_key(self):
+        with patch("sre_agent.agent.create_async_client", side_effect=RuntimeError("no key")):
+            result = await judge_response("q", "a", ["t"], client=None)
         assert result is None
 
-    def test_api_call_failure(self):
+    @pytest.mark.asyncio
+    async def test_api_call_failure(self):
         client = MagicMock()
-        client.messages.create.side_effect = RuntimeError("API error")
-        result = judge_response("q", "a", ["t"], client=client)
+        client.messages.create = AsyncMock(side_effect=RuntimeError("API error"))
+        result = await judge_response("q", "a", ["t"], client=client)
         assert result is None
 
-    def test_invalid_json_response(self):
+    @pytest.mark.asyncio
+    async def test_invalid_json_response(self):
         mock_msg = SimpleNamespace(content=[SimpleNamespace(text="not json at all")])
         client = MagicMock()
-        client.messages.create.return_value = mock_msg
-        result = judge_response("q", "a", ["t"], client=client)
+        client.messages.create = AsyncMock(return_value=mock_msg)
+        result = await judge_response("q", "a", ["t"], client=client)
         assert result is None
 
-    def test_default_model(self):
+    @pytest.mark.asyncio
+    async def test_default_model(self):
         mock_msg = SimpleNamespace(
             content=[
                 SimpleNamespace(
@@ -121,13 +129,14 @@ class TestJudgeResponse:
             ]
         )
         client = MagicMock()
-        client.messages.create.return_value = mock_msg
+        client.messages.create = AsyncMock(return_value=mock_msg)
 
-        judge_response("q", "a", ["t"], client=client)
+        await judge_response("q", "a", ["t"], client=client)
         call_kwargs = client.messages.create.call_args[1]
         assert call_kwargs["model"] == "claude-sonnet-4-6"
 
-    def test_custom_model(self):
+    @pytest.mark.asyncio
+    async def test_custom_model(self):
         mock_msg = SimpleNamespace(
             content=[
                 SimpleNamespace(
@@ -145,8 +154,8 @@ class TestJudgeResponse:
             ]
         )
         client = MagicMock()
-        client.messages.create.return_value = mock_msg
+        client.messages.create = AsyncMock(return_value=mock_msg)
 
-        judge_response("q", "a", ["t"], client=client, model="claude-haiku-4-20250514")
+        await judge_response("q", "a", ["t"], client=client, model="claude-haiku-4-20250514")
         call_kwargs = client.messages.create.call_args[1]
         assert call_kwargs["model"] == "claude-haiku-4-20250514"

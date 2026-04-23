@@ -9,6 +9,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import asyncio
 import json
 import sys
 
@@ -155,9 +156,9 @@ def _setup_model(model: str, dry_run: bool):
     if dry_run:
         return None, thinking  # caller builds mock client per fixture
     else:
-        from ..agent import create_client
+        from ..agent import create_async_client
 
-        return create_client(), thinking
+        return create_async_client(), thinking
 
 
 def _run_fixture(name: str, use_judge: bool = False, model: str = "claude-sonnet-4-6", dry_run: bool = False) -> dict:
@@ -189,11 +190,13 @@ def _run_fixture(name: str, use_judge: bool = False, model: str = "claude-sonnet
     if use_judge:
         from .judge import judge_response
 
-        judge_result = judge_response(
-            prompt=fixture["prompt"],
-            response=result["response"],
-            tool_calls=[tc["name"] for tc in result["tool_calls"]],
-            client=client,
+        judge_result = asyncio.run(
+            judge_response(
+                prompt=fixture["prompt"],
+                response=result["response"],
+                tool_calls=[tc["name"] for tc in result["tool_calls"]],
+                client=client,
+            )
         )
         output["judge"] = judge_result
 
@@ -232,11 +235,13 @@ def _run_multi_turn_fixture(name: str, fixture: dict, use_judge: bool, model: st
         last = result["turns"][-1]
         all_tools = [tc["name"] for t in result["turns"] for tc in t["tool_calls"]]
         full_prompt = " → ".join(t["prompt"] for t in fixture["turns"])
-        judge_result = judge_response(
-            prompt=full_prompt,
-            response=last["response"],
-            tool_calls=all_tools,
-            client=client if not dry_run else None,
+        judge_result = asyncio.run(
+            judge_response(
+                prompt=full_prompt,
+                response=last["response"],
+                tool_calls=all_tools,
+                client=client if not dry_run else None,
+            )
         )
         output["judge"] = judge_result
 

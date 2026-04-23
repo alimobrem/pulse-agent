@@ -6,7 +6,7 @@ These tests mock the Claude API so no real API key is needed.
 from __future__ import annotations
 
 from types import SimpleNamespace
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -76,10 +76,15 @@ def _make_mock_client(tool_names_to_call: list[str] | None = None, final_text: s
     streams = []
     for resp, events in zip(responses, event_lists):
         stream = MagicMock()
-        stream.__enter__ = MagicMock(return_value=stream)
-        stream.__exit__ = MagicMock(return_value=False)
-        stream.__iter__ = MagicMock(return_value=iter(events))
-        stream.get_final_message.return_value = resp
+        stream.__aenter__ = AsyncMock(return_value=stream)
+        stream.__aexit__ = AsyncMock(return_value=False)
+
+        async def _aiter(evts=events):
+            for e in evts:
+                yield e
+
+        stream.__aiter__ = MagicMock(return_value=_aiter())
+        stream.get_final_message = AsyncMock(return_value=resp)
         streams.append(stream)
 
     client.messages.stream = MagicMock(side_effect=streams)
@@ -347,17 +352,18 @@ class TestJudgeModule:
         assert callable(judge_response)
         assert "Correctness" in JUDGE_PROMPT_TEMPLATE
 
-    def test_judge_returns_none_without_client(self):
+    @pytest.mark.asyncio
+    async def test_judge_returns_none_without_client(self):
         """judge_response should return None gracefully when no API key."""
         from sre_agent.evals.judge import judge_response
 
         with patch("sre_agent.evals.judge.logger"):
-            result = judge_response(
+            result = await judge_response(
                 prompt="test",
                 response="test response",
                 tool_calls=["list_pods"],
                 client=None,
             )
         # Should be None (no real API key in test)
-        # It either returns None from create_client failure or from the call
+        # It either returns None from create_async_client failure or from the call
         assert result is None or isinstance(result, dict)
