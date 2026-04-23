@@ -7,6 +7,7 @@ instead of making real API calls.  Runs the actual agent loop
 
 from __future__ import annotations
 
+import asyncio
 import json
 import time
 from pathlib import Path
@@ -99,7 +100,7 @@ class ReplayHarness:
             tool_defs = self._build_stub_defs()
 
         # Track every tool invocation via a callback
-        def _on_tool_use(tool_name: str) -> None:
+        async def _on_tool_use(tool_name: str) -> None:
             self.tool_calls.append({"name": tool_name, "timestamp": time.time()})
 
         start = time.monotonic()
@@ -114,7 +115,7 @@ class ReplayHarness:
         }
         if thinking is not None:
             kwargs["thinking"] = thinking
-        response = run_agent_streaming(**kwargs)
+        response = asyncio.run(run_agent_streaming(**kwargs))
         elapsed_ms = (time.monotonic() - start) * 1000
 
         return {
@@ -211,7 +212,7 @@ class MultiTurnReplayHarness:
                 mock_tool.call.return_value = value
                 effective_map[name] = mock_tool
 
-            def _on_tool_use(tool_name: str) -> None:
+            async def _on_tool_use(tool_name: str) -> None:
                 turn_tool_calls.append({"name": tool_name, "timestamp": time.time()})
 
             # Add user message
@@ -230,7 +231,7 @@ class MultiTurnReplayHarness:
             if thinking is not None:
                 kwargs["thinking"] = thinking
 
-            response = run_agent_streaming(**kwargs)
+            response = asyncio.run(run_agent_streaming(**kwargs))
             elapsed_ms = (time.monotonic() - start) * 1000
 
             # Add assistant response to history for next turn

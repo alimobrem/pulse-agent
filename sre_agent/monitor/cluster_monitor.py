@@ -23,8 +23,8 @@ from .autofix import _autofix_paused
 from .confidence import _estimate_auto_fix_confidence, _estimate_finding_confidence, _finding_key
 from .findings import _make_action_report, _ts
 from .investigations import (
-    _run_proactive_investigation_sync,
-    _run_security_followup_sync,
+    _run_proactive_investigation,
+    _run_security_followup,
     _sanitize_for_prompt,
 )
 from .registry import SCANNER_REGISTRY, SEVERITY_CRITICAL, SEVERITY_WARNING
@@ -76,10 +76,10 @@ class ClusterMonitor:
         self._noise_suppressed_last_scan = 0
         self._session_id = f"mon-{uuid.uuid4().hex[:12]}"
 
-        # Shared Anthropic client
-        from ..agent import create_client
+        # Shared Anthropic client (async)
+        from ..agent import create_async_client
 
-        self._client = create_client()
+        self._client = create_async_client()
 
         # Initialize database schema once
         from .. import db as db_module
@@ -191,7 +191,7 @@ class ClusterMonitor:
                 task.cancel()
         self._investigation_tasks.clear()
         try:
-            self._client.close()
+            await self._client.close()
         except Exception:
             logger.debug("Failed to close client", exc_info=True)
 
@@ -801,7 +801,7 @@ class ClusterMonitor:
             }
             try:
                 result = await asyncio.wait_for(
-                    asyncio.to_thread(_run_proactive_investigation_sync, finding, client=self._client),
+                    _run_proactive_investigation(finding, client=self._client),
                     timeout=timeout_seconds,
                 )
                 report.update(
@@ -843,7 +843,7 @@ class ClusterMonitor:
                 ):
                     try:
                         sec_result = await asyncio.wait_for(
-                            asyncio.to_thread(_run_security_followup_sync, finding, client=self._client),
+                            _run_security_followup(finding, client=self._client),
                             timeout=timeout_seconds,
                         )
                         report["securityFollowup"] = {
@@ -1207,7 +1207,7 @@ class ClusterMonitor:
                 }
             )
             if finding_id:
-                asyncio.get_event_loop().run_in_executor(None, mark_finding_actions_resolved, finding_id)
+                asyncio.get_running_loop().run_in_executor(None, mark_finding_actions_resolved, finding_id)
 
         # Track transient findings
         for key in stale_keys:
@@ -1421,7 +1421,7 @@ class ClusterMonitor:
                 }
                 try:
                     await asyncio.wait_for(
-                        asyncio.to_thread(_run_security_followup_sync, finding, client=self._client),
+                        _run_security_followup(finding, client=self._client),
                         timeout=timeout_seconds,
                     )
                     logger.info("Handoff security scan completed for %s", namespace)
@@ -1441,7 +1441,7 @@ class ClusterMonitor:
                 }
                 try:
                     await asyncio.wait_for(
-                        asyncio.to_thread(_run_proactive_investigation_sync, finding, client=self._client),
+                        _run_proactive_investigation(finding, client=self._client),
                         timeout=timeout_seconds,
                     )
                     logger.info("Handoff SRE investigation completed for %s", namespace)

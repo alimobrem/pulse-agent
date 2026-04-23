@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
+import asyncio
 import atexit
 import concurrent.futures
 import contextlib
 import json
 import logging
 import os
-import threading
 import time
 from datetime import UTC, datetime
 from typing import Any
@@ -96,6 +96,14 @@ _tool_pool = concurrent.futures.ThreadPoolExecutor(max_workers=4, thread_name_pr
 atexit.register(_tool_pool.shutdown, wait=False)
 
 
+async def _invoke(callback, *args, **kwargs):
+    """Invoke a callback that may be sync or async."""
+    result = callback(*args, **kwargs)
+    if asyncio.iscoroutine(result):
+        return await result
+    return result
+
+
 # ---------------------------------------------------------------------------
 # Circuit Breaker — enters "Silent Mode" when the API is unreachable
 # ---------------------------------------------------------------------------
@@ -120,39 +128,34 @@ class CircuitBreaker:
         self.state = self.CLOSED
         self.failure_count = 0
         self.last_failure_time: float = 0
-        self._lock = threading.Lock()
 
     def allow_request(self) -> bool:
-        with self._lock:
-            if self.state == self.CLOSED:
-                return True
-            if self.state == self.OPEN:
-                if time.time() - self.last_failure_time >= self.recovery_timeout:
-                    self.state = self.HALF_OPEN
-                    logger.info("Circuit breaker: HALF_OPEN — testing recovery")
-                    return True
-                return False
-            # HALF_OPEN — allow one request to test
+        if self.state == self.CLOSED:
             return True
+        if self.state == self.OPEN:
+            if time.time() - self.last_failure_time >= self.recovery_timeout:
+                self.state = self.HALF_OPEN
+                logger.info("Circuit breaker: HALF_OPEN — testing recovery")
+                return True
+            return False
+        return True
 
     def record_success(self):
-        with self._lock:
-            if self.state == self.HALF_OPEN:
-                logger.info("Circuit breaker: CLOSED — API recovered")
-            self.state = self.CLOSED
-            self.failure_count = 0
+        if self.state == self.HALF_OPEN:
+            logger.info("Circuit breaker: CLOSED — API recovered")
+        self.state = self.CLOSED
+        self.failure_count = 0
 
     def record_failure(self):
-        with self._lock:
-            self.failure_count += 1
-            self.last_failure_time = time.time()
-            if self.failure_count >= self.failure_threshold:
-                self.state = self.OPEN
-                logger.warning(
-                    "Circuit breaker: OPEN — Silent Mode activated after %d failures. Will retry in %ds.",
-                    self.failure_count,
-                    self.recovery_timeout,
-                )
+        self.failure_count += 1
+        self.last_failure_time = time.time()
+        if self.failure_count >= self.failure_threshold:
+            self.state = self.OPEN
+            logger.warning(
+                "Circuit breaker: OPEN — Silent Mode activated after %d failures. Will retry in %ds.",
+                self.failure_count,
+                self.recovery_timeout,
+            )
 
     @property
     def is_open(self) -> bool:
@@ -244,19 +247,25 @@ TOOL_DEFS = [t.to_dict() for t in ALL_TOOLS]
 TOOL_MAP = {t.name: t for t in ALL_TOOLS}
 
 
+def _get_vertex_config() -> tuple[str, str]:
+    """Return (project, region) for Vertex AI, or empty strings for direct API."""
+    return os.environ.get("ANTHROPIC_VERTEX_PROJECT_ID", ""), os.environ.get("CLOUD_ML_REGION", "")
+
+
 def create_client():
-    """Create an Anthropic client.
-
-    Uses Vertex AI if GCP project is configured,
-    otherwise falls back to direct Anthropic API.
-    """
-    project = os.environ.get("ANTHROPIC_VERTEX_PROJECT_ID", "")
-    region = os.environ.get("CLOUD_ML_REGION", "")
-
+    """Create a sync Anthropic client."""
+    project, region = _get_vertex_config()
     if project and region:
         return anthropic.AnthropicVertex(region=region, project_id=project)
-
     return anthropic.Anthropic()
+
+
+def create_async_client():
+    """Create an async Anthropic client for the agent loop."""
+    project, region = _get_vertex_config()
+    if project and region:
+        return anthropic.AsyncAnthropicVertex(region=region, project_id=project)
+    return anthropic.AsyncAnthropic()
 
 
 @contextlib.contextmanager
@@ -273,6 +282,22 @@ def borrow_client(client=None):
                 client.close()
             except Exception:
                 logger.debug("Failed to close borrowed client", exc_info=True)
+
+
+@contextlib.asynccontextmanager
+async def borrow_async_client(client=None):
+    """Yield an async Anthropic client, closing it only if we created it."""
+    owns = client is None
+    if owns:
+        client = create_async_client()
+    try:
+        yield client
+    finally:
+        if owns:
+            try:
+                await client.close()
+            except Exception:
+                logger.debug("Failed to close borrowed async client", exc_info=True)
 
 
 def _sanitize_content(content) -> list[dict]:
@@ -404,7 +429,7 @@ def _execute_tool_with_timeout(
         return f"Error: {name} timed out after {timeout}s", None, meta
 
 
-def run_agent_streaming(
+async def run_agent_streaming(
     client,
     messages: list[dict],
     system_prompt: str | list[dict[str, Any]],
@@ -540,8 +565,8 @@ def run_agent_streaming(
                         "API %d, retrying in %ds (attempt %d/%d)", e.status_code, delay, attempt + 1, max_retries
                     )
                     if on_text:
-                        on_text(f"\n*Rate limited, retrying in {delay}s...*\n")
-                    time.sleep(min(delay, 30))
+                        await _invoke(on_text, f"\n*Rate limited, retrying in {delay}s...*\n")
+                    await asyncio.sleep(min(delay, 30))
                     continue
                 _circuit_breaker.record_failure()
                 if _circuit_breaker.is_open:
@@ -553,7 +578,7 @@ def run_agent_streaming(
                 raise
             except anthropic.APIConnectionError:
                 if attempt < max_retries:
-                    time.sleep(retry_delays[attempt])
+                    await asyncio.sleep(retry_delays[attempt])
                     continue
                 _circuit_breaker.record_failure()
                 if _circuit_breaker.is_open:
@@ -567,27 +592,28 @@ def run_agent_streaming(
         if stream_ctx is None:
             return "Failed to connect to Claude API after retries."
 
-        with stream_ctx as stream:
-            for event in stream:
+        async with stream_ctx as stream:
+            async for event in stream:
                 if event.type == "content_block_start":
                     if hasattr(event.content_block, "name"):
                         if on_tool_use:
-                            on_tool_use(event.content_block.name)
+                            await _invoke(on_tool_use, event.content_block.name)
                 elif event.type == "content_block_delta":
                     if event.delta.type == "text_delta":
                         if on_text:
-                            on_text(event.delta.text)
+                            await _invoke(on_text, event.delta.text)
                         full_text_parts.append(event.delta.text)
                     elif event.delta.type == "thinking_delta":
                         if on_thinking:
-                            on_thinking(event.delta.thinking)
+                            await _invoke(on_thinking, event.delta.thinking)
 
-            response = stream.get_final_message()
+            response = await stream.get_final_message()
 
         # Extract token usage from API response
         _usage = getattr(response, "usage", None)
         if _usage and on_usage:
-            on_usage(
+            await _invoke(
+                on_usage,
                 input_tokens=getattr(_usage, "input_tokens", 0),
                 output_tokens=getattr(_usage, "output_tokens", 0),
                 cache_read_tokens=getattr(_usage, "cache_read_input_tokens", 0),
@@ -612,18 +638,46 @@ def run_agent_streaming(
             # Execute read tools in parallel via shared pool
             if read_blocks:
                 start_time = time.time()
-                # Submit _execute_tool directly (not _execute_tool_with_timeout)
-                # to avoid nested pool submissions that could exhaust workers.
-                futures = {_tool_pool.submit(_execute_tool, b.name, b.input, tool_map): b for b in read_blocks}
-                timeout = TOOL_TIMEOUT
-                for future in concurrent.futures.as_completed(futures, timeout=timeout):
-                    block = futures[future]
+                loop = asyncio.get_running_loop()
+                task_to_block: dict[asyncio.Task, Any] = {}
+                for b in read_blocks:
+                    task = asyncio.ensure_future(
+                        loop.run_in_executor(_tool_pool, _execute_tool, b.name, b.input, tool_map)
+                    )
+                    task_to_block[task] = b
+
+                done, pending = await asyncio.wait(task_to_block.keys(), timeout=TOOL_TIMEOUT)
+
+                for p in pending:
+                    p.cancel()
+                    block = task_to_block[p]
+                    elapsed_ms = int((time.time() - start_time) * 1000)
+                    results_map[block.id] = (f"Error: {block.name} timed out", None)
+                    if on_tool_result:
+                        await _invoke(
+                            on_tool_result,
+                            {
+                                "tool_name": block.name,
+                                "input": block.input,
+                                "status": "error",
+                                "error_message": f"{block.name} timed out",
+                                "error_category": "server",
+                                "duration_ms": elapsed_ms,
+                                "result_bytes": 0,
+                                "was_confirmed": None,
+                                "turn_number": iterations,
+                            },
+                        )
+
+                for task in done:
+                    block = task_to_block[task]
                     elapsed_ms = int((time.time() - start_time) * 1000)
                     try:
-                        text, component, exec_meta = future.result(timeout=timeout)
+                        text, component, exec_meta = task.result()
                         results_map[block.id] = (text, component)
                         if on_tool_result:
-                            on_tool_result(
+                            await _invoke(
+                                on_tool_result,
                                 {
                                     "tool_name": block.name,
                                     "input": block.input,
@@ -634,12 +688,13 @@ def run_agent_streaming(
                                     "result_bytes": exec_meta["result_bytes"],
                                     "was_confirmed": None,
                                     "turn_number": iterations,
-                                }
+                                },
                             )
                     except Exception:
                         results_map[block.id] = (f"Error executing {block.name}", None)
                         if on_tool_result:
-                            on_tool_result(
+                            await _invoke(
+                                on_tool_result,
                                 {
                                     "tool_name": block.name,
                                     "input": block.input,
@@ -650,16 +705,17 @@ def run_agent_streaming(
                                     "result_bytes": 0,
                                     "was_confirmed": None,
                                     "turn_number": iterations,
-                                }
+                                },
                             )
 
             # Execute write tools sequentially (need confirmation gate)
             for block in write_blocks:
-                confirmed = on_confirm(block.name, block.input) if on_confirm else False
+                confirmed = await _invoke(on_confirm, block.name, block.input) if on_confirm else False
                 if not confirmed:
                     results_map[block.id] = ("Operation denied. No confirmation callback or user rejected.", None)
                     if on_tool_result:
-                        on_tool_result(
+                        await _invoke(
+                            on_tool_result,
                             {
                                 "tool_name": block.name,
                                 "input": block.input,
@@ -670,15 +726,19 @@ def run_agent_streaming(
                                 "result_bytes": 0,
                                 "was_confirmed": False,
                                 "turn_number": iterations,
-                            }
+                            },
                         )
                     continue
                 write_start = time.time()
-                text, component, exec_meta = _execute_tool_with_timeout(block.name, block.input, tool_map)
+                loop = asyncio.get_running_loop()
+                text, component, exec_meta = await loop.run_in_executor(
+                    _tool_pool, _execute_tool_with_timeout, block.name, block.input, tool_map
+                )
                 write_elapsed_ms = int((time.time() - write_start) * 1000)
                 results_map[block.id] = (text, component)
                 if on_tool_result:
-                    on_tool_result(
+                    await _invoke(
+                        on_tool_result,
                         {
                             "tool_name": block.name,
                             "input": block.input,
@@ -689,7 +749,7 @@ def run_agent_streaming(
                             "result_bytes": exec_meta["result_bytes"],
                             "was_confirmed": True,
                             "turn_number": iterations,
-                        }
+                        },
                     )
 
             # Assemble results in original order
@@ -703,7 +763,7 @@ def run_agent_streaming(
                     }
                 )
                 if component and on_component:
-                    on_component(block.name, component)
+                    await _invoke(on_component, block.name, component)
 
             messages.append({"role": "user", "content": tool_results})
         elif response.stop_reason == "pause_turn":
@@ -717,7 +777,7 @@ def run_agent_streaming(
     return "".join(full_text_parts)
 
 
-def run_agent_turn_streaming(
+async def run_agent_turn_streaming(
     client,
     messages: list[dict],
     system_prompt: str | None = None,
@@ -734,7 +794,7 @@ def run_agent_turn_streaming(
     effective_defs = TOOL_DEFS + (extra_tool_defs or [])
     effective_map = {**TOOL_MAP, **(extra_tool_map or {})}
 
-    return run_agent_streaming(
+    return await run_agent_streaming(
         client=client,
         messages=messages,
         system_prompt=system_prompt or SYSTEM_PROMPT,

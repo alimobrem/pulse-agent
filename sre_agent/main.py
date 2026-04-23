@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import sys
@@ -10,7 +11,7 @@ from typing import Any
 from rich.console import Console
 from rich.panel import Panel
 
-from .agent import SYSTEM_PROMPT, create_client, run_agent_turn_streaming
+from .agent import SYSTEM_PROMPT, create_async_client, run_agent_turn_streaming
 from .security_agent import SECURITY_SYSTEM_PROMPT, run_security_scan_streaming
 
 console = Console()
@@ -64,7 +65,7 @@ HELP_TEXT = """\
 """
 
 
-def _confirm_action(tool_name: str, tool_input: dict) -> bool:
+async def _confirm_action(tool_name: str, tool_input: dict) -> bool:
     """Prompt the user to confirm a destructive operation."""
     console.print()
     console.print(
@@ -92,7 +93,7 @@ def print_banner(mode: str, memory_active: bool):
     )
 
 
-def run_repl(mode: str):
+async def run_repl(mode: str):
     cfg = MODES[mode]
 
     # Initialize memory system if enabled
@@ -106,7 +107,7 @@ def run_repl(mode: str):
     print_banner(mode, memory_mgr is not None)
 
     try:
-        client = create_client()
+        client = create_async_client()
     except Exception as e:
         console.print(f"[red]Failed to initialize API client: {e}[/red]")
         sys.exit(1)
@@ -183,18 +184,18 @@ def run_repl(mode: str):
 
         text_parts: list[str] = []
 
-        def on_text(delta: str):
+        async def on_text(delta: str):
             text_parts.append(delta)
             console.print(delta, end="", highlight=False)
 
-        def on_tool_use(name: str):
+        async def on_tool_use(name: str):
             console.print(f"\n  [dim]> calling {name}...[/dim]")
             if memory_mgr:
                 memory_mgr.record_tool_call(name, {})
 
         try:
             console.print()
-            full_response = cfg["runner"](
+            full_response = await cfg["runner"](
                 client,
                 messages,
                 system_prompt=augmented_prompt,
@@ -239,7 +240,7 @@ def main():
         mode = sys.argv[1]
 
     while True:
-        result = run_repl(mode)
+        result = asyncio.run(run_repl(mode))
         if result == "switch":
             mode = "security" if mode == "sre" else "sre"
             continue

@@ -291,7 +291,7 @@ class PlanRuntime:
         )
 
         try:
-            from .agent import borrow_client, run_agent_streaming
+            from .agent import borrow_async_client, run_agent_streaming
             from .skill_loader import build_config_from_skill, get_skill
 
             skill = get_skill(phase.skill_name)
@@ -317,15 +317,14 @@ class PlanRuntime:
                 agent_mode=f"pipeline:plan:{phase.skill_name}",
             )
 
-            with borrow_client(self._client) as client:
-                response = await asyncio.to_thread(
-                    run_agent_streaming,
+            async with borrow_async_client(self._client) as client:
+                response = await run_agent_streaming(
                     client,
                     [{"role": "user", "content": prompt}],
                     config["system_prompt"],
                     config["tool_defs"],
                     config["tool_map"],
-                    set(),  # investigation plans are read-only — no write tools
+                    set(),
                     on_tool_use=on_tool,
                     on_tool_result=on_tool_result,
                     mode=phase.skill_name,
@@ -728,7 +727,7 @@ async def run_parallel_skills(
     Uses SkillExecutor for full event pipeline (tool recording, components,
     confirmation flow for primary, memory augmentation per-skill).
     """
-    from .agent import borrow_client
+    from .agent import borrow_async_client
     from .context_bus import get_context_bus
     from .skill_loader import build_config_from_skill
 
@@ -744,7 +743,7 @@ async def run_parallel_skills(
     primary_components: list[dict] = []
     secondary_components: list[dict] = []
 
-    with borrow_client(client) as c:
+    async with borrow_async_client(client) as c:
         try:
             primary_config = build_config_from_skill(primary, query=query)
             secondary_config = build_config_from_skill(secondary, query=query)
@@ -756,8 +755,7 @@ async def run_parallel_skills(
             if websocket is not None:
                 from .api.agent_ws import SkillExecutor
 
-                loop = asyncio.get_running_loop()
-                executor = SkillExecutor(websocket, session_id, loop)
+                executor = SkillExecutor(websocket, session_id)
 
                 primary_task = asyncio.create_task(
                     executor.run(
@@ -780,10 +778,10 @@ async def run_parallel_skills(
 
                 try:
                     remaining = set(tasks)
-                    deadline = asyncio.get_event_loop().time() + 120
+                    deadline = asyncio.get_running_loop().time() + 120
 
                     while remaining:
-                        timeout_left = max(deadline - asyncio.get_event_loop().time(), 0)
+                        timeout_left = max(deadline - asyncio.get_running_loop().time(), 0)
                         done, remaining = await asyncio.wait(
                             remaining, return_when=asyncio.FIRST_COMPLETED, timeout=timeout_left
                         )
@@ -844,8 +842,7 @@ async def run_parallel_skills(
 
                 async def _run_bare(config, skill_name, write_tools):
                     try:
-                        result = await asyncio.to_thread(
-                            run_agent_streaming,
+                        result = await run_agent_streaming(
                             client=c,
                             messages=list(messages),
                             system_prompt=config["system_prompt"],

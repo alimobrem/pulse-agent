@@ -101,7 +101,7 @@ class TestWebSocketProtocol:
         """Send a message and verify we get at least a done or error event back."""
         with (
             patch("sre_agent.api.agent_ws.run_agent_streaming", return_value="Test response"),
-            patch("sre_agent.api.agent_ws.create_client", return_value=MagicMock()),
+            patch("sre_agent.api.agent_ws.create_async_client", return_value=MagicMock()),
             ws_client.websocket_connect(f"/ws/agent?token={pulse_token}") as ws,
         ):
             ws.send_json({"type": "message", "content": "hello"})
@@ -218,7 +218,7 @@ class TestMultiSkillFlow:
             patch(
                 "sre_agent.synthesis.synthesize_parallel_outputs", new_callable=AsyncMock, return_value=mock_synthesis
             ),
-            patch("sre_agent.agent.create_client", return_value=MagicMock()),
+            patch("sre_agent.agent.create_async_client", return_value=MagicMock()),
             ws_client.websocket_connect(f"/ws/agent?token={pulse_token}") as ws,
         ):
             _configure_multi_skill_settings(mock_settings, pulse_token)

@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
+import os
 from types import SimpleNamespace
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import anthropic
+import pytest
 
 from sre_agent.agent import (
     MAX_ITERATIONS,
@@ -12,6 +16,28 @@ from sre_agent.agent import (
     _sanitize_content,
     run_agent_streaming,
 )
+
+
+class _MockAsyncStream:
+    """Mock async stream supporting both async context manager and async iteration."""
+
+    def __init__(self, final_message):
+        self._final_message = final_message
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *args):
+        return False
+
+    def __aiter__(self):
+        return self
+
+    async def __anext__(self):
+        raise StopAsyncIteration
+
+    async def get_final_message(self):
+        return self._final_message
 
 
 class TestSanitizeContent:
@@ -101,22 +127,17 @@ class TestExecuteTool:
         assert meta["result_bytes"] == 0
 
 
+@patch.dict("os.environ", {"PULSE_AGENT_HARNESS": "0"})
 class TestConfirmationGate:
     def _make_stream_context(self, responses):
         """Build a mock client that returns responses in sequence."""
         client = MagicMock()
-        streams = []
-        for resp in responses:
-            stream = MagicMock()
-            stream.__enter__ = MagicMock(return_value=stream)
-            stream.__exit__ = MagicMock(return_value=False)
-            stream.__iter__ = MagicMock(return_value=iter([]))
-            stream.get_final_message.return_value = resp
-            streams.append(stream)
+        streams = [_MockAsyncStream(resp) for resp in responses]
         client.messages.stream = MagicMock(side_effect=streams)
         return client
 
-    def test_write_tool_blocked_without_confirm(self):
+    @pytest.mark.asyncio
+    async def test_write_tool_blocked_without_confirm(self):
         """Write tool should be blocked if on_confirm returns False."""
         tool_use_response = SimpleNamespace(
             stop_reason="tool_use",
@@ -135,20 +156,21 @@ class TestConfirmationGate:
         mock_tool = MagicMock()
         mock_tool.call.return_value = "deleted"
 
-        run_agent_streaming(
+        await run_agent_streaming(
             client=client,
             messages=[{"role": "user", "content": "delete pod"}],
             system_prompt="test",
             tool_defs=[],
             tool_map={"delete_pod": mock_tool},
             write_tools={"delete_pod"},
-            on_confirm=lambda name, inp: False,  # User says no
+            on_confirm=AsyncMock(return_value=False),
         )
 
         # Tool should NOT have been called
         mock_tool.call.assert_not_called()
 
-    def test_write_tool_allowed_with_confirm(self):
+    @pytest.mark.asyncio
+    async def test_write_tool_allowed_with_confirm(self):
         """Write tool should execute if on_confirm returns True."""
         tool_use_response = SimpleNamespace(
             stop_reason="tool_use",
@@ -170,19 +192,20 @@ class TestConfirmationGate:
         mock_tool = MagicMock()
         mock_tool.call.return_value = "Scaled default/nginx to 5 replicas."
 
-        run_agent_streaming(
+        await run_agent_streaming(
             client=client,
             messages=[{"role": "user", "content": "scale nginx to 5"}],
             system_prompt="test",
             tool_defs=[],
             tool_map={"scale_deployment": mock_tool},
             write_tools={"scale_deployment"},
-            on_confirm=lambda name, inp: True,  # User says yes
+            on_confirm=AsyncMock(return_value=True),
         )
 
         mock_tool.call.assert_called_once()
 
-    def test_read_tool_no_confirm_needed(self):
+    @pytest.mark.asyncio
+    async def test_read_tool_no_confirm_needed(self):
         """Read tools should execute without confirmation."""
         tool_use_response = SimpleNamespace(
             stop_reason="tool_use",
@@ -199,9 +222,9 @@ class TestConfirmationGate:
         mock_tool = MagicMock()
         mock_tool.call.return_value = "default/web-1  Running"
 
-        confirm_mock = MagicMock()
+        confirm_mock = AsyncMock()
 
-        run_agent_streaming(
+        await run_agent_streaming(
             client=client,
             messages=[{"role": "user", "content": "list pods"}],
             system_prompt="test",
@@ -215,8 +238,10 @@ class TestConfirmationGate:
         confirm_mock.assert_not_called()
 
 
+@patch.dict("os.environ", {"PULSE_AGENT_HARNESS": "0"})
 class TestIterationGuard:
-    def test_max_iterations_stops_loop(self):
+    @pytest.mark.asyncio
+    async def test_max_iterations_stops_loop(self):
         """Agent should stop after MAX_ITERATIONS even if model keeps calling tools."""
         # Create a response that always asks for another tool
         tool_response = SimpleNamespace(
@@ -227,17 +252,13 @@ class TestIterationGuard:
         )
 
         client = MagicMock()
-        stream = MagicMock()
-        stream.__enter__ = MagicMock(return_value=stream)
-        stream.__exit__ = MagicMock(return_value=False)
-        stream.__iter__ = MagicMock(return_value=iter([]))
-        stream.get_final_message.return_value = tool_response
+        stream = _MockAsyncStream(tool_response)
         client.messages.stream = MagicMock(return_value=stream)
 
         mock_tool = MagicMock()
         mock_tool.call.return_value = "pods"
 
-        run_agent_streaming(
+        await run_agent_streaming(
             client=client,
             messages=[{"role": "user", "content": "loop forever"}],
             system_prompt="test",
@@ -278,18 +299,12 @@ class TestWriteToolSet:
 class TestOnToolResult:
     def _make_stream_context(self, responses):
         client = MagicMock()
-        streams = []
-        for resp in responses:
-            stream = MagicMock()
-            stream.__enter__ = MagicMock(return_value=stream)
-            stream.__exit__ = MagicMock(return_value=False)
-            stream.__iter__ = MagicMock(return_value=iter([]))
-            stream.get_final_message.return_value = resp
-            streams.append(stream)
+        streams = [_MockAsyncStream(resp) for resp in responses]
         client.messages.stream = MagicMock(side_effect=streams)
         return client
 
-    def test_on_tool_result_called_for_read_tool(self):
+    @pytest.mark.asyncio
+    async def test_on_tool_result_called_for_read_tool(self):
         tool_use_response = SimpleNamespace(
             stop_reason="tool_use",
             content=[SimpleNamespace(type="tool_use", id="t1", name="list_pods", input={"namespace": "default"})],
@@ -299,13 +314,13 @@ class TestOnToolResult:
         mock_tool = MagicMock()
         mock_tool.call.return_value = "pod-1 Running"
         results = []
-        run_agent_streaming(
+        await run_agent_streaming(
             client=client,
             messages=[{"role": "user", "content": "list pods"}],
             system_prompt="test",
             tool_defs=[],
             tool_map={"list_pods": mock_tool},
-            on_tool_result=lambda info: results.append(info),
+            on_tool_result=AsyncMock(side_effect=lambda info: results.append(info)),
         )
         assert len(results) == 1
         r = results[0]
@@ -317,7 +332,8 @@ class TestOnToolResult:
         assert r["result_bytes"] > 0
         assert r["was_confirmed"] is None
 
-    def test_on_tool_result_called_for_write_tool_confirmed(self):
+    @pytest.mark.asyncio
+    async def test_on_tool_result_called_for_write_tool_confirmed(self):
         tool_use_response = SimpleNamespace(
             stop_reason="tool_use",
             content=[SimpleNamespace(type="tool_use", id="t1", name="delete_pod", input={"pod_name": "x"})],
@@ -327,21 +343,22 @@ class TestOnToolResult:
         mock_tool = MagicMock()
         mock_tool.call.return_value = "deleted"
         results = []
-        run_agent_streaming(
+        await run_agent_streaming(
             client=client,
             messages=[{"role": "user", "content": "delete pod"}],
             system_prompt="test",
             tool_defs=[],
             tool_map={"delete_pod": mock_tool},
             write_tools={"delete_pod"},
-            on_confirm=lambda name, inp: True,
-            on_tool_result=lambda info: results.append(info),
+            on_confirm=AsyncMock(return_value=True),
+            on_tool_result=AsyncMock(side_effect=lambda info: results.append(info)),
         )
         assert len(results) == 1
         assert results[0]["was_confirmed"] is True
         assert results[0]["status"] == "success"
 
-    def test_on_tool_result_called_for_write_tool_denied(self):
+    @pytest.mark.asyncio
+    async def test_on_tool_result_called_for_write_tool_denied(self):
         tool_use_response = SimpleNamespace(
             stop_reason="tool_use",
             content=[SimpleNamespace(type="tool_use", id="t1", name="delete_pod", input={"pod_name": "x"})],
@@ -352,21 +369,22 @@ class TestOnToolResult:
         client = self._make_stream_context([tool_use_response, final_response])
         mock_tool = MagicMock()
         results = []
-        run_agent_streaming(
+        await run_agent_streaming(
             client=client,
             messages=[{"role": "user", "content": "delete pod"}],
             system_prompt="test",
             tool_defs=[],
             tool_map={"delete_pod": mock_tool},
             write_tools={"delete_pod"},
-            on_confirm=lambda name, inp: False,
-            on_tool_result=lambda info: results.append(info),
+            on_confirm=AsyncMock(return_value=False),
+            on_tool_result=AsyncMock(side_effect=lambda info: results.append(info)),
         )
         assert len(results) == 1
         assert results[0]["was_confirmed"] is False
         assert results[0]["status"] == "denied"
 
-    def test_on_tool_result_captures_error(self):
+    @pytest.mark.asyncio
+    async def test_on_tool_result_captures_error(self):
         tool_use_response = SimpleNamespace(
             stop_reason="tool_use",
             content=[SimpleNamespace(type="tool_use", id="t1", name="bad_tool", input={})],
@@ -376,19 +394,20 @@ class TestOnToolResult:
         mock_tool = MagicMock()
         mock_tool.call.side_effect = RuntimeError("k8s unreachable")
         results = []
-        run_agent_streaming(
+        await run_agent_streaming(
             client=client,
             messages=[{"role": "user", "content": "do thing"}],
             system_prompt="test",
             tool_defs=[],
             tool_map={"bad_tool": mock_tool},
-            on_tool_result=lambda info: results.append(info),
+            on_tool_result=AsyncMock(side_effect=lambda info: results.append(info)),
         )
         assert len(results) == 1
         assert results[0]["status"] == "error"
         assert "RuntimeError" in results[0]["error_message"]
 
-    def test_on_tool_result_includes_iteration(self):
+    @pytest.mark.asyncio
+    async def test_on_tool_result_includes_iteration(self):
         tool_use_response = SimpleNamespace(
             stop_reason="tool_use",
             content=[SimpleNamespace(type="tool_use", id="t1", name="list_pods", input={})],
@@ -398,12 +417,85 @@ class TestOnToolResult:
         mock_tool = MagicMock()
         mock_tool.call.return_value = "pods"
         results = []
-        run_agent_streaming(
+        await run_agent_streaming(
             client=client,
             messages=[{"role": "user", "content": "list"}],
             system_prompt="test",
             tool_defs=[],
             tool_map={"list_pods": mock_tool},
-            on_tool_result=lambda info: results.append(info),
+            on_tool_result=AsyncMock(side_effect=lambda info: results.append(info)),
         )
         assert results[0]["turn_number"] == 1
+
+
+class TestAsyncConfirmation:
+    @pytest.mark.asyncio
+    async def test_cancelled_future_returns_false(self):
+        """CancelledError during confirmation await should return False (deny)."""
+        import asyncio
+
+        future = asyncio.get_running_loop().create_future()
+        future.cancel()
+
+        async def on_confirm(name, inp):
+            try:
+                return await asyncio.wait_for(future, timeout=5)
+            except (asyncio.CancelledError, TimeoutError):
+                return False
+
+        result = await on_confirm("delete_pod", {"pod_name": "test"})
+        assert result is False
+
+    @pytest.mark.asyncio
+    async def test_timeout_returns_false(self):
+        """TimeoutError during confirmation await should return False (deny)."""
+        import asyncio
+
+        future = asyncio.get_running_loop().create_future()
+
+        async def on_confirm(name, inp):
+            try:
+                return await asyncio.wait_for(future, timeout=0.01)
+            except (asyncio.CancelledError, TimeoutError):
+                return False
+
+        result = await on_confirm("delete_pod", {"pod_name": "test"})
+        assert result is False
+
+
+class TestAsyncToolExecution:
+    @pytest.mark.asyncio
+    async def test_tool_timeout_via_asyncio_wait(self):
+        """Tools exceeding timeout should be in the pending set."""
+        import asyncio
+        import time
+
+        from sre_agent.agent import _tool_pool
+
+        def slow_tool(name, input_data, tool_map):
+            time.sleep(10)
+            return "done", None, {"status": "success", "error_message": None, "error_category": None, "result_bytes": 4}
+
+        loop = asyncio.get_running_loop()
+        task = asyncio.ensure_future(loop.run_in_executor(_tool_pool, slow_tool, "slow", {}, {}))
+        _done, pending = await asyncio.wait({task}, timeout=0.05)
+
+        assert len(pending) == 1
+        for p in pending:
+            p.cancel()
+
+
+class TestCreateAsyncClient:
+    @patch.dict(os.environ, {"ANTHROPIC_VERTEX_PROJECT_ID": "test-proj", "CLOUD_ML_REGION": "us-east5"})
+    def test_returns_async_vertex_when_configured(self):
+        from sre_agent.agent import create_async_client
+
+        client = create_async_client()
+        assert isinstance(client, anthropic.AsyncAnthropicVertex)
+
+    @patch.dict(os.environ, {"ANTHROPIC_VERTEX_PROJECT_ID": "", "CLOUD_ML_REGION": ""})
+    def test_returns_async_anthropic_when_no_vertex(self):
+        from sre_agent.agent import create_async_client
+
+        client = create_async_client()
+        assert isinstance(client, anthropic.AsyncAnthropic)

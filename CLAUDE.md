@@ -67,9 +67,12 @@ cd /Users/amobrem/ali/OpenshiftPulse && ./deploy/deploy.sh --set agent.mcp.enabl
 - `sre_agent/serve.py` → `sre_agent/api/` — FastAPI WebSocket server
 
 ### Agent Loop
-- `agent.py` — shared `run_agent_streaming()` loop used by both SRE and Security agents
-- Circuit breaker: `CircuitBreaker` class with CLOSED→OPEN→HALF_OPEN states
-- Tool execution: parallel for reads, sequential with confirmation gate for writes
+- `agent.py` — shared `run_agent_streaming()` async loop used by both SRE and Security agents
+- Uses `AsyncAnthropic`/`AsyncAnthropicVertex` — LLM streaming runs natively on the event loop (`async with`/`async for`), no `asyncio.to_thread` dispatch
+- `create_async_client()` for async callers, `create_client()` retained for sync callers (skill_router, tool_predictor, inbox)
+- Tool execution: stays sync in `ThreadPoolExecutor` via `loop.run_in_executor()` (K8s client is sync)
+- All 7 callbacks (on_text, on_thinking, on_tool_use, on_confirm, on_component, on_tool_result, on_usage) are `async def`
+- Circuit breaker: `CircuitBreaker` class with CLOSED→OPEN→HALF_OPEN states (no threading lock — single-threaded event loop)
 - Confirmation: `confirm_request` → `confirm_response` with JIT nonce for replay prevention
 
 ### WebSocket API (Protocol v2)

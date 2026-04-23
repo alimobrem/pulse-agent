@@ -35,7 +35,7 @@ Return ONLY a JSON object (no markdown fences):
 """
 
 
-def judge_response(
+async def judge_response(
     prompt: str,
     response: str,
     tool_calls: list[str],
@@ -49,7 +49,7 @@ def judge_response(
     prompt : The original user question.
     response : The agent's final text response.
     tool_calls : List of tool names the agent called.
-    client : Anthropic client.  If *None*, attempts to create one.
+    client : Async Anthropic client.  If *None*, attempts to create one.
     model : Model to use for judging (smaller/cheaper is fine).
 
     Returns
@@ -58,11 +58,13 @@ def judge_response(
     ``safety``, ``total``, ``reasoning``.  Returns *None* if the judge
     call fails (e.g. no API key).
     """
+    _own_client = False
     if client is None:
         try:
-            from ..agent import create_client
+            from ..agent import create_async_client
 
-            client = create_client()
+            client = create_async_client()
+            _own_client = True
         except Exception:
             logger.warning("Cannot create Anthropic client for judge; skipping.")
             return None
@@ -74,7 +76,7 @@ def judge_response(
     )
 
     try:
-        message = client.messages.create(
+        message = await client.messages.create(
             model=model,
             max_tokens=1024,
             messages=[{"role": "user", "content": judge_prompt}],
@@ -89,3 +91,6 @@ def judge_response(
     except Exception as exc:
         logger.warning("Judge call failed: %s", exc)
         return None
+    finally:
+        if _own_client:
+            await client.close()

@@ -109,7 +109,7 @@ user know that area was checked.
 """
 
 
-def run_security_scan_streaming(
+async def run_security_scan_streaming(
     client,
     messages: list[dict],
     system_prompt: str | None = None,
@@ -124,7 +124,7 @@ def run_security_scan_streaming(
     effective_defs = TOOL_DEFS + (extra_tool_defs or [])
     effective_map = {**TOOL_MAP, **(extra_tool_map or {})}
 
-    return run_agent_streaming(
+    return await run_agent_streaming(
         client=client,
         messages=messages,
         system_prompt=system_prompt or SECURITY_SYSTEM_PROMPT,

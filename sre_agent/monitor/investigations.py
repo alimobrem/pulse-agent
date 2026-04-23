@@ -200,7 +200,7 @@ def simulate_action(tool: str, inp: dict) -> dict:
     }
 
 
-def _run_proactive_investigation_sync(finding: dict, *, client=None) -> dict[str, Any]:
+async def _run_proactive_investigation(finding: dict, *, client=None) -> dict[str, Any]:
     from ..agent import (
         SYSTEM_PROMPT as SRE_SYSTEM_PROMPT,
     )
@@ -214,7 +214,7 @@ def _run_proactive_investigation_sync(finding: dict, *, client=None) -> dict[str
         WRITE_TOOLS as SRE_WRITE_TOOLS,
     )
     from ..agent import (
-        borrow_client,
+        borrow_async_client,
         run_agent_streaming,
     )
     from ..harness import build_cached_system_prompt, get_cluster_context, get_component_hint
@@ -257,8 +257,8 @@ def _run_proactive_investigation_sync(finding: dict, *, client=None) -> dict[str
         agent_mode="pipeline:investigate",
     )
 
-    with borrow_client(client) as c:
-        response = run_agent_streaming(
+    async with borrow_async_client(client) as c:
+        response = await run_agent_streaming(
             client=c,
             messages=[{"role": "user", "content": prompt}],
             system_prompt=effective_system,
@@ -304,9 +304,9 @@ def _run_proactive_investigation_sync(finding: dict, *, client=None) -> dict[str
     }
 
 
-def _run_security_followup_sync(finding: dict, *, client=None) -> dict:
+async def _run_security_followup(finding: dict, *, client=None) -> dict:
     """Run a lightweight security check on the namespace of a critical finding."""
-    from ..agent import borrow_client, run_agent_streaming
+    from ..agent import borrow_async_client, run_agent_streaming
     from ..harness import build_cached_system_prompt, get_cluster_context, get_component_hint
     from ..security_agent import (
         SECURITY_SYSTEM_PROMPT,
@@ -358,8 +358,8 @@ def _run_security_followup_sync(finding: dict, *, client=None) -> dict:
         except Exception:
             pass
 
-    with borrow_client(client) as c:
-        response = run_agent_streaming(
+    async with borrow_async_client(client) as c:
+        response = await run_agent_streaming(
             client=c,
             messages=[{"role": "user", "content": prompt}],
             system_prompt=effective_system,

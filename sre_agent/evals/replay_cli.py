@@ -9,6 +9,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import asyncio
 import json
 import sys
 
@@ -59,39 +60,50 @@ def _make_parser() -> argparse.ArgumentParser:
     return p
 
 
+class _MockAsyncStream:
+    """Mock async stream for eval dry-run mode."""
+
+    def __init__(self, events, final_message):
+        self._events = events
+        self._final_message = final_message
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *args):
+        return False
+
+    def __aiter__(self):
+        return self._async_iter()
+
+    async def _async_iter(self):
+        for event in self._events:
+            yield event
+
+    async def get_final_message(self):
+        return self._final_message
+
+
 def _make_mock_stream(tool_names: list[str], text: str, stop_reason: str = "end_turn"):
     """Build one mock stream cycle (tool calls → text response)."""
     from types import SimpleNamespace
-    from unittest.mock import MagicMock
 
     streams = []
 
     if tool_names:
-        # Tool call stream
         tool_blocks = [
             SimpleNamespace(type="tool_use", id=f"t{i}", name=name, input={}) for i, name in enumerate(tool_names)
         ]
         tool_events = [SimpleNamespace(type="content_block_start", content_block=b) for b in tool_blocks]
         tool_msg = SimpleNamespace(content=tool_blocks, stop_reason="tool_use")
-        tool_stream = MagicMock()
-        tool_stream.__enter__ = MagicMock(return_value=tool_stream)
-        tool_stream.__exit__ = MagicMock(return_value=False)
-        tool_stream.__iter__ = MagicMock(return_value=iter(tool_events))
-        tool_stream.get_final_message.return_value = tool_msg
-        streams.append(tool_stream)
+        streams.append(_MockAsyncStream(tool_events, tool_msg))
 
-    # Text response stream
     text_block = SimpleNamespace(type="text", text=text)
     text_events = [
         SimpleNamespace(type="content_block_delta", delta=SimpleNamespace(type="text_delta", text=text)),
     ]
     text_msg = SimpleNamespace(content=[text_block], stop_reason=stop_reason)
-    text_stream = MagicMock()
-    text_stream.__enter__ = MagicMock(return_value=text_stream)
-    text_stream.__exit__ = MagicMock(return_value=False)
-    text_stream.__iter__ = MagicMock(return_value=iter(text_events))
-    text_stream.get_final_message.return_value = text_msg
-    streams.append(text_stream)
+    streams.append(_MockAsyncStream(text_events, text_msg))
 
     return streams
 
@@ -155,9 +167,9 @@ def _setup_model(model: str, dry_run: bool):
     if dry_run:
         return None, thinking  # caller builds mock client per fixture
     else:
-        from ..agent import create_client
+        from ..agent import create_async_client
 
-        return create_client(), thinking
+        return create_async_client(), thinking
 
 
 def _run_fixture(name: str, use_judge: bool = False, model: str = "claude-sonnet-4-6", dry_run: bool = False) -> dict:
@@ -189,11 +201,13 @@ def _run_fixture(name: str, use_judge: bool = False, model: str = "claude-sonnet
     if use_judge:
         from .judge import judge_response
 
-        judge_result = judge_response(
-            prompt=fixture["prompt"],
-            response=result["response"],
-            tool_calls=[tc["name"] for tc in result["tool_calls"]],
-            client=client,
+        judge_result = asyncio.run(
+            judge_response(
+                prompt=fixture["prompt"],
+                response=result["response"],
+                tool_calls=[tc["name"] for tc in result["tool_calls"]],
+                client=client,
+            )
         )
         output["judge"] = judge_result
 
@@ -232,11 +246,13 @@ def _run_multi_turn_fixture(name: str, fixture: dict, use_judge: bool, model: st
         last = result["turns"][-1]
         all_tools = [tc["name"] for t in result["turns"] for tc in t["tool_calls"]]
         full_prompt = " → ".join(t["prompt"] for t in fixture["turns"])
-        judge_result = judge_response(
-            prompt=full_prompt,
-            response=last["response"],
-            tool_calls=all_tools,
-            client=client if not dry_run else None,
+        judge_result = asyncio.run(
+            judge_response(
+                prompt=full_prompt,
+                response=last["response"],
+                tool_calls=all_tools,
+                client=client if not dry_run else None,
+            )
         )
         output["judge"] = judge_result
 

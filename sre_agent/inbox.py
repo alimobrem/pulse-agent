@@ -982,10 +982,12 @@ def _phase_b_investigate() -> int:
         }
 
         try:
-            from .monitor.actions import save_investigation
-            from .monitor.investigations import _run_proactive_investigation_sync
+            import asyncio as _asyncio
 
-            result = _run_proactive_investigation_sync(finding_dict)
+            from .monitor.actions import save_investigation
+            from .monitor.investigations import _run_proactive_investigation
+
+            result = _asyncio.run(_run_proactive_investigation(finding_dict))
             tools_offered: list[str] = []
             try:
                 from .agent import TOOL_MAP as SRE_TOOL_MAP
