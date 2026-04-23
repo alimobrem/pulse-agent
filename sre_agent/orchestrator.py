@@ -378,6 +378,10 @@ def classify_intent(query: str) -> tuple[AgentMode, bool]:
     """
     q = fix_typos(query).lower()
 
+    # 0. Empty or trivially short queries — default to SRE (no signal for ORCA)
+    if len(q.strip()) < 4:
+        return "sre", False
+
     # 1. "both" = merge SRE + security tools (not a skill, check first)
     if any(kw in q for kw in BOTH_KEYWORDS):
         return "both", True
@@ -392,9 +396,16 @@ def classify_intent(query: str) -> tuple[AgentMode, bool]:
     # 3. ORCA multi-signal routing — single authority for all skills
     try:
         from .skill_loader import classify_query as _classify
+        from .skill_selector import _last_selection_result_var
 
         skill = _classify(query)
         if skill:
+            sel = _last_selection_result_var.get(None)
+            if sel and sel.source == "fallback":
+                top_score = max(sel.fused_scores.values()) if sel.fused_scores else 0
+                # No real signal — default to SRE
+                if top_score < 0.1:
+                    return "sre", False
             is_strong = skill.name != "sre"  # non-default = strong signal
             return skill.name, is_strong
     except Exception:
