@@ -30,13 +30,20 @@ def _record_tool_call(tool_name: str, args: dict, result: Any, item_id: str) -> 
     try:
         from .tool_usage import record_tool_call
 
-        output = str(result)[:200] if result else ""
         record_tool_call(
             tool_name=tool_name,
             input_data=args,
-            output_summary=output,
-            source="view_executor",
             session_id=item_id,
+            turn_number=0,
+            agent_mode="view_executor",
+            tool_category=None,
+            status="success",
+            error_message=None,
+            error_category=None,
+            duration_ms=0,
+            result_bytes=len(str(result)[:200]) if result else 0,
+            requires_confirmation=False,
+            was_confirmed=None,
         )
     except Exception:
         logger.debug("Failed to record tool call %s", tool_name, exc_info=True)

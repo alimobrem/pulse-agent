@@ -155,7 +155,7 @@ def run_multi_skill_check() -> MultiSkillCheckResult:
     result = MultiSkillCheckResult(total_scenarios=len(scenarios))
 
     for scenario in scenarios:
-        primary, secondary = classify_query_multi(scenario["query"])
+        primary, secondary = classify_query_multi(str(scenario["query"]))
         primary_name = primary.name if primary else ""
         secondary_name = secondary.name if secondary else None
 

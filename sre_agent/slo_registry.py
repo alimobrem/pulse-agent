@@ -232,3 +232,36 @@ def _register_defaults(registry: SLORegistry) -> None:
     for slo in defaults:
         registry.register(slo)
     logger.info("Registered %d default SLOs", len(defaults))
+
+
+def list_slo_definitions() -> list[dict]:
+    """Return all registered SLO definitions as dicts."""
+    registry = get_slo_registry()
+    return [
+        {
+            "id": f"{slo.service_name}:{slo.slo_type}",
+            "service_name": slo.service_name,
+            "slo_type": slo.slo_type,
+            "target": slo.target,
+            "window_days": slo.window_days,
+            "description": slo.description,
+        }
+        for slo in registry._slos.values()
+    ]
+
+
+def query_slo_burn_rate(slo_id: str) -> dict | None:
+    """Query burn rate for a specific SLO by id (service:type)."""
+    registry = get_slo_registry()
+    parts = slo_id.split(":", 1)
+    if len(parts) != 2:
+        return None
+    slo = registry.get(parts[0], parts[1])
+    if not slo:
+        return None
+    return {
+        "slo_id": slo_id,
+        "target": slo.target,
+        "window_days": slo.window_days,
+        "budget_remaining_hours": slo.window_days * 24 * (1.0 - slo.target),
+    }

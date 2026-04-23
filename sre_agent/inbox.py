@@ -739,7 +739,7 @@ def dismiss_item(item_id: str, actor: str = "") -> bool:
     return True
 
 
-_last_prune_time = 0
+_last_prune_time: float = 0
 _PRUNE_INTERVAL = 86400
 
 
@@ -1023,10 +1023,10 @@ def _phase_b_investigate() -> int:
                         metadata["view_plan_at"] = int(time.time())
 
                 try:
-                    from .dependency_graph import get_graph
+                    from .dependency_graph import get_dependency_graph
 
                     resources = item.get("resources", [])
-                    graph = get_graph()
+                    graph = get_dependency_graph()
                     if resources and graph:
                         r = resources[0]
                         affected = graph.downstream_blast_radius(

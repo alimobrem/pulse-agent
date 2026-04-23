@@ -485,6 +485,56 @@ class TestAsyncToolExecution:
             p.cancel()
 
 
+class TestInvokeHelper:
+    @pytest.mark.asyncio
+    async def test_invoke_with_sync_callback(self):
+        """_invoke should handle sync callbacks returning None."""
+        from sre_agent.agent import _invoke
+
+        results = []
+
+        def sync_cb(x):
+            results.append(x)
+
+        await _invoke(sync_cb, "hello")
+        assert results == ["hello"]
+
+    @pytest.mark.asyncio
+    async def test_invoke_with_async_callback(self):
+        """_invoke should await async callbacks."""
+        from sre_agent.agent import _invoke
+
+        results = []
+
+        async def async_cb(x):
+            results.append(x)
+
+        await _invoke(async_cb, "world")
+        assert results == ["world"]
+
+    @pytest.mark.asyncio
+    async def test_invoke_with_sync_callback_returning_value(self):
+        """_invoke should return sync callback's return value."""
+        from sre_agent.agent import _invoke
+
+        def sync_cb():
+            return True
+
+        result = await _invoke(sync_cb)
+        assert result is True
+
+    @pytest.mark.asyncio
+    async def test_invoke_with_async_callback_returning_value(self):
+        """_invoke should return async callback's return value."""
+        from sre_agent.agent import _invoke
+
+        async def async_cb():
+            return 42
+
+        result = await _invoke(async_cb)
+        assert result == 42
+
+
 class TestCreateAsyncClient:
     @patch.dict(os.environ, {"ANTHROPIC_VERTEX_PROJECT_ID": "test-proj", "CLOUD_ML_REGION": "us-east5"})
     def test_returns_async_vertex_when_configured(self):
