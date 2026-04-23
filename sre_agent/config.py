@@ -44,6 +44,11 @@ class PulseAgentSettings(BaseSettings):
     noise_threshold: float = 0.7
     max_trust_level: int = 3
 
+    # Scaling
+    max_conversation_messages: int = 50
+    max_agent_sessions: int = 20
+    max_monitor_clients: int = 50
+
     # WebSocket
     ws_token: str = ""
 

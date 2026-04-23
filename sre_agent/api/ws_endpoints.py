@@ -30,6 +30,8 @@ from .context import _apply_style_hint, _build_context_prefix
 
 # Active monitor sessions — keyed by ws_id, used by /debug/memory
 _active_monitor_sessions: dict[str, MonitorClient] = {}
+# Active agent session count (for connection limiting)
+_active_agent_count: int = 0
 
 logger = logging.getLogger("pulse_agent.api")
 
@@ -86,7 +88,15 @@ async def websocket_agent(websocket: WebSocket, mode: str):
         await websocket.close(4001, "Unauthorized")
         return
 
+    # Connection limit
+    global _active_agent_count
+    settings = get_settings()
+    if _active_agent_count >= settings.max_agent_sessions:
+        await websocket.close(4008, "Too many connections")
+        return
+
     await websocket.accept()
+    _active_agent_count += 1
     session_id = str(uuid.uuid4())
     _ws_alive[session_id] = True
     messages: list[dict] = []
@@ -208,6 +218,10 @@ async def websocket_agent(websocket: WebSocket, mode: str):
                 )
                 full_response = _result[0] if isinstance(_result, tuple) else _result
                 messages.append({"role": "assistant", "content": full_response})
+                # Cap conversation history to prevent unbounded memory growth
+                max_msgs = settings.max_conversation_messages
+                if len(messages) > max_msgs:
+                    messages[:] = messages[-max_msgs:]
 
                 # Persist messages to chat history (single commit)
                 try:
@@ -287,6 +301,7 @@ async def websocket_agent(websocket: WebSocket, mode: str):
         _pending_nonces.pop(session_id, None)
         _pending_timestamps.pop(session_id, None)
         _ws_alive.pop(session_id, None)
+        _active_agent_count = max(0, _active_agent_count - 1)
 
 
 # -- /ws/agent: Auto-routing unified agent ---------------------------------
@@ -300,7 +315,14 @@ async def websocket_auto_agent(websocket: WebSocket):
         await websocket.close(4001, "Unauthorized")
         return
 
+    global _active_agent_count
+    settings = get_settings()
+    if _active_agent_count >= settings.max_agent_sessions:
+        await websocket.close(4008, "Too many connections")
+        return
+
     await websocket.accept()
+    _active_agent_count += 1
     session_id = str(uuid.uuid4())
     _ws_alive[session_id] = True
     messages: list[dict] = []
@@ -658,6 +680,9 @@ async def websocket_auto_agent(websocket: WebSocket):
                 else:
                     full_response, turn_meta = result, {}
                 messages.append({"role": "assistant", "content": full_response})
+                max_msgs = settings.max_conversation_messages
+                if len(messages) > max_msgs:
+                    messages[:] = messages[-max_msgs:]
 
                 # Persist messages to chat history (single commit)
                 try:
@@ -764,6 +789,7 @@ async def websocket_auto_agent(websocket: WebSocket):
         _pending_nonces.pop(session_id, None)
         _pending_timestamps.pop(session_id, None)
         _ws_alive.pop(session_id, None)
+        _active_agent_count = max(0, _active_agent_count - 1)
 
 
 # -- Protocol v2: /ws/monitor -----------------------------------------------
@@ -779,6 +805,11 @@ async def websocket_monitor(websocket: WebSocket):
     client_token = _verify_ws_token(websocket)
     if not client_token:
         await websocket.close(4001, "Unauthorized")
+        return
+
+    # Connection limit
+    if len(_active_monitor_sessions) >= get_settings().max_monitor_clients:
+        await websocket.close(4008, "Too many monitor connections")
         return
 
     await websocket.accept()
