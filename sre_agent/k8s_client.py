@@ -42,6 +42,7 @@ def _get_user_api_client(token: str) -> client.ApiClient:
         return cached
     _load_k8s()
     cfg = client.Configuration.get_default_copy()
+    cfg.refresh_api_key_hook = None
     cfg.api_key = {"authorization": f"Bearer {token}"}
     cfg.api_key_prefix = {}
     api_client = client.ApiClient(configuration=cfg)
