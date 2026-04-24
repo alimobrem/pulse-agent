@@ -7,11 +7,14 @@ a unified timeline to answer "why did this happen?"
 from __future__ import annotations
 
 import json
+import logging
 import os
 import urllib.error
 import urllib.request
 from collections import defaultdict
 from datetime import UTC, datetime, timedelta
+
+logger = logging.getLogger("pulse_agent.timeline_tools")
 
 from kubernetes.client.rest import ApiException
 
@@ -144,7 +147,7 @@ def correlate_incident(
             with urllib.request.urlopen(req, timeout=10) as resp:
                 alerts = json.loads(resp.read())
         except Exception:
-            pass
+            logger.debug("Failed to fetch alerts from Alertmanager URL", exc_info=True)
     if alerts is None:
         # Fallback: OpenShift service proxy
         try:
@@ -182,7 +185,7 @@ def correlate_incident(
                         }
                     )
             except (ValueError, TypeError):
-                pass
+                logger.debug("Failed to parse alert timestamp: %s", starts, exc_info=True)
 
     # 5. ArgoCD sync events (if available)
     try:
@@ -211,9 +214,9 @@ def correlate_incident(
                             }
                         )
                 except (ValueError, TypeError):
-                    pass
+                    logger.debug("Failed to parse ArgoCD sync timestamp", exc_info=True)
     except (ApiException, Exception):
-        pass  # ArgoCD not installed
+        logger.debug("ArgoCD not installed or inaccessible", exc_info=True)
 
     if not timeline:
         empty_text = f"No events found in the last {minutes_back} minutes."

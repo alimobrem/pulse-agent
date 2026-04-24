@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import json
+import logging
 from datetime import UTC, datetime
+
+logger = logging.getLogger("pulse_agent.k8s_tools")
 
 from .. import k8s_client as _kc
 from ..decorators import beta_tool
@@ -192,7 +195,7 @@ def describe_deployment(namespace: str, name: str):
                 }
             )
     except Exception:
-        pass
+        logger.debug("Failed to serialize pod template spec for deployment %s", name, exc_info=True)
 
     component = {
         "kind": "section",

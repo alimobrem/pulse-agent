@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import json
+import logging
 from datetime import UTC, datetime
 from typing import Any
+
+logger = logging.getLogger("pulse_agent.k8s_tools")
 
 from kubernetes.client.rest import ApiException
 
@@ -479,7 +482,7 @@ def get_resource_relationships(namespace: str, name: str, kind: str = "Pod"):
                         # Check if this pod's RS is owned by our deployment
                         pass
     except Exception:
-        pass
+        logger.debug("Failed to list child pods for %s/%s in %s", kind, name, namespace, exc_info=True)
 
     # Build output
     if owners_chain:
@@ -511,7 +514,7 @@ def get_resource_relationships(namespace: str, name: str, kind: str = "Pod"):
                 for k, v in sorted(important.items()):
                     lines.append(f"  {k}={v}")
     except Exception:
-        pass
+        logger.debug("Failed to fetch well-known labels for %s/%s in %s", kind, name, namespace, exc_info=True)
 
     text = "\n".join(lines)
 

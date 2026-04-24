@@ -6,7 +6,7 @@ import json
 import logging
 from typing import Any
 
-logger = logging.getLogger("pulse_agent.monitoring")
+logger = logging.getLogger("pulse_agent.k8s_tools")
 
 from kubernetes.client.rest import ApiException
 
@@ -203,7 +203,7 @@ def verify_query(query: str):
 
             record_query_result(query, success=False, series_count=0)
         except Exception:
-            pass
+            logger.debug("Failed to record query result for syntax error", exc_info=True)
         return f"{thanos_warning}FAIL_SYNTAX: {error_msg}"
 
     results = data.get("data", {}).get("result", [])
@@ -214,7 +214,7 @@ def verify_query(query: str):
 
             record_query_result(query, success=False, series_count=0)
         except Exception:
-            pass
+            logger.debug("Failed to record query result for no-data", exc_info=True)
         return "FAIL_NO_DATA: Query returned 0 results. Metric may not exist or labels may be wrong."
 
     sample = results[0]
@@ -227,7 +227,7 @@ def verify_query(query: str):
 
         record_query_result(query, success=True, series_count=len(results))
     except Exception:
-        pass
+        logger.debug("Failed to record successful query result", exc_info=True)
 
     return f"{thanos_warning}PASS: Query returns data ({len(results)} series, sample: {sample_info})"
 
@@ -280,7 +280,7 @@ def get_prometheus_query(query: str, time_range: str = "1h", title: str = "", de
 
             record_query_result(query, success=False, series_count=0)
         except Exception:
-            pass
+            logger.debug("Failed to record query result for query error", exc_info=True)
         return f"Query error: {data.get('error', 'unknown')}"
 
     result_type = data.get("data", {}).get("resultType", "")
@@ -292,7 +292,7 @@ def get_prometheus_query(query: str, time_range: str = "1h", title: str = "", de
 
             record_query_result(query, success=False, series_count=0)
         except Exception:
-            pass
+            logger.debug("Failed to record no-data query result", exc_info=True)
         # Suggest verified recipe alternatives — prefer ACM-safe when on ACM
         try:
             from ..promql_recipes import _detect_category, get_recipes_for_category
@@ -303,7 +303,7 @@ def get_prometheus_query(query: str, time_range: str = "1h", title: str = "", de
 
                 is_acm = get_prometheus_client().is_acm_available()
             except Exception:
-                pass
+                logger.debug("Failed to detect ACM availability", exc_info=True)
 
             cat = _detect_category(query)
             if cat:
@@ -318,7 +318,7 @@ def get_prometheus_query(query: str, time_range: str = "1h", title: str = "", de
                         f"Try these {prefix}verified alternatives for '{cat}':\n{alt_text}"
                     )
         except Exception:
-            pass
+            logger.debug("Failed to suggest recipe alternatives for query: %s", query, exc_info=True)
         return f"Query returned no results for: {query}"
 
     # Default color palette for chart series
@@ -538,7 +538,7 @@ def get_prometheus_query(query: str, time_range: str = "1h", title: str = "", de
 
             record_query_result(query, success=True, series_count=series_count)
         except Exception:
-            pass
+            logger.debug("Failed to record successful query result", exc_info=True)
 
     def _extract_label(metric: dict, index: int) -> str:
         """Extract a display label from a Prometheus metric dict."""
@@ -649,7 +649,7 @@ def get_prometheus_query(query: str, time_range: str = "1h", title: str = "", de
 
             record_query_result(query, success=True, series_count=len(rows))
         except Exception:
-            pass
+            logger.debug("Failed to record vector query result", exc_info=True)
         return (text, component_table)
 
 

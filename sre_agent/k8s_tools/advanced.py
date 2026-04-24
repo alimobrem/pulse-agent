@@ -4,8 +4,11 @@ from __future__ import annotations
 
 import atexit
 import json
+import logging
 import re
 from concurrent.futures import ThreadPoolExecutor
+
+logger = logging.getLogger("pulse_agent.k8s_tools")
 
 from kubernetes.client.rest import ApiException
 from kubernetes.stream import stream as k8s_stream
@@ -362,7 +365,7 @@ def get_resource_recommendations(namespace: str, time_range: str = "24h"):
             if data.get("status") == "success":
                 return data.get("data", {}).get("result", [])
         except Exception:
-            pass
+            logger.debug("Prometheus instant query failed: %s", query, exc_info=True)
         return []
 
     cpu_usage_f = _query_pool.submit(_instant_query, cpu_query)

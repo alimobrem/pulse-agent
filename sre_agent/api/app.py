@@ -97,7 +97,22 @@ async def lifespan(app: FastAPI):
             logger.info("Memory system initialized")
         except Exception as e:
             logger.warning("Memory system init failed: %s", e)
+    # Event loop health watchdog — logs when the loop is blocked
+    import asyncio
+
+    async def _event_loop_watchdog():
+        while True:
+            start = asyncio.get_running_loop().time()
+            await asyncio.sleep(5)
+            lag = asyncio.get_running_loop().time() - start - 5.0
+            if lag > 0.5:
+                logger.warning("Event loop lag: %.2fs", lag)
+
+    watchdog_task = asyncio.create_task(_event_loop_watchdog())
+
     yield
+
+    watchdog_task.cancel()
 
     # Cleanup MCP connections on shutdown
     try:
@@ -105,7 +120,7 @@ async def lifespan(app: FastAPI):
 
         disconnect_all()
     except Exception:
-        pass
+        logger.debug("MCP disconnect cleanup failed", exc_info=True)
 
 
 def _get_agent_version() -> str:

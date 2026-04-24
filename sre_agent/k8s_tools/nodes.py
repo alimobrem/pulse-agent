@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import json
+import logging
 from typing import Any
+
+logger = logging.getLogger("pulse_agent.k8s_tools")
 
 from .. import k8s_client as _kc
 from ..decorators import beta_tool
@@ -174,7 +177,7 @@ def visualize_nodes(label_selector: str = "", show_pods: bool = True):
                     ns_spec["cpuPct"] = round(cpu_usage / cpu_alloc * 100, 1) if cpu_alloc else None
                     ns_spec["memPct"] = round(mem_usage / mem_alloc * 100, 1) if mem_alloc else None
     except Exception:
-        pass
+        logger.debug("Failed to enrich node metrics from metrics-server", exc_info=True)
 
     ready_count = sum(1 for n in node_specs if n["status"] == "ready")
     total_pods = sum(n["podCount"] for n in node_specs)

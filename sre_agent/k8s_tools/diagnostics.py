@@ -4,8 +4,11 @@ from __future__ import annotations
 
 import atexit
 import json
+import logging
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
+
+logger = logging.getLogger("pulse_agent.k8s_tools")
 
 from kubernetes.client.rest import ApiException
 
@@ -203,7 +206,7 @@ def get_cluster_version():
         info += f"\nOpenShift {ocp_version} (Channel: {channel})"
         info += f"\nConditions: {cond_summary}"
     except ApiException:
-        pass
+        logger.debug("Failed to fetch OpenShift cluster version (may not be an OpenShift cluster)", exc_info=True)
 
     return info
 
@@ -566,7 +569,12 @@ def get_tls_certificates(namespace: str = "ALL"):
                     raw = cn_attrs[0].value
                     cn = raw if isinstance(raw, str) else raw.decode()
             except Exception:
-                pass
+                logger.debug(
+                    "Failed to extract CN from certificate in %s/%s",
+                    secret.metadata.namespace,
+                    secret.metadata.name,
+                    exc_info=True,
+                )
 
             status = "OK" if days_left > 30 else "EXPIRING" if days_left > 0 else "EXPIRED"
             certs.append(
