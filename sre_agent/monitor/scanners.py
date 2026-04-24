@@ -271,6 +271,8 @@ def scan_firing_alerts() -> list[dict]:
                         resources.append({"kind": "Deployment", "name": labels["deployment"], "namespace": ns})
                     elif labels.get("node"):
                         resources.append({"kind": "Node", "name": labels["node"]})
+                    if not resources:
+                        resources.append({"kind": "Alert", "name": alertname, "namespace": ns})
                     findings.append(
                         _make_finding(
                             severity=sev,

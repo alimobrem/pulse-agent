@@ -334,9 +334,7 @@ def scan_warning_events() -> list[dict]:
                         f"affecting {len(group)} {resource_kind}(s): {', '.join(resource_names[:3])}"
                         + (f" (+{len(resource_names) - 3} more)" if len(resource_names) > 3 else "")
                     ),
-                    resources=[{"kind": resource_kind, "name": resource_names[0], "namespace": ns}]
-                    if resource_names
-                    else [],
+                    resources=[{"kind": resource_kind, "name": name, "namespace": ns} for name in resource_names[:5]],
                     confidence=0.78,
                 )
             )

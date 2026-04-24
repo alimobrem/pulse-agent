@@ -840,18 +840,34 @@ class TestFixImagePullRollback:
 
 class TestConfidenceScoring:
     def test_finding_confidence_by_category(self):
-        assert _estimate_finding_confidence({"category": "crashloop", "severity": "critical"}) >= 0.95
-        assert _estimate_finding_confidence({"category": "hpa", "severity": "warning"}) <= 0.80
+        resources = [{"kind": "Pod", "name": "test", "namespace": "default"}]
+        assert (
+            _estimate_finding_confidence({"category": "crashloop", "severity": "critical", "resources": resources})
+            >= 0.95
+        )
+        assert _estimate_finding_confidence({"category": "hpa", "severity": "warning", "resources": resources}) <= 0.80
 
     def test_finding_confidence_severity_adjustment(self):
-        critical = _estimate_finding_confidence({"category": "pending", "severity": "critical"})
-        warning = _estimate_finding_confidence({"category": "pending", "severity": "warning"})
-        info = _estimate_finding_confidence({"category": "pending", "severity": "info"})
+        resources = [{"kind": "Pod", "name": "test", "namespace": "default"}]
+        critical = _estimate_finding_confidence({"category": "pending", "severity": "critical", "resources": resources})
+        warning = _estimate_finding_confidence({"category": "pending", "severity": "warning", "resources": resources})
+        info = _estimate_finding_confidence({"category": "pending", "severity": "info", "resources": resources})
         assert critical > warning > info
 
     def test_finding_confidence_unknown_category(self):
         conf = _estimate_finding_confidence({"category": "unknown_scanner", "severity": "warning"})
         assert 0.0 <= conf <= 1.0
+
+    def test_finding_confidence_penalized_for_empty_resources(self):
+        with_res = _estimate_finding_confidence(
+            {
+                "category": "alerts",
+                "severity": "warning",
+                "resources": [{"kind": "Pod", "name": "x", "namespace": "ns"}],
+            }
+        )
+        without_res = _estimate_finding_confidence({"category": "alerts", "severity": "warning", "resources": []})
+        assert without_res < with_res * 0.7
 
     def test_make_finding_includes_confidence(self):
         f = _make_finding(

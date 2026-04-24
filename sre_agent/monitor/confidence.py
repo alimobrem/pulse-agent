@@ -39,6 +39,13 @@ def _estimate_finding_confidence(finding: dict) -> float:
         base = min(1.0, base + 0.05)
     elif severity == SEVERITY_INFO:
         base = max(0.0, base - 0.10)
+
+    resources = finding.get("resources", [])
+    if not resources:
+        base *= 0.6
+    elif len(resources) == 1 and resources[0].get("kind") == "Unknown":
+        base *= 0.7
+
     return round(base, 2)
 
 
