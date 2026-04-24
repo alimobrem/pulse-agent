@@ -9,7 +9,7 @@ from __future__ import annotations
 from datetime import UTC
 
 from .decorators import beta_tool
-from .k8s_client import safe
+from .k8s_client import get_core_client, safe
 
 _openapi_cache: tuple[dict, float] | None = None
 _OPENAPI_CACHE_TTL = 3600  # 1 hour
@@ -674,10 +674,10 @@ def _get_openapi_definitions():
     if _openapi_cache and now - _openapi_cache[1] < _OPENAPI_CACHE_TTL:
         return _openapi_cache[0]
 
-    from kubernetes import client
-
-    api_client = client.ApiClient()
-    openapi = api_client.call_api("/openapi/v2", "GET", response_type="object", _preload_content=False)
+    api_client = get_core_client().api_client
+    openapi = api_client.call_api(
+        "/openapi/v2", "GET", response_type="object", auth_settings=["BearerToken"], _preload_content=False
+    )
     import json
 
     schema_data = json.loads(openapi[0].read())
@@ -831,7 +831,7 @@ def list_api_resources(group: str = ""):
 
     # Specific group: list resources
     try:
-        api_client = client.ApiClient()
+        api_client = get_core_client().api_client
         if group == "v1" or group == "core":
             core = client.CoreV1Api()
             resources = safe(lambda: core.get_api_resources())
@@ -853,7 +853,9 @@ def list_api_resources(group: str = ""):
 
             preferred = target_group.preferred_version.group_version
             path = f"/apis/{preferred}"
-            resp = api_client.call_api(path, "GET", response_type="object", _preload_content=False)
+            resp = api_client.call_api(
+                path, "GET", response_type="object", auth_settings=["BearerToken"], _preload_content=False
+            )
             import json
 
             data = json.loads(resp[0].read())

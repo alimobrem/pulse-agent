@@ -139,6 +139,7 @@ def apply_yaml(yaml_content: str, namespace: str = "", dry_run: bool = False):
                 "Accept": "application/json",
             },
             query_params=[("fieldManager", "pulse-agent")] + ([("dryRun", "All")] if dry_run else []),
+            auth_settings=["BearerToken"],
             _preload_content=False,
         )
         json.loads(resp[0].data)  # validate response is valid JSON
