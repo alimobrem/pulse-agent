@@ -116,6 +116,9 @@ async def websocket_agent(websocket: WebSocket, mode: str):
     # Rate limiting state
     message_timestamps: list[float] = []
 
+    # Extract user OAuth token for forwarding to K8s API
+    user_token = websocket.headers.get("x-forwarded-access-token") if get_settings().token_forwarding else None
+
     # Extract user identity for view tools
     try:
         ws_user = _get_current_user(
@@ -228,6 +231,7 @@ async def websocket_agent(websocket: WebSocket, mode: str):
                     mode=mode,
                     turn_number=turn_counter,
                     user_query=content,
+                    user_token=user_token,
                 )
                 full_response = _result[0] if isinstance(_result, tuple) else _result
                 messages.append({"role": "assistant", "content": full_response})
@@ -337,6 +341,9 @@ async def websocket_auto_agent(websocket: WebSocket):
     messages: list[dict] = []
     message_timestamps: list[float] = []
     last_mode: str = "sre"
+
+    # Extract user OAuth token for forwarding to K8s API
+    user_token = websocket.headers.get("x-forwarded-access-token") if get_settings().token_forwarding else None
 
     # Extract user identity for view tools
     try:
@@ -681,6 +688,7 @@ async def websocket_auto_agent(websocket: WebSocket):
                     mode=intent,
                     turn_number=turn_counter,
                     user_query=content,
+                    user_token=user_token,
                 )
                 # Unpack response + metadata tuple
                 if isinstance(result, tuple):

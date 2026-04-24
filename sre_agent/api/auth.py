@@ -136,6 +136,17 @@ def get_owner(
     return _get_current_user(x_forwarded_access_token, x_forwarded_user)
 
 
+def get_user_token(
+    x_forwarded_access_token: str | None = Header(None, alias="X-Forwarded-Access-Token"),
+) -> str | None:
+    """FastAPI dependency — extracts user OAuth token from proxy header."""
+    from ..config import get_settings
+
+    if not get_settings().token_forwarding:
+        return None
+    return x_forwarded_access_token or None
+
+
 def _cache_user(token_hash: str, username: str) -> None:
     """Cache a user identity with O(1) LRU eviction."""
     _user_cache[token_hash] = (username, time.time())

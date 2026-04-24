@@ -37,9 +37,10 @@ class SkillExecutor:
     When skill_tag is set (parallel): tool events only, text/thinking suppressed.
     """
 
-    def __init__(self, websocket: WebSocket, session_id: str):
+    def __init__(self, websocket: WebSocket, session_id: str, user_token: str | None = None):
         self.websocket = websocket
         self.session_id = session_id
+        self._user_token = user_token
 
     async def run(
         self,
@@ -120,6 +121,8 @@ class SkillExecutor:
                         "duration_ms": info.get("duration_ms", 0),
                     }
                 )
+            if info.get("error_category") == "unauthorized":
+                await _ws_send({"type": "session_expired", "reason": "K8s API returned 401 — token may have expired"})
 
         effective_system = config["system_prompt"]
         if get_settings().memory:
@@ -149,6 +152,7 @@ class SkillExecutor:
             on_tool_result=on_tool_result,
             on_usage=on_usage,
             mode=skill_tag or mode,
+            user_token=self._user_token,
         )
 
         text = full_response if isinstance(full_response, str) else full_response[0]
@@ -263,6 +267,7 @@ async def _run_agent_ws(
     mode: str = "sre",
     turn_number: int = 1,
     user_query: str = "",
+    user_token: str | None = None,
 ):
     """Run an agent turn and stream results over WebSocket."""
     from ..view_tools import set_current_user
@@ -289,6 +294,7 @@ async def _run_agent_ws(
             user_query,
             client,
             _turn_start,
+            user_token,
         )
     finally:
         _turn_starts.pop(ws_id, None)
@@ -312,6 +318,7 @@ async def _run_agent_ws_inner(
     user_query,
     client,
     _turn_start,
+    user_token=None,
 ):
     """Inner body of _run_agent_ws — separated so the outer function can clean up _turn_starts."""
     # Start memory timing before agent runs
@@ -327,7 +334,7 @@ async def _run_agent_ws_inner(
             logger.debug("Memory manager init failed", exc_info=True)
 
     # Run via SkillExecutor — handles callbacks, memory augmentation, tool recording
-    executor = SkillExecutor(websocket, ws_id)
+    executor = SkillExecutor(websocket, ws_id, user_token=user_token)
     config = {
         "system_prompt": system_prompt,
         "tool_defs": tool_defs,
