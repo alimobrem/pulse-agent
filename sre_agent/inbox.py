@@ -631,6 +631,13 @@ def upsert_inbox_item(item: dict[str, Any]) -> str:
         )
         if row:
             existing = _deserialize_row(row)
+        else:
+            recently_resolved = db.fetchone(
+                "SELECT * FROM inbox_items WHERE correlation_key = ? AND item_type = ? AND status IN ('resolved', 'archived') AND updated_at > ?",
+                (corr_key, item_type, int(time.time()) - 86400),
+            )
+            if recently_resolved:
+                return recently_resolved["id"]
 
     if existing is None:
         return create_inbox_item(item)

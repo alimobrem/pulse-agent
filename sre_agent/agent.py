@@ -505,13 +505,19 @@ async def run_agent_streaming(
             from .tool_predictor import select_tools_adaptive
 
             fallback_cats = MODE_CATEGORIES.get(mode)
-            filtered_defs, filtered_map, _offered = select_tools_adaptive(
+            original_tool_map = tool_map
+            _filtered_defs, filtered_map, _offered = select_tools_adaptive(
                 last_user,
                 all_tool_map=tool_map,
                 fallback_categories=fallback_cats,
             )
-            tool_defs = filtered_defs
-            tool_map = {**filtered_map}  # Don't mutate the original
+            tool_map = {**filtered_map}
+            # Preserve write tools — skill declared them, confirmation gate handles safety
+            if write_tools:
+                for wt in write_tools:
+                    if wt in original_tool_map and wt not in tool_map:
+                        tool_map[wt] = original_tool_map[wt]
+            tool_defs = [t.to_dict() for t in tool_map.values()]
 
     # --- Harness: Cached system prompt with cluster context ---
     if use_harness:
