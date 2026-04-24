@@ -584,7 +584,7 @@ def disconnect_all() -> None:
                 try:
                     conn.process.kill()
                 except Exception:
-                    pass
+                    logger.debug("Suppressed exception", exc_info=True)
             conn.connected = False
     _connections.clear()
 
@@ -643,7 +643,7 @@ def _disconnect_one(key: str) -> None:
             try:
                 conn.process.kill()
             except Exception:
-                pass
+                logger.debug("Suppressed exception", exc_info=True)
     conn.connected = False
 
 
@@ -674,7 +674,7 @@ def test_mcp_connection(url: str, transport: str = "sse") -> dict:
             try:
                 conn.process.kill()
             except Exception:
-                pass
+                logger.debug("Suppressed exception", exc_info=True)
 
     return result
 

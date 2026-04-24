@@ -6,6 +6,8 @@ resource exhaustion, detecting HPA thrashing, and suggesting fixes.
 
 from __future__ import annotations
 
+import logging
+
 from .decorators import beta_tool
 from .errors import ToolError
 from .k8s_client import get_autoscaling_client, get_core_client, safe
@@ -27,7 +29,7 @@ def _query_prometheus_trend(query: str, hours: int = 24) -> float | None:
                 rate_per_sec = float(results[0].get("value", [0, "0"])[1])
                 return rate_per_sec * 3600
     except Exception:
-        pass
+        logger.debug("Suppressed exception", exc_info=True)
     return None
 
 
@@ -323,6 +325,8 @@ PREDICT_TOOLS = [forecast_quota_exhaustion, analyze_hpa_thrashing, suggest_remed
 
 # Register predict tools in the central registry (all read-only)
 from .tool_registry import register_tool
+
+logger = logging.getLogger("pulse_agent.predict_tools")
 
 for _tool in PREDICT_TOOLS:
     register_tool(_tool, is_write=False)

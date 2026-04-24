@@ -35,7 +35,7 @@ def db_safe(default=None):
                         )
                     )
                 except Exception:
-                    pass
+                    logger.debug("Suppressed exception", exc_info=True)
                 return default
 
         return wrapper

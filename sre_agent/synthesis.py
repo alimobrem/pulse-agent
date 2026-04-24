@@ -165,7 +165,7 @@ async def synthesize_parallel_outputs(
             try:
                 await on_text_delta(fallback)
             except Exception:
-                pass
+                logger.debug("Suppressed exception", exc_info=True)
         return SynthesisResult(
             unified_response=fallback,
             conflicts=[],

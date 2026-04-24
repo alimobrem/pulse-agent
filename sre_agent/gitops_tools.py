@@ -7,6 +7,7 @@ show provenance, sync state, and drift for every managed resource.
 from __future__ import annotations
 
 import json
+import logging
 from typing import Any
 
 from kubernetes.client.rest import ApiException
@@ -309,7 +310,7 @@ def install_gitops_operator() -> str:
                 "ArgoCD API (argoproj.io) is already available on this cluster. The operator appears to be installed."
             )
     except Exception:
-        pass
+        logger.debug("Suppressed exception", exc_info=True)
 
     # Create the Subscription
     subscription = {
@@ -456,6 +457,8 @@ GITOPS_TOOLS: list[Any] = [
 
 # Register gitops tools in the central registry
 from .tool_registry import register_tool
+
+logger = logging.getLogger("pulse_agent.gitops_tools")
 
 _GITOPS_WRITE_TOOLS = {"install_gitops_operator", "create_argo_application"}
 for _tool in GITOPS_TOOLS:

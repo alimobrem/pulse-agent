@@ -272,7 +272,7 @@ class SkillSelector:
                 self._weights.update(learned)
                 logger.info("Using learned channel weights")
         except Exception:
-            pass
+            logger.debug("Suppressed exception", exc_info=True)
 
     def set_weights(self, weights: dict[str, float]) -> None:
         """Replace channel weights. Use this instead of mutating _weights directly."""
@@ -314,7 +314,7 @@ class SkillSelector:
             if slo_context and context is not None:
                 context["slo_alerts"] = slo_context
         except Exception:
-            pass
+            logger.debug("Suppressed exception", exc_info=True)
 
         # Fuse scores
         fused = self._fuse_scores(channel_scores)
@@ -377,7 +377,7 @@ class SkillSelector:
                             if not has_conflict:
                                 secondary = candidate
         except Exception:
-            pass
+            logger.debug("Suppressed exception", exc_info=True)
 
         if best_score >= threshold and best_name in self._skills:
             result = SelectionResult(

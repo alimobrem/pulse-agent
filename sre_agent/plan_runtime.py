@@ -806,7 +806,7 @@ async def run_parallel_skills(
                                     {"type": "skill_progress", "skill": skill_name, "status": "complete"}
                                 )
                             except Exception:
-                                pass
+                                logger.debug("Suppressed exception", exc_info=True)
 
                             if remaining and output and output.text.strip():
                                 try:
@@ -817,7 +817,7 @@ async def run_parallel_skills(
                                         }
                                     )
                                 except Exception:
-                                    pass
+                                    logger.debug("Suppressed exception", exc_info=True)
 
                 except TimeoutError:
                     for t in tasks:

@@ -166,7 +166,7 @@ def namespace_summary(namespace: str):
         if not isinstance(routes, ToolError):
             route_count = len(routes.get("items", []))
     except Exception:
-        pass
+        logger.debug("Suppressed exception", exc_info=True)
 
     ingress_count = 0
     try:
@@ -177,7 +177,7 @@ def namespace_summary(namespace: str):
         if not isinstance(ingresses, ToolError):
             ingress_count = len(ingresses.items)
     except Exception:
-        pass
+        logger.debug("Suppressed exception", exc_info=True)
 
     # Warning events (last hour)
     events_result = safe(lambda: core.list_namespaced_event(namespace, field_selector="type=Warning"))
@@ -588,7 +588,7 @@ def cluster_metrics(category: str = "overview"):
                     }
                 )
         except Exception:
-            pass
+            logger.debug("Suppressed exception", exc_info=True)
 
     text = f"Cluster metrics ({category}): {len(cards)} KPI cards"
     component = {
@@ -901,7 +901,7 @@ def get_topology_graph(
                 if res_str:
                     finding_status[res_str] = "error" if sev in ("critical", "warning") else "warning"
     except Exception:
-        pass
+        logger.debug("Suppressed exception", exc_info=True)
 
     # Cluster-scoped kinds (namespace="") should pass namespace filter when explicitly requested
     cluster_scoped = {"Node", "HPA"}
