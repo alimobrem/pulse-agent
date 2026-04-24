@@ -157,11 +157,10 @@ def visualize_nodes(label_selector: str = "", show_pods: bool = True):
 
     # Get CPU/memory metrics
     try:
-        from kubernetes import client as k8s_client
-
+        from ..k8s_client import get_custom_client
         from ..units import parse_cpu_millicores, parse_memory_bytes
 
-        custom = k8s_client.CustomObjectsApi()
+        custom = get_custom_client()
         metrics = custom.list_cluster_custom_object("metrics.k8s.io", "v1beta1", "nodes")
         for m in metrics.get("items", []):
             name = m["metadata"]["name"]

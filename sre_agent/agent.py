@@ -9,6 +9,7 @@ import contextlib
 import json
 import logging
 import os
+import threading
 import time
 from datetime import UTC, datetime
 from typing import Any
@@ -331,9 +332,22 @@ MAX_TOOL_RESULT_LENGTH = 50_000  # ~50KB cap to prevent WebSocket overflow
 
 
 def _execute_tool(
-    name: str, input_data: dict, tool_map: dict, user_token: str | None = None
+    name: str,
+    input_data: dict,
+    tool_map: dict,
+    user_token: str | None = None,
+    abort_event: threading.Event | None = None,
 ) -> tuple[str, dict | None, dict]:
     """Execute a tool by name. Returns (text_result, component_spec_or_None, exec_meta)."""
+    if abort_event and abort_event.is_set():
+        meta = {
+            "status": "error",
+            "error_message": "Skipped — session expired",
+            "error_category": "unauthorized",
+            "result_bytes": 0,
+        }
+        return "Error: session expired — operation skipped", None, meta
+
     from .k8s_client import user_token_context
 
     with user_token_context(user_token):
@@ -347,11 +361,25 @@ def _execute_tool(
             }
             return f"Error: unknown tool '{name}'", None, meta
         try:
+            from .errors import ToolError
+
             result = tool.call(input_data)
             if isinstance(result, tuple) and len(result) == 2:
                 text, component = result
             else:
                 text, component = result, None
+            # Detect ToolError returned as value (e.g. from safe() or classify_api_error)
+            if isinstance(text, ToolError):
+                err = text
+                if err.category == "unauthorized" and abort_event:
+                    abort_event.set()
+                meta = {
+                    "status": "error",
+                    "error_message": err.message,
+                    "error_category": err.category,
+                    "result_bytes": len(err.message),
+                }
+                return str(err), None, meta
             result_bytes = len(text)
             if len(text) > MAX_TOOL_RESULT_LENGTH:
                 original_len = len(text)
@@ -389,6 +417,8 @@ def _execute_tool(
                     }
                 )
             )
+            if err.category == "unauthorized" and abort_event:
+                abort_event.set()
             error_message = f"{type(e).__name__}: {str(e)[:200]}"
             meta = {
                 "status": "error",
@@ -403,11 +433,16 @@ TOOL_TIMEOUT = get_settings().tool_timeout
 
 
 def _execute_tool_with_timeout(
-    name: str, input_data: dict, tool_map: dict, timeout: int | None = None, user_token: str | None = None
+    name: str,
+    input_data: dict,
+    tool_map: dict,
+    timeout: int | None = None,
+    user_token: str | None = None,
+    abort_event: threading.Event | None = None,
 ) -> tuple[str, dict | None, dict]:
     """Execute a tool with a timeout guard."""
     timeout = timeout or TOOL_TIMEOUT
-    future = _tool_pool.submit(_execute_tool, name, input_data, tool_map, user_token)
+    future = _tool_pool.submit(_execute_tool, name, input_data, tool_map, user_token, abort_event)
     try:
         return future.result(timeout=timeout)
     except concurrent.futures.TimeoutError:
@@ -643,6 +678,7 @@ async def run_agent_streaming(
 
         if response.stop_reason == "tool_use":
             tool_results = []
+            _abort_401 = threading.Event()
             tool_blocks = [b for b in response.content if b.type == "tool_use"]
             read_blocks = [b for b in tool_blocks if b.name not in write_tools]
             write_blocks = [b for b in tool_blocks if b.name in write_tools]
@@ -655,7 +691,9 @@ async def run_agent_streaming(
                 task_to_block: dict[asyncio.Task, Any] = {}
                 for b in read_blocks:
                     task = asyncio.ensure_future(
-                        loop.run_in_executor(_tool_pool, _execute_tool, b.name, b.input, tool_map, user_token)
+                        loop.run_in_executor(
+                            _tool_pool, _execute_tool, b.name, b.input, tool_map, user_token, _abort_401
+                        )
                     )
                     task_to_block[task] = b
 
@@ -745,7 +783,14 @@ async def run_agent_streaming(
                 write_start = time.time()
                 loop = asyncio.get_running_loop()
                 text, component, exec_meta = await loop.run_in_executor(
-                    _tool_pool, _execute_tool_with_timeout, block.name, block.input, tool_map, None, user_token
+                    _tool_pool,
+                    _execute_tool_with_timeout,
+                    block.name,
+                    block.input,
+                    tool_map,
+                    None,
+                    user_token,
+                    _abort_401,
                 )
                 write_elapsed_ms = int((time.time() - write_start) * 1000)
                 results_map[block.id] = (text, component)

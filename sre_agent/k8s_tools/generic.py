@@ -672,7 +672,9 @@ def describe_resource(namespace: str, name: str, kind: str, group: str = "", ver
         # resp is a tuple (data, status, headers) or just data depending on version
         obj = resp if isinstance(resp, dict) else resp[0] if isinstance(resp, tuple) else resp
     except ApiException as e:
-        return f"Error ({e.status}): {e.reason}"
+        from ..errors import classify_api_error
+
+        return classify_api_error(e, "describe_resource")
     except Exception as e:
         return f"Error fetching {kind}/{name}: {type(e).__name__}: {e}"
 

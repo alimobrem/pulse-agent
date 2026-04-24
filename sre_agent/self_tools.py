@@ -9,7 +9,7 @@ from __future__ import annotations
 from datetime import UTC
 
 from .decorators import beta_tool
-from .k8s_client import get_core_client, safe
+from .k8s_client import get_apis_client, get_core_client, safe
 
 _openapi_cache: tuple[dict, float] | None = None
 _OPENAPI_CACHE_TTL = 3600  # 1 hour
@@ -805,15 +805,13 @@ def list_api_resources(group: str = ""):
         group: Optional API group filter (e.g., 'apps', 'batch', 'networking.k8s.io').
                Empty = show all groups with resource counts.
     """
-    from kubernetes import client
-
     from .k8s_client import _load_k8s
 
     _load_k8s()
 
     if not group:
         # Overview: list all API groups with resource counts
-        api = client.ApisApi()
+        api = get_apis_client()
         result = safe(lambda: api.get_api_versions())
         if isinstance(result, str):
             return result
@@ -833,11 +831,11 @@ def list_api_resources(group: str = ""):
     try:
         api_client = get_core_client().api_client
         if group == "v1" or group == "core":
-            core = client.CoreV1Api()
+            core = get_core_client()
             resources = safe(lambda: core.get_api_resources())
         else:
             # Try group/v1 first, then discover preferred version
-            apis = client.ApisApi()
+            apis = get_apis_client()
             groups = safe(lambda: apis.get_api_versions())
             if isinstance(groups, str):
                 return groups
@@ -894,13 +892,11 @@ def list_deprecated_apis():
     Shows API groups where non-preferred (older) versions are still available,
     indicating resources that may need migration before the next cluster upgrade.
     """
-    from kubernetes import client
-
     from .k8s_client import _load_k8s
 
     _load_k8s()
 
-    api = client.ApisApi()
+    api = get_apis_client()
     result = safe(lambda: api.get_api_versions())
     if isinstance(result, str):
         return result

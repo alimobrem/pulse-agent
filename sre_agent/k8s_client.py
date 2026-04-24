@@ -28,11 +28,18 @@ CONTAINER_RUNTIME_SOCKET = None
 
 _user_token_var: ContextVar[str | None] = ContextVar("_user_token", default=None)
 _user_api_client_var: ContextVar[Any] = ContextVar("_user_api_client", default=None)
+_require_user_token_var: ContextVar[bool] = ContextVar("_require_user_token", default=False)
 
 
 def get_current_user_token() -> str | None:
     """Return the current user's bearer token, or None if using SA."""
     return _user_token_var.get()
+
+
+def _check_user_token_required() -> None:
+    """Raise 401 if we're in a user context but have no token."""
+    if _require_user_token_var.get():
+        raise ApiException(status=401, reason="No user token available — session may have expired")
 
 
 def _get_user_api_client(token: str) -> client.ApiClient:
@@ -55,8 +62,15 @@ def user_token_context(token: str | None):
     """Set the user's bearer token for the duration of the context."""
     from .config import get_settings
 
-    if not token or not get_settings().token_forwarding:
+    if not get_settings().token_forwarding:
         yield
+        return
+    reset_req = _require_user_token_var.set(True)
+    if not token:
+        try:
+            yield
+        finally:
+            _require_user_token_var.reset(reset_req)
         return
     reset_tok = _user_token_var.set(token)
     reset_cli = _user_api_client_var.set(None)
@@ -65,6 +79,7 @@ def user_token_context(token: str | None):
     finally:
         _user_token_var.reset(reset_tok)
         _user_api_client_var.reset(reset_cli)
+        _require_user_token_var.reset(reset_req)
 
 
 def _detect_container_runtime() -> str | None:
@@ -110,6 +125,7 @@ def get_core_client() -> client.CoreV1Api:
     token = _user_token_var.get()
     if token:
         return client.CoreV1Api(api_client=_get_user_api_client(token))
+    _check_user_token_required()
     _load_k8s()
     if "core" not in _clients:
         _clients["core"] = client.CoreV1Api()
@@ -120,6 +136,7 @@ def get_apps_client() -> client.AppsV1Api:
     token = _user_token_var.get()
     if token:
         return client.AppsV1Api(api_client=_get_user_api_client(token))
+    _check_user_token_required()
     _load_k8s()
     if "apps" not in _clients:
         _clients["apps"] = client.AppsV1Api()
@@ -130,6 +147,7 @@ def get_custom_client() -> client.CustomObjectsApi:
     token = _user_token_var.get()
     if token:
         return client.CustomObjectsApi(api_client=_get_user_api_client(token))
+    _check_user_token_required()
     _load_k8s()
     if "custom" not in _clients:
         _clients["custom"] = client.CustomObjectsApi()
@@ -140,6 +158,7 @@ def get_version_client() -> client.VersionApi:
     token = _user_token_var.get()
     if token:
         return client.VersionApi(api_client=_get_user_api_client(token))
+    _check_user_token_required()
     _load_k8s()
     if "version" not in _clients:
         _clients["version"] = client.VersionApi()
@@ -150,6 +169,7 @@ def get_rbac_client() -> client.RbacAuthorizationV1Api:
     token = _user_token_var.get()
     if token:
         return client.RbacAuthorizationV1Api(api_client=_get_user_api_client(token))
+    _check_user_token_required()
     _load_k8s()
     if "rbac" not in _clients:
         _clients["rbac"] = client.RbacAuthorizationV1Api()
@@ -160,6 +180,7 @@ def get_networking_client() -> client.NetworkingV1Api:
     token = _user_token_var.get()
     if token:
         return client.NetworkingV1Api(api_client=_get_user_api_client(token))
+    _check_user_token_required()
     _load_k8s()
     if "networking" not in _clients:
         _clients["networking"] = client.NetworkingV1Api()
@@ -170,6 +191,7 @@ def get_batch_client() -> client.BatchV1Api:
     token = _user_token_var.get()
     if token:
         return client.BatchV1Api(api_client=_get_user_api_client(token))
+    _check_user_token_required()
     _load_k8s()
     if "batch" not in _clients:
         _clients["batch"] = client.BatchV1Api()
@@ -180,10 +202,22 @@ def get_autoscaling_client() -> client.AutoscalingV2Api:
     token = _user_token_var.get()
     if token:
         return client.AutoscalingV2Api(api_client=_get_user_api_client(token))
+    _check_user_token_required()
     _load_k8s()
     if "autoscaling" not in _clients:
         _clients["autoscaling"] = client.AutoscalingV2Api()
     return _clients["autoscaling"]
+
+
+def get_apis_client() -> client.ApisApi:
+    token = _user_token_var.get()
+    if token:
+        return client.ApisApi(api_client=_get_user_api_client(token))
+    _check_user_token_required()
+    _load_k8s()
+    if "apis" not in _clients:
+        _clients["apis"] = client.ApisApi()
+    return _clients["apis"]
 
 
 def safe(fn) -> Any:

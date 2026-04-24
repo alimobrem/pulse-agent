@@ -146,7 +146,9 @@ def apply_yaml(yaml_content: str, namespace: str = "", dry_run: bool = False):
         action = "Dry-run validated" if dry_run else "Applied"
         return f"{action} {kind}/{name} in namespace {ns} successfully."
     except ApiException as e:
-        return f"Error ({e.status}): {e.reason}\n{e.body}"
+        from ..errors import classify_api_error
+
+        return classify_api_error(e, "apply_yaml")
     except Exception as e:
         return f"Error applying YAML: {type(e).__name__}: {e}"
 
