@@ -553,6 +553,13 @@ async def run_agent_streaming(
                     if wt in original_tool_map and wt not in tool_map:
                         tool_map[wt] = original_tool_map[wt]
             tool_defs = [t.to_dict() for t in tool_map.values()]
+            write_in_map = [wt for wt in (write_tools or set()) if wt in tool_map]
+            logger.info(
+                "Adaptive selection: %d tools, %d write tools preserved: %s",
+                len(tool_map),
+                len(write_in_map),
+                write_in_map[:5],
+            )
 
     # --- Harness: Cached system prompt with cluster context ---
     if use_harness:
