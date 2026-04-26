@@ -809,13 +809,23 @@ def prune_old_items(max_age_days: int = 30) -> int:
     return cur.rowcount if hasattr(cur, "rowcount") else 0
 
 
+_MAX_RESOURCES = 10
+
+
 def _merge_resources(existing: list[dict], new: list[dict]) -> list[dict]:
-    seen = {(r["kind"], r["name"], r["namespace"]) for r in existing}
-    merged = list(existing)
+    seen: set[tuple[str, str, str]] = set()
+    merged: list[dict] = []
     for r in new:
-        if (r["kind"], r["name"], r["namespace"]) not in seen:
+        key = (r.get("kind", ""), r.get("name", ""), r.get("namespace", ""))
+        if key not in seen:
+            seen.add(key)
             merged.append(r)
-    return merged
+    for r in existing:
+        key = (r.get("kind", ""), r.get("name", ""), r.get("namespace", ""))
+        if key not in seen:
+            seen.add(key)
+            merged.append(r)
+    return merged[:_MAX_RESOURCES]
 
 
 def _deserialize_row(row: Any) -> dict[str, Any]:
@@ -829,6 +839,23 @@ def _deserialize_row(row: Any) -> dict[str, Any]:
 # -- Monitor integration --
 
 
+def _finding_corr_key(finding: dict[str, Any]) -> str:
+    """Build a correlation key scoped to category + namespace + primary resource."""
+    category = finding.get("category", "unknown")
+    namespace = finding.get("namespace", "")
+    resources = finding.get("resources", [])
+    if resources:
+        r = resources[0]
+        name = r.get("name", "")
+        kind = r.get("kind", "")
+        if kind == "Pod":
+            from .monitor.confidence import _strip_pod_hash
+
+            name = _strip_pod_hash(name)
+        return f"{category}:{namespace}:{kind}/{name}"
+    return f"{category}:{namespace}"
+
+
 def bridge_finding_to_inbox(finding: dict[str, Any]) -> str:
     """Create or update an inbox item from a monitor finding."""
     finding_id = finding.get("id", "")
@@ -840,7 +867,7 @@ def bridge_finding_to_inbox(finding: dict[str, Any]) -> str:
     )
 
     if existing is None:
-        corr_key = f"{finding.get('category', 'unknown')}:{finding.get('namespace', '')}"
+        corr_key = _finding_corr_key(finding)
         if corr_key:
             existing = db.fetchone(
                 "SELECT * FROM inbox_items WHERE correlation_key = ? AND item_type = 'task' AND status NOT IN ('resolved', 'archived')",
@@ -875,7 +902,7 @@ def bridge_finding_to_inbox(finding: dict[str, Any]) -> str:
         "noise_score": finding.get("noiseScore", 0),
         "namespace": finding.get("namespace"),
         "resources": finding.get("resources", []),
-        "correlation_key": f"{finding.get('category', 'unknown')}:{finding.get('namespace', '')}",
+        "correlation_key": _finding_corr_key(finding),
         "created_by": "system:monitor",
         "finding_id": finding_id,
     }
@@ -1014,18 +1041,28 @@ def _phase_b_investigate() -> int:
             continue
 
         resources = item.get("resources", [])
-        if resources and not _resource_exists(resources[0]):
-            _inbox_logger.info("Resource gone (404) for %s — auto-resolving", item["id"])
-            ts = int(time.time())
-            metadata = item.get("metadata", {})
-            metadata["dismiss_reason"] = "Resource no longer exists"
-            db.execute(
-                "UPDATE inbox_items SET status = 'resolved', resolved_at = ?, metadata = ?, updated_at = ? WHERE id = ?",
-                (ts, json.dumps(metadata), ts, item["id"]),
-            )
-            db.commit()
-            _publish_event("inbox_item_resolved", item["id"], {"resolved_at": ts})
-            continue
+        if resources:
+            alive = [r for r in resources if _resource_exists(r)]
+            if not alive:
+                _inbox_logger.info("All resources gone (404) for %s — auto-resolving", item["id"])
+                ts = int(time.time())
+                metadata = item.get("metadata", {})
+                metadata["dismiss_reason"] = "Resource no longer exists"
+                db.execute(
+                    "UPDATE inbox_items SET status = 'resolved', resolved_at = ?, metadata = ?, updated_at = ? WHERE id = ?",
+                    (ts, json.dumps(metadata), ts, item["id"]),
+                )
+                db.commit()
+                _publish_event("inbox_item_resolved", item["id"], {"resolved_at": ts})
+                continue
+            if len(alive) < len(resources):
+                _inbox_logger.info("Pruned %d dead resources from %s", len(resources) - len(alive), item["id"])
+                db.execute(
+                    "UPDATE inbox_items SET resources = ?, updated_at = ? WHERE id = ?",
+                    (json.dumps(alive), int(time.time()), item["id"]),
+                )
+                db.commit()
+                item["resources"] = alive
 
         _last_investigate_time[item["id"]] = now
 
@@ -1240,6 +1277,35 @@ def resolve_finding_inbox_item(finding_id: str) -> bool:
     return True
 
 
+_PRUNABLE_KINDS = {"Pod", "Deployment", "StatefulSet", "DaemonSet", "ReplicaSet"}
+_prune_counter = 0
+
+
+def _prune_stale_resources(db: Any) -> None:
+    """Remove dead Pod/Deployment resources from open inbox items (every 5th call)."""
+    global _prune_counter
+    _prune_counter += 1
+    if _prune_counter % 5 != 0:
+        return
+
+    rows = db.fetchall(
+        "SELECT id, resources FROM inbox_items WHERE status NOT IN ('resolved', 'archived')",
+    )
+    pruned_count = 0
+    for row in rows:
+        item_resources = json.loads(row["resources"] or "[]")
+        prunable = [r for r in item_resources if r.get("kind") in _PRUNABLE_KINDS]
+        if not prunable:
+            continue
+        alive = [r for r in item_resources if r.get("kind") not in _PRUNABLE_KINDS or _resource_exists(r)]
+        if len(alive) < len(item_resources):
+            db.execute("UPDATE inbox_items SET resources = ? WHERE id = ?", (json.dumps(alive), row["id"]))
+            pruned_count += len(item_resources) - len(alive)
+    if pruned_count:
+        db.commit()
+        _inbox_logger.info("Pruned %d stale resources from inbox items", pruned_count)
+
+
 def run_generator_cycle() -> None:
     """Run all generators, upsert items, auto-resolve cleared conditions."""
     from .inbox_generators import run_all_generators
@@ -1268,6 +1334,8 @@ def run_generator_cycle() -> None:
                 (now, now, row["id"]),
             )
     db.commit()
+
+    _prune_stale_resources(db)
 
     unsnooze_expired()
     prune_old_items()

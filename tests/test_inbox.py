@@ -545,3 +545,82 @@ class TestResourceExists:
         with patch("sre_agent.k8s_client.get_core_client") as mock_core:
             mock_core.return_value.read_namespaced_pod.return_value = MagicMock()
             assert _resource_exists({"kind": "Pod", "name": "alive-pod", "namespace": "default"}) is True
+
+
+class TestMergeResources:
+    """Tests for _merge_resources cap and dedup."""
+
+    def test_deduplicates_by_kind_name_namespace(self):
+        from sre_agent.inbox import _merge_resources
+
+        existing = [{"kind": "Pod", "name": "a", "namespace": "ns"}]
+        new = [{"kind": "Pod", "name": "a", "namespace": "ns"}]
+        result = _merge_resources(existing, new)
+        assert len(result) == 1
+
+    def test_new_resources_come_first(self):
+        from sre_agent.inbox import _merge_resources
+
+        existing = [{"kind": "Pod", "name": "old", "namespace": "ns"}]
+        new = [{"kind": "Pod", "name": "new", "namespace": "ns"}]
+        result = _merge_resources(existing, new)
+        assert result[0]["name"] == "new"
+        assert result[1]["name"] == "old"
+
+    def test_caps_at_max(self):
+        from sre_agent.inbox import _MAX_RESOURCES, _merge_resources
+
+        existing = [{"kind": "Pod", "name": f"old-{i}", "namespace": "ns"} for i in range(8)]
+        new = [{"kind": "Pod", "name": f"new-{i}", "namespace": "ns"} for i in range(8)]
+        result = _merge_resources(existing, new)
+        assert len(result) == _MAX_RESOURCES
+        assert result[0]["name"] == "new-0"
+
+
+class TestFindingCorrKey:
+    """Tests for correlation key narrowing."""
+
+    def test_includes_primary_resource(self):
+        from sre_agent.inbox import _finding_corr_key
+
+        finding = {
+            "category": "crashloop",
+            "namespace": "prod",
+            "resources": [{"kind": "Deployment", "name": "web", "namespace": "prod"}],
+        }
+        key = _finding_corr_key(finding)
+        assert key == "crashloop:prod:Deployment/web"
+
+    def test_strips_pod_hash(self):
+        from sre_agent.inbox import _finding_corr_key
+
+        finding = {
+            "category": "crashloop",
+            "namespace": "prod",
+            "resources": [{"kind": "Pod", "name": "web-abc123-xyz", "namespace": "prod"}],
+        }
+        key = _finding_corr_key(finding)
+        assert "abc123-xyz" not in key
+        assert "crashloop:prod:Pod/" in key
+
+    def test_no_resources_fallback(self):
+        from sre_agent.inbox import _finding_corr_key
+
+        finding = {"category": "alerts", "namespace": "monitoring"}
+        key = _finding_corr_key(finding)
+        assert key == "alerts:monitoring"
+
+    def test_different_resources_different_keys(self):
+        from sre_agent.inbox import _finding_corr_key
+
+        f1 = {
+            "category": "crashloop",
+            "namespace": "prod",
+            "resources": [{"kind": "Pod", "name": "api-abc-123", "namespace": "prod"}],
+        }
+        f2 = {
+            "category": "crashloop",
+            "namespace": "prod",
+            "resources": [{"kind": "Pod", "name": "worker-def-456", "namespace": "prod"}],
+        }
+        assert _finding_corr_key(f1) != _finding_corr_key(f2)
