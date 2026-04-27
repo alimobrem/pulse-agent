@@ -72,7 +72,7 @@ cd /Users/amobrem/ali/OpenshiftPulse && ./deploy/deploy.sh --set agent.mcp.enabl
 - Uses `AsyncAnthropic`/`AsyncAnthropicVertex` — LLM streaming runs natively on the event loop (`async with`/`async for`), no `asyncio.to_thread` dispatch
 - `create_async_client()` for async callers, `create_client()` retained for sync callers (skill_router, tool_predictor, inbox)
 - Tool execution: stays sync in `ThreadPoolExecutor` via `loop.run_in_executor()` (K8s client is sync)
-- All 7 callbacks (on_text, on_thinking, on_tool_use, on_confirm, on_component, on_tool_result, on_usage) are `async def`
+- All 7 callbacks routed through `EventBus` (`event_bus.py`). Existing callers pass individual callbacks via `EventBus.from_callbacks()`. New callers implement `AgentEventHandler` protocol.
 - Circuit breaker: `CircuitBreaker` class with CLOSED→OPEN→HALF_OPEN states (no threading lock — single-threaded event loop)
 - Confirmation: `confirm_request` → `confirm_response` with JIT nonce for replay prevention
 
@@ -81,8 +81,9 @@ cd /Users/amobrem/ali/OpenshiftPulse && ./deploy/deploy.sh --set agent.mcp.enabl
 - `/ws/monitor` — Autonomous cluster monitoring (push-based findings, investigations, actions)
 - Auth: `PULSE_AGENT_WS_TOKEN` via query param, constant-time comparison
 
-### Monitor System (`monitor/` package — 11 modules)
+### Monitor System (`monitor/` package — 12 modules)
 - `MonitorSession` (session.py) — periodic cluster scanning (default 60s interval)
+- Scanner protocol: `ScannerMeta` dataclass + `Scanner` protocol in `scanner_protocol.py`. `FunctionScanner` wraps existing functions. `cluster_monitor._run_scan_locked()` iterates `get_all_scanner_instances()` with `shared_resources` dict for pod-sharing. Adding a scanner = adding a class, no changes to cluster_monitor.
 - 24 scanners: 13 reactive (crashlooping pods, pending pods, failed deployments, node pressure, expiring certs, firing alerts, OOM-killed pods, image pull errors, degraded operators, DaemonSet gaps, HPA saturation, SLO burn rate, security posture) + 5 audit (config changes, RBAC, deployments, warning events, auth) + 4 predictive trend (memory pressure forecast, disk pressure forecast, HPA exhaustion trend, error rate acceleration) using Prometheus `predict_linear()`
 - Auto-fix at trust level 3+: deletes crashlooping pods, restarts failed deployments
 - Confidence scores on all findings, investigations, and action proposals
@@ -102,6 +103,7 @@ cd /Users/amobrem/ali/OpenshiftPulse && ./deploy/deploy.sh --set agent.mcp.enabl
 - `fix_typos()` — corrects ~130 common K8s/SRE misspellings before classification
 - `build_orchestrated_config()` — returns system_prompt, tool_defs, tool_map, write_tools for the classified mode
 - Used by `/ws/agent` endpoint for auto-routing
+- Skill routing: ALL trigger patterns in `skill.md` YAML (`trigger_patterns` + `route_priority`), zero hardcoded patterns in `skill_router.py`. `reset_hard_pre_route()` on skill reload. OOM pattern uses `\boom` (start boundary) to avoid matching "headroom".
 
 ### Tools
 - `k8s_tools/` — 12-module package with 42 K8s tools (`@beta_tool` decorated). Write tools in `WRITE_TOOLS` set require confirmation. Submodules: validators, pods, nodes, deployments, workloads, monitoring, diagnostics, generic, advanced, audit, live_table.
@@ -112,7 +114,8 @@ cd /Users/amobrem/ali/OpenshiftPulse && ./deploy/deploy.sh --set agent.mcp.enabl
 - `timeline_tools.py` — 1 incident correlation tool
 - `git_tools.py` — 1 Git PR proposal tool
 - `handoff_tools.py` — 2 agent-to-agent handoff tools (`request_security_scan`, `request_sre_investigation`)
-- `tool_registry.py` — central registry; all tool modules call `register_tool()` at import time
+- `tool_registry.py` — central registry with `TOOL_CATEGORIES` and `WRITE_TOOL_NAMES`. `@beta_tool(category="views", is_write=True)` for auto-registration with metadata. Plain `@beta_tool` unchanged.
+- `tool_discovery.py` — `discover_tools()` imports all tool modules, populates `TOOL_REGISTRY`. Called in `app.py` lifespan.
 
 ### Tool Pattern
 ```python
@@ -132,13 +135,19 @@ Rules: validate inputs with `_validate_k8s_name()`/`_validate_k8s_namespace()`, 
 
 ### Configuration (`config.py`)
 - `PulseAgentSettings(BaseSettings)` — Pydantic v2 Settings with `PULSE_AGENT_` env prefix
-- `.env` file support, type validation at startup
-- All config accessed via settings instance, not raw `os.environ`
+- 6 frozen sub-models: `AgentConfig`, `DatabaseConfig`, `MonitorConfig`, `RoutingConfig`, `ServerConfig`, `PrometheusConfig`
+- Access: `get_settings().monitor.scan_interval` (nested). Flat env vars (`PULSE_AGENT_MODEL`) synced to nested via `model_post_init`
+- `.env` file support, type validation at startup. All config via settings instance, not raw `os.environ`
 
 ### Harness (`harness.py`)
 - Prompt caching: `cache_control: ephemeral` on system prompt
 - Cluster context injection: pre-fetches node count, namespaces, OCP version
 - Component hints for selected tools (tool selection moved to skill_loader)
+
+### Logging
+- structlog wraps stdlib (`logging_config.py`). Both `logging.getLogger()` and `get_logger()` from `sre_agent/log.py` emit structured JSON.
+- `CorrelationMiddleware` in `api/app.py` injects `request_id` into all log entries via `contextvars`.
+- Log format/level configured via `PULSE_AGENT_LOG_FORMAT` / `PULSE_AGENT_LOG_LEVEL` (Pydantic settings, not raw `os.environ`).
 
 ### Security
 - Non-root container (UID 1001) on UBI9
@@ -176,17 +185,21 @@ Rules: validate inputs with `_validate_k8s_name()`/`_validate_k8s_namespace()`, 
 - `runbooks.py` — 10 built-in SRE runbooks injected into system prompt
 - `memory/` — self-improving agent (PostgreSQL, pattern detection, learned runbooks)
 - `view_tools.py` — `namespace_summary` + `create_dashboard` (accepts view_type, trigger_source, finding_id, visibility for agent view lifecycle) + `get_topology_graph` tools for generative views. Topology supports 5 perspectives (Physical, Logical, Network, Multi-Tenant, Helm) via `kinds`, `relationships`, `layout_hint`, `include_metrics`, `group_by` params
-- `view_mutations.py` — view mutation tools extracted from view_tools.py (`update_dashboard`, `delete_dashboard`, `clone_view`, `share_view`)
+- `view_mutations.py` — dispatches to `mutations/` package (13 typed `ViewMutation` classes with validate/apply). `MUTATION_REGISTRY` with lazy registration. Tool signature unchanged.
 - `view_executor.py` — executes viewPlan widget specs at claim time (tool-backed + props-only, timeout, staleness, security gate)
 - `dependency_graph.py` — live K8s resource dependency graph (17 types, 10 relationships), `_fetch_metrics()` with 30s TTL cache for metrics-server enrichment
 - `quality_engine.py` — unified dashboard validation + quality scoring (includes `critique_view` moved from view_critic.py)
-- `db.py` — Database abstraction (PostgreSQL production, SQLite tests) + view CRUD + lifecycle (status transitions, claims, finding lookup, recurrence handling, assessment escalation, resolution tool extraction, similar view search)
+- `db.py` — Database class (PostgreSQL pool, `?`→`%s` translation) + thin wrappers delegating to repositories
+- `repositories/` — domain-specific DB access: `ViewRepository` (27 methods), `InboxRepository` (24 methods), `MonitorRepository` (17 methods), `ToolUsageRepository`, `IntelligenceRepository`, `PromptLogRepository`, `ChatHistoryRepository`, `SelectorLearningRepository`. All extend `BaseRepository` with lazy `self.db` property.
+- `async_db.py` — `AsyncDatabase` with asyncpg pool (`$1` placeholders). WARNING: `_translate_placeholders` breaks on jsonb `?` operator — use `jsonb_exists()` instead.
 - `k8s_client.py` — lazy-initialized K8s client with `safe()` wrapper
 - `context_bus.py` — shared context bus for cross-agent communication
 - `orchestrator.py` — intent classification + typo correction + agent routing for `/ws/agent`
 - `tool_usage.py` — tool invocation audit log (PostgreSQL, fire-and-forget recording, query/stats)
 - `tool_predictor.py` — adaptive tool selection engine (TF-IDF prediction, LLM fallback, co-occurrence expansion, real-time learning)
-- `decorators.py` — typed `beta_tool` wrapper (centralizes SDK type mismatch for tools returning `tuple[str, dict]`)
+- `decorators.py` — typed `beta_tool` wrapper with optional `category`/`is_write` kwargs for auto-registration
+- `event_bus.py` — `EventBus` with `from_callbacks()` factory, replaces 7 individual callback params in agent loop
+- `async_k8s.py` — async K8s client wrappers using `kubernetes_asyncio` (scaffolding, no production consumer yet)
 - `tool_chains.py` — tool chain discovery and next-tool hints (bigram analysis, system prompt injection)
 - `promql_recipes.py` — 83 production-tested PromQL recipes + learned queries DB (sources: OpenShift console, cluster-monitoring-operator, kube-state-metrics, node_exporter, ACM)
 - `layout_engine.py` — semantic auto-layout engine (role-based row packing, replaces fixed templates)
