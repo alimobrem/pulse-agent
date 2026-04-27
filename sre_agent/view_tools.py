@@ -1067,7 +1067,7 @@ def get_topology_graph(
 
 
 get_topology_graph_raw = get_topology_graph
-get_topology_graph = beta_tool(get_topology_graph)
+get_topology_graph = beta_tool(get_topology_graph)  # type: ignore[assignment]
 
 register_tool(get_topology_graph)
 

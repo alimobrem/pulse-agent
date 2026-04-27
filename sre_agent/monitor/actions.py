@@ -281,9 +281,9 @@ def execute_rollback(action_id: str) -> dict:
             name = inp["name"]
             ns = inp["namespace"]
             revision = int(inp.get("revision", 0)) if inp.get("revision") else 0
-            result_text = rollback_deployment(ns, name, revision)
+            result_text = rollback_deployment(ns, name, revision)  # type: ignore[call-arg]
 
-            if "error" in result_text.lower() or "not found" in result_text.lower():
+            if "error" in result_text.lower() or "not found" in result_text.lower():  # type: ignore[union-attr]
                 return {"error": f"Rollback failed: {result_text}"}
 
             # Update status in database

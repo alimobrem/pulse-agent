@@ -89,7 +89,7 @@ def beta_tool(fn: F | None = None, *, category: str = "", is_write: bool = False
 
             register_tool(tool, is_write=is_write, category=category or "general")
 
-        return tool
+        return tool  # type: ignore[return-value]
 
     if fn is not None:
         # Called as @beta_tool (no parentheses) — no auto-registration

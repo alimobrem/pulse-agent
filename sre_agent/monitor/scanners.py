@@ -759,11 +759,11 @@ def scan_security_posture() -> list[dict]:
     try:
         from ..security_tools import get_security_summary
 
-        summary = get_security_summary()
+        summary = get_security_summary()  # type: ignore[call-arg]
 
         # Parse the summary string to extract findings
         # Format: "  [!!!] [CRITICAL] Category: detail"
-        for line in summary.split("\n"):
+        for line in summary.split("\n"):  # type: ignore[union-attr]
             line = line.strip()
             if not line or not line.startswith("["):
                 continue
