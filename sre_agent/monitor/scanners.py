@@ -535,16 +535,131 @@ class AsyncPendingPodsScanner(AsyncScanner):
         return findings
 
 
+class AsyncFailedDeploymentsScanner(AsyncScanner):
+    meta = _meta("workloads")
+    is_async = True
+
+    async def async_scan(self, shared_resources=None):
+        findings: list[dict] = []
+        try:
+            from ..async_k8s import get_async_apps_client, safe_async
+
+            apps = await get_async_apps_client()
+            deploys = await safe_async(apps.list_deployment_for_all_namespaces())
+            if isinstance(deploys, ToolError):
+                return findings
+            for d in deploys.items:
+                ns = d.metadata.namespace
+                name = d.metadata.name
+                if _skip_namespace(ns):
+                    continue
+                desired = d.spec.replicas or 0
+                available = d.status.available_replicas or 0
+                if desired > 0 and available < desired:
+                    findings.append(
+                        _make_finding(
+                            severity=SEVERITY_WARNING if available > 0 else SEVERITY_CRITICAL,
+                            category="workloads",
+                            title=f"Deployment {name} degraded ({available}/{desired})",
+                            summary=f"Only {available} of {desired} replicas available",
+                            resources=[{"kind": "Deployment", "name": name, "namespace": ns}],
+                            auto_fixable=True,
+                            runbook_id="deployment-degraded",
+                        )
+                    )
+        except Exception as e:
+            logger.error("Async deployment scan failed: %s", e)
+        return findings
+
+
+class AsyncNodePressureScanner(AsyncScanner):
+    meta = _meta("nodes")
+    is_async = True
+
+    async def async_scan(self, shared_resources=None):
+        findings: list[dict] = []
+        try:
+            from ..async_k8s import get_async_core_client, safe_async
+
+            core = await get_async_core_client()
+            nodes = await safe_async(core.list_node())
+            if isinstance(nodes, ToolError):
+                return findings
+            for node in nodes.items:
+                name = node.metadata.name
+                for cond in node.status.conditions or []:
+                    if cond.type in ("DiskPressure", "MemoryPressure", "PIDPressure") and cond.status == "True":
+                        findings.append(
+                            _make_finding(
+                                severity=SEVERITY_CRITICAL,
+                                category="nodes",
+                                title=f"Node {name} has {cond.type}",
+                                summary=f"{cond.type}: {cond.message or cond.reason or 'Condition active'}",
+                                resources=[{"kind": "Node", "name": name}],
+                            )
+                        )
+                    if cond.type == "Ready" and cond.status != "True":
+                        findings.append(
+                            _make_finding(
+                                severity=SEVERITY_CRITICAL,
+                                category="nodes",
+                                title=f"Node {name} NotReady",
+                                summary=f"Node is not ready: {cond.message or cond.reason or 'Unknown'}",
+                                resources=[{"kind": "Node", "name": name}],
+                            )
+                        )
+        except Exception as e:
+            logger.error("Async node pressure scan failed: %s", e)
+        return findings
+
+
+class AsyncDegradedOperatorsScanner(AsyncScanner):
+    meta = _meta("operators")
+    is_async = True
+
+    async def async_scan(self, shared_resources=None):
+        findings: list[dict] = []
+        try:
+            from ..async_k8s import get_async_custom_client, safe_async
+
+            custom = await get_async_custom_client()
+            result = await safe_async(
+                custom.list_cluster_custom_object(
+                    group="config.openshift.io",
+                    version="v1",
+                    plural="clusteroperators",
+                )
+            )
+            if isinstance(result, ToolError):
+                return findings
+            for op in result.get("items", []):
+                name = op.get("metadata", {}).get("name", "")
+                for cond in op.get("status", {}).get("conditions", []):
+                    if cond.get("type") == "Degraded" and cond.get("status") == "True":
+                        findings.append(
+                            _make_finding(
+                                severity=SEVERITY_CRITICAL,
+                                category="operators",
+                                title=f"ClusterOperator {name} degraded",
+                                summary=f"Operator degraded: {cond.get('message', cond.get('reason', 'Unknown'))}",
+                                resources=[{"kind": "ClusterOperator", "name": name}],
+                            )
+                        )
+        except Exception as e:
+            logger.error("Async degraded operators scan failed: %s", e)
+        return findings
+
+
 ALL_SCANNER_INSTANCES: list = [
     FunctionScanner(_meta("crashloop"), scan_crashlooping_pods, accepts_pods=True),
     AsyncPendingPodsScanner(),
-    FunctionScanner(_meta("workloads"), scan_failed_deployments),
-    FunctionScanner(_meta("nodes"), scan_node_pressure),
+    AsyncFailedDeploymentsScanner(),
+    AsyncNodePressureScanner(),
     FunctionScanner(_meta("cert_expiry"), scan_expiring_certs),
     FunctionScanner(_meta("alerts"), scan_firing_alerts),
     FunctionScanner(_meta("oom"), scan_oom_killed_pods, accepts_pods=True),
     FunctionScanner(_meta("image_pull"), scan_image_pull_errors, accepts_pods=True),
-    FunctionScanner(_meta("operators"), scan_degraded_operators),
+    AsyncDegradedOperatorsScanner(),
     FunctionScanner(_meta("daemonsets"), scan_daemonset_gaps),
     FunctionScanner(_meta("hpa"), scan_hpa_saturation),
 ]

@@ -15,7 +15,7 @@ import uuid
 from typing import TYPE_CHECKING, Any
 
 from ..config import get_settings
-from ..k8s_client import get_core_client, safe
+from ..k8s_client import get_core_client
 from ..repositories.monitor_repo import get_monitor_repo
 from .actions import mark_finding_actions_resolved, save_action, save_investigation, update_action_verification
 from .autofix import _autofix_paused
@@ -1111,8 +1111,11 @@ class ClusterMonitor:
 
         shared_resources: dict = {}
         try:
-            shared_pods = await asyncio.to_thread(lambda: safe(lambda: get_core_client().list_pod_for_all_namespaces()))
-            if shared_pods is not None:
+            from ..async_k8s import get_async_core_client, safe_async
+
+            async_core = await get_async_core_client()
+            shared_pods = await safe_async(async_core.list_pod_for_all_namespaces())
+            if shared_pods is not None and not isinstance(shared_pods, str):
                 shared_resources["pods"] = shared_pods
         except Exception as e:
             logger.error("Failed to fetch shared pod list: %s", e)
@@ -1292,11 +1295,16 @@ class ClusterMonitor:
         )
 
         try:
-            get_monitor_repo().save_scan_run(
+            await get_monitor_repo().async_save_scan_run(
                 scan_duration_ms, len(all_findings), json.dumps(scanner_results), self._session_id
             )
-        except Exception as e:
-            logger.debug("Failed to save scan run: %s", e, exc_info=True)
+        except Exception:
+            try:
+                get_monitor_repo().save_scan_run(
+                    scan_duration_ms, len(all_findings), json.dumps(scanner_results), self._session_id
+                )
+            except Exception as e:
+                logger.debug("Failed to save scan run: %s", e, exc_info=True)
 
         await self._broadcast_raw(
             {

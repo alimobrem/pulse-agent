@@ -261,13 +261,26 @@ class MonitorRepository(BaseRepository):
     # ── Scan runs ────────────────────────────────────────────────────────
 
     def save_scan_run(self, duration_ms: int, total_findings: int, scanner_results_json: str, session_id: str) -> None:
-        """Persist a scan run record."""
+        """Persist a scan run record (sync)."""
         db = self.db
         db.execute(
             "INSERT INTO scan_runs (duration_ms, total_findings, scanner_results, session_id) VALUES (?, ?, ?, ?)",
             (duration_ms, total_findings, scanner_results_json, session_id),
         )
         db.commit()
+
+    async def async_save_scan_run(
+        self, duration_ms: int, total_findings: int, scanner_results_json: str, session_id: str
+    ) -> None:
+        """Persist a scan run record (async — uses asyncpg)."""
+        adb = await self.get_async_db()
+        await adb.execute(
+            "INSERT INTO scan_runs (duration_ms, total_findings, scanner_results, session_id) VALUES (?, ?, ?, ?)",
+            duration_ms,
+            total_findings,
+            scanner_results_json,
+            session_id,
+        )
 
     # ── Handoffs ─────────────────────────────────────────────────────────
 
