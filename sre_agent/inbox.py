@@ -8,7 +8,6 @@ import time
 import uuid
 from typing import Any
 
-from .db import get_database
 from .repositories.inbox_repo import get_inbox_repo
 
 logger = logging.getLogger("pulse_agent.inbox")
@@ -66,17 +65,10 @@ def record_interaction(
 ) -> None:
     """Fire-and-forget audit record for human-in-the-loop decisions."""
     try:
-        db = get_database()
-        db.execute(
-            "INSERT INTO user_interactions (actor, interaction_type, item_id, action_id, decision, metadata) "
-            "VALUES (?, ?, ?, ?, ?, ?)",
-            (actor, interaction_type, item_id, action_id, decision, json.dumps(metadata or {})),
-        )
-        db.commit()
+        repo = get_inbox_repo()
+        repo.record_interaction(actor, interaction_type, item_id, action_id, decision, json.dumps(metadata or {}))
     except Exception:
-        import logging
-
-        logging.getLogger("pulse_agent.inbox").debug("Failed to record interaction", exc_info=True)
+        logger.debug("Failed to record interaction", exc_info=True)
 
 
 # -- Simplified lifecycle: New → Triaged → Claimed → In Progress → Resolved --

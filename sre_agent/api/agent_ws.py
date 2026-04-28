@@ -137,13 +137,9 @@ class SkillExecutor:
             except Exception:
                 logger.debug("Memory retrieval failed for skill %s", skill_tag or mode, exc_info=True)
 
-        full_response = await run_agent_streaming(
-            client=client,
-            messages=messages if not skill_tag else list(messages),
-            system_prompt=effective_system,
-            tool_defs=config["tool_defs"],
-            tool_map=config["tool_map"],
-            write_tools=write_tools,
+        from ..event_bus import EventBus
+
+        bus = EventBus.from_callbacks(
             on_text=on_text,
             on_thinking=on_thinking,
             on_tool_use=on_tool_use,
@@ -151,6 +147,16 @@ class SkillExecutor:
             on_component=on_component,
             on_tool_result=on_tool_result,
             on_usage=on_usage,
+        )
+
+        full_response = await run_agent_streaming(
+            client=client,
+            messages=messages if not skill_tag else list(messages),
+            system_prompt=effective_system,
+            tool_defs=config["tool_defs"],
+            tool_map=config["tool_map"],
+            write_tools=write_tools,
+            event_bus=bus,
             mode=skill_tag or mode,
             user_token=self._user_token,
         )

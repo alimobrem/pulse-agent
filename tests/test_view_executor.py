@@ -338,11 +338,11 @@ class TestIntegrationWithInbox:
         }
 
         with (
-            patch("sre_agent.inbox.get_database") as mock_db,
+            patch("sre_agent.inbox.get_inbox_repo") as mock_repo,
             patch("sre_agent.db.save_view") as mock_save,
             patch("sre_agent.inbox._publish_event"),
         ):
-            mock_db.return_value = MagicMock()
+            mock_repo.return_value = MagicMock()
             _generate_view_for_item("inb-test", item)
 
         mock_save.assert_called_once()
@@ -367,7 +367,7 @@ class TestIntegrationWithInbox:
         }
 
         with (
-            patch("sre_agent.inbox.get_database") as mock_db,
+            patch("sre_agent.inbox.get_inbox_repo") as mock_repo,
             patch("sre_agent.db.save_view") as mock_save,
             patch("sre_agent.inbox._publish_event"),
             patch(
@@ -375,7 +375,7 @@ class TestIntegrationWithInbox:
                 return_value=[{"kind": "info_card_grid", "title": "Old", "props": {}}],
             ),
         ):
-            mock_db.return_value = MagicMock()
+            mock_repo.return_value = MagicMock()
             _generate_view_for_item("inb-old", item)
 
         mock_save.assert_called_once()

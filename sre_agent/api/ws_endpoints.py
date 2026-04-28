@@ -9,6 +9,7 @@ import re
 import time
 import uuid
 
+import structlog
 from fastapi import HTTPException, WebSocket, WebSocketDisconnect
 
 from ..config import get_settings
@@ -116,6 +117,9 @@ async def websocket_agent(websocket: WebSocket, mode: str):
     # Rate limiting state
     message_timestamps: list[float] = []
 
+    # Bind structured log context for this session
+    structlog.contextvars.bind_contextvars(session_id=session_id, endpoint="agent")
+
     # Extract user OAuth token for forwarding to K8s API
     user_token = extract_user_token(websocket.headers)
 
@@ -128,6 +132,8 @@ async def websocket_agent(websocket: WebSocket, mode: str):
     except HTTPException:
         logger.warning("WebSocket session %s: no valid user token, view operations will be unavailable", session_id)
         ws_user = "anonymous"
+
+    structlog.contextvars.bind_contextvars(user=ws_user)
 
     # Persist chat session
     try:
@@ -317,6 +323,7 @@ async def websocket_agent(websocket: WebSocket, mode: str):
         _pending_timestamps.pop(session_id, None)
         _ws_alive.pop(session_id, None)
         _active_agent_count = max(0, _active_agent_count - 1)
+        structlog.contextvars.unbind_contextvars("session_id", "user", "endpoint")
 
 
 # -- /ws/agent: Auto-routing unified agent ---------------------------------
@@ -354,6 +361,8 @@ async def websocket_auto_agent(websocket: WebSocket):
     except HTTPException:
         logger.warning("WebSocket session %s: no valid user token, view operations will be unavailable", session_id)
         ws_user = "anonymous"
+
+    structlog.contextvars.bind_contextvars(user=ws_user)
 
     # Persist chat session
     try:
@@ -804,6 +813,7 @@ async def websocket_auto_agent(websocket: WebSocket):
         _pending_timestamps.pop(session_id, None)
         _ws_alive.pop(session_id, None)
         _active_agent_count = max(0, _active_agent_count - 1)
+        structlog.contextvars.unbind_contextvars("session_id", "user", "endpoint")
 
 
 # -- Protocol v2: /ws/monitor -----------------------------------------------
@@ -827,6 +837,7 @@ async def websocket_monitor(websocket: WebSocket):
         return
 
     await websocket.accept()
+    structlog.contextvars.bind_contextvars(endpoint="monitor")
     logger.info("Monitor client connected")
 
     # Wait for subscribe_monitor message to get config
@@ -965,4 +976,5 @@ async def websocket_monitor(websocket: WebSocket):
                 except asyncio.CancelledError:
                     pass
         _ws_alive.pop(ws_id, None)
+        structlog.contextvars.unbind_contextvars("session_id", "user", "endpoint")
         _active_monitor_sessions.pop(ws_id, None)

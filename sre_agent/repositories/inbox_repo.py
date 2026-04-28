@@ -402,6 +402,22 @@ class InboxRepository(BaseRepository):
             (resources_json, item_id),
         )
 
+    def record_interaction(
+        self,
+        actor: str,
+        interaction_type: str,
+        item_id: str | None,
+        action_id: str | None,
+        decision: str,
+        metadata_json: str,
+    ) -> None:
+        self.db.execute(
+            "INSERT INTO user_interactions (actor, interaction_type, item_id, action_id, decision, metadata) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (actor, interaction_type, item_id, action_id, decision, metadata_json),
+        )
+        self.db.commit()
+
 
 # -- Singleton ---------------------------------------------------------------
 
