@@ -16,9 +16,6 @@ import threading
 import time
 from dataclasses import dataclass, field
 
-from . import db_schema
-from .db import get_database
-
 logger = logging.getLogger("pulse_agent.context_bus")
 
 
@@ -32,25 +29,6 @@ class ContextEntry:
     namespace: str = ""
     resources: list = field(default_factory=list)
     parallel_task_id: str = ""
-
-
-_tables_ensured = False
-
-
-def _ensure_tables() -> None:
-    global _tables_ensured
-    if _tables_ensured:
-        return
-    try:
-        db = get_database()
-        db.executescript(db_schema.CONTEXT_ENTRIES_SCHEMA)
-        db.executescript(
-            "CREATE INDEX IF NOT EXISTS idx_context_entries_ts ON context_entries(timestamp DESC);\n"
-            "CREATE INDEX IF NOT EXISTS idx_context_entries_ns ON context_entries(namespace);\n"
-        )
-        _tables_ensured = True
-    except Exception as e:
-        logger.warning("Failed to ensure context_entries table: %s", e)
 
 
 class ContextBus:
@@ -100,31 +78,23 @@ class ContextBus:
                     return
         with self._lock:
             try:
-                _ensure_tables()
-                db = get_database()
+                from .repositories import get_context_bus_repo
+
+                repo = get_context_bus_repo()
+                repo.ensure_tables()
                 timestamp_ms = int(entry.timestamp * 1000)
-                db.execute(
-                    """INSERT INTO context_entries
-                       (source, category, summary, details, timestamp, namespace, resources)
-                       VALUES (?, ?, ?, ?, ?, ?, ?)""",
-                    (
-                        entry.source,
-                        entry.category,
-                        entry.summary,
-                        json.dumps(entry.details),
-                        timestamp_ms,
-                        entry.namespace,
-                        json.dumps(entry.resources),
-                    ),
+                repo.insert_entry(
+                    entry.source,
+                    entry.category,
+                    entry.summary,
+                    json.dumps(entry.details),
+                    timestamp_ms,
+                    entry.namespace,
+                    json.dumps(entry.resources),
                 )
                 # Prune old entries beyond max_entries (same connection, single commit)
-                db.execute(
-                    """DELETE FROM context_entries WHERE id NOT IN (
-                       SELECT id FROM context_entries ORDER BY id DESC LIMIT ?
-                    )""",
-                    (self._max_entries,),
-                )
-                db.commit()
+                repo.prune_old_entries(self._max_entries)
+                repo.commit()
             except Exception as e:
                 logger.warning("Failed to publish context entry: %s", e)
 
@@ -132,8 +102,10 @@ class ContextBus:
         """Get recent context entries, optionally filtered."""
         with self._lock:
             try:
-                _ensure_tables()
-                db = get_database()
+                from .repositories import get_context_bus_repo
+
+                repo = get_context_bus_repo()
+                repo.ensure_tables()
                 now_ms = int(time.time() * 1000)
                 cutoff_ms = now_ms - self._ttl * 1000
 
@@ -148,10 +120,7 @@ class ContextBus:
                     params.append(category)
 
                 where = " AND ".join(where_parts)
-                rows = db.fetchall(
-                    f"SELECT * FROM context_entries WHERE {where} ORDER BY timestamp DESC LIMIT ?",
-                    tuple(params + [limit]),
-                )
+                rows = repo.fetch_entries(where, tuple(params), limit)
 
                 entries = []
                 for r in rows:

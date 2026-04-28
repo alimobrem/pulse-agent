@@ -34,13 +34,13 @@ from tests.conftest import _TEST_DB_URL
 @pytest.fixture(autouse=True)
 def _use_temp_db(monkeypatch):
     """Use a temp database for each test."""
-    import sre_agent.context_bus as _cb
     import sre_agent.monitor as _mon
+    from sre_agent.repositories.context_bus_repo import ContextBusRepository, get_context_bus_repo
 
     db = Database(_TEST_DB_URL)
     set_database(db)
     _mon.findings._tables_ensured = False
-    _cb._tables_ensured = False
+    ContextBusRepository._tables_ensured = False
     for table in (
         "actions",
         "investigations",
@@ -57,13 +57,13 @@ def _use_temp_db(monkeypatch):
             pass
     db.commit()
     _mon.findings._tables_ensured = False
-    _cb._tables_ensured = False
+    ContextBusRepository._tables_ensured = False
     _mon._ensure_tables()
-    _cb._ensure_tables()
+    get_context_bus_repo().ensure_tables()
     yield
     reset_database()
     _mon.findings._tables_ensured = False
-    _cb._tables_ensured = False
+    ContextBusRepository._tables_ensured = False
 
 
 def _list_result(items):

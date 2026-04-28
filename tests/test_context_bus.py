@@ -5,9 +5,9 @@ import time
 
 import pytest
 
-import sre_agent.context_bus as _cb
 from sre_agent.context_bus import ContextBus, ContextEntry, get_context_bus
 from sre_agent.db import Database, reset_database, set_database
+from sre_agent.repositories.context_bus_repo import ContextBusRepository, get_context_bus_repo
 
 
 @pytest.fixture(autouse=True)
@@ -17,8 +17,8 @@ def _use_temp_db(tmp_path):
 
     db = Database(_TEST_DB_URL)
     set_database(db)
-    _cb._tables_ensured = False
-    _cb._ensure_tables()
+    ContextBusRepository._tables_ensured = False
+    get_context_bus_repo().ensure_tables()
     for table in ("context_entries",):
         try:
             db.execute(f"TRUNCATE {table} RESTART IDENTITY CASCADE")
@@ -27,7 +27,7 @@ def _use_temp_db(tmp_path):
     db.commit()
     yield
     reset_database()
-    _cb._tables_ensured = False
+    ContextBusRepository._tables_ensured = False
 
 
 class TestContextBusPublishAndRetrieve:

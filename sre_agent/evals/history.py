@@ -29,30 +29,22 @@ def record_eval_run(
 ) -> None:
     """Record an eval run to the database. Fire-and-forget."""
     try:
-        from ..db import get_database
+        from ..repositories import get_eval_repo
 
-        db = get_database()
-        db.execute(
-            "INSERT INTO eval_runs "
-            "(suite_name, source, model, scenario_count, passed_count, gate_passed, "
-            "average_overall, dimensions, blocker_counts, scenarios, prompt_audit, judge_avg) "
-            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
-            (
-                suite_name,
-                source,
-                model,
-                scenario_count,
-                passed_count,
-                gate_passed,
-                average_overall,
-                json.dumps(dimensions) if dimensions else None,
-                json.dumps(blocker_counts) if blocker_counts else None,
-                json.dumps(scenarios) if scenarios else None,
-                json.dumps(prompt_audit) if prompt_audit else None,
-                judge_avg,
-            ),
+        get_eval_repo().record_run(
+            suite_name=suite_name,
+            source=source,
+            model=model,
+            scenario_count=scenario_count,
+            passed_count=passed_count,
+            gate_passed=gate_passed,
+            average_overall=average_overall,
+            dimensions_json=json.dumps(dimensions) if dimensions else None,
+            blocker_counts_json=json.dumps(blocker_counts) if blocker_counts else None,
+            scenarios_json=json.dumps(scenarios) if scenarios else None,
+            prompt_audit_json=json.dumps(prompt_audit) if prompt_audit else None,
+            judge_avg=judge_avg,
         )
-        db.commit()
     except Exception:
         logger.debug("Failed to record eval run: %s", suite_name, exc_info=True)
 
@@ -65,9 +57,8 @@ def get_eval_history(
 ) -> list[dict]:
     """Query eval run history for trend display."""
     try:
-        from ..db import get_database
+        from ..repositories import get_eval_repo
 
-        db = get_database()
         where_parts: list[str] = ["timestamp > NOW() - INTERVAL '1 day' * %s"]
         params: list = [days]
 
@@ -77,14 +68,7 @@ def get_eval_history(
 
         where = "WHERE " + " AND ".join(where_parts)
 
-        rows = db.fetchall(
-            f"SELECT id, timestamp, suite_name, source, model, scenario_count, "
-            f"passed_count, gate_passed, average_overall, dimensions, "
-            f"blocker_counts, judge_avg "
-            f"FROM eval_runs {where} "
-            f"ORDER BY timestamp DESC LIMIT %s",
-            tuple(params + [limit]),
-        )
+        rows = get_eval_repo().fetch_history(where, tuple(params), limit)
 
         results = []
         for row in rows:
@@ -116,16 +100,9 @@ def get_eval_trend(
 ) -> dict:
     """Get trend summary for a suite — latest score, previous score, delta."""
     try:
-        from ..db import get_database
+        from ..repositories import get_eval_repo
 
-        db = get_database()
-        rows = db.fetchall(
-            "SELECT timestamp, average_overall, gate_passed, judge_avg "
-            "FROM eval_runs "
-            "WHERE suite_name = %s AND timestamp > NOW() - INTERVAL '1 day' * %s "
-            "ORDER BY timestamp DESC LIMIT 50",
-            (suite_name, days),
-        )
+        rows = get_eval_repo().fetch_trend(suite_name, days)
         if not rows:
             return {"suite": suite_name, "runs": 0}
 

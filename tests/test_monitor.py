@@ -34,8 +34,8 @@ from tests.conftest import _TEST_DB_URL
 @pytest.fixture(autouse=True)
 def _use_temp_db(monkeypatch, tmp_path):
     """Use a temp database for each test."""
-    import sre_agent.context_bus as _cb
     import sre_agent.monitor as _mon
+    from sre_agent.repositories.context_bus_repo import ContextBusRepository, get_context_bus_repo
     from tests.conftest import _TEST_DB_URL
 
     db = Database(_TEST_DB_URL)
@@ -43,7 +43,7 @@ def _use_temp_db(monkeypatch, tmp_path):
     # Reset table-creation flags so each test creates tables fresh
     _mon.findings._tables_ensured = False
     MonitorRepository._tables_ensured = False
-    _cb._tables_ensured = False
+    ContextBusRepository._tables_ensured = False
     # Ensure tables exist then truncate for isolation
     # Drop and recreate tables to pick up schema changes
     for table in (
@@ -63,15 +63,15 @@ def _use_temp_db(monkeypatch, tmp_path):
     db.commit()
     _mon.findings._tables_ensured = False
     MonitorRepository._tables_ensured = False
-    _cb._tables_ensured = False
+    ContextBusRepository._tables_ensured = False
     _mon._ensure_tables()
-    _cb._ensure_tables()
+    get_context_bus_repo().ensure_tables()
     yield
     reset_database()
     reset_cluster_monitor()
     _mon.findings._tables_ensured = False
     MonitorRepository._tables_ensured = False
-    _cb._tables_ensured = False
+    ContextBusRepository._tables_ensured = False
 
 
 class TestMakeHelpers:

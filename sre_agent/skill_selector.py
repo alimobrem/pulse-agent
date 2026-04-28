@@ -72,19 +72,15 @@ def _build_temporal_signal(cache_ttl: int = 60) -> TemporalSignal:
     active_incidents = 0
 
     try:
-        from .db import get_database
+        from .repositories import get_skill_analytics_repo
 
-        db = get_database()
-        row = db.fetchone(
-            "SELECT COUNT(*) as cnt FROM findings "
-            "WHERE category = 'audit_deployment' "
-            "AND timestamp > EXTRACT(EPOCH FROM NOW() - INTERVAL '30 minutes')::BIGINT * 1000"
-        )
+        repo = get_skill_analytics_repo()
+        row = repo.fetch_recent_deploy_count()
         deploy_count = row["cnt"] if row else 0
         if deploy_count > 0:
             recent_deploys = [{"count": deploy_count}]
 
-        inc_row = db.fetchone("SELECT COUNT(*) as cnt FROM findings WHERE resolved = 0 AND category NOT LIKE 'audit_%'")
+        inc_row = repo.fetch_active_incident_count()
         active_incidents = inc_row["cnt"] if inc_row else 0
     except Exception:
         logger.debug("Temporal signal: data source unavailable", exc_info=True)
@@ -518,19 +514,10 @@ class SkillSelector:
             return self._match_historical_tokens(query)
 
         try:
-            from .db import get_database
-
-            db = get_database()
+            from .repositories import get_skill_analytics_repo
 
             # Build token→skill frequency map from recent successful skill_usage
-            rows = db.fetchall(
-                "SELECT skill_name, query_summary "
-                "FROM skill_usage "
-                "WHERE (feedback IS NULL OR feedback != 'negative') "
-                "AND timestamp > NOW() - INTERVAL '7 days' "
-                "ORDER BY timestamp DESC "
-                "LIMIT 200"
-            )
+            rows = get_skill_analytics_repo().fetch_recent_skill_queries(7, 200)
             if not rows:
                 return {}
 
@@ -706,17 +693,9 @@ class SkillSelector:
         Returns None if insufficient data (<5 invocations).
         """
         try:
-            from .db import get_database
+            from .repositories import get_skill_analytics_repo
 
-            db = get_database()
-            row = db.fetchone(
-                "SELECT COUNT(*) FILTER (WHERE feedback IS NULL OR feedback != 'negative') AS good, "
-                "COUNT(*) AS total "
-                "FROM skill_usage "
-                "WHERE skill_name = %s "
-                "AND timestamp > NOW() - INTERVAL '30 days'",
-                (skill_name,),
-            )
+            row = get_skill_analytics_repo().fetch_skill_success_rate(skill_name)
             if not row or row["total"] < 5:
                 return None
             return row["good"] / max(row["total"], 1)
@@ -787,9 +766,7 @@ def record_selection_outcome(
     try:
         import json
 
-        from .db import get_database
-
-        db = get_database()
+        from .repositories import get_skill_analytics_repo
 
         # Detect missed retrievals
         missing = []
@@ -797,26 +774,18 @@ def record_selection_outcome(
             offered_set = set(tools_offered)
             missing = [t for t in tools_called if t not in offered_set]
 
-        db.execute(
-            "INSERT INTO skill_selection_log "
-            "(session_id, query_summary, channel_scores, fused_scores, selected_skill, "
-            "threshold_used, conflicts_detected, skill_overridden, tools_requested_missing, "
-            "selection_ms, channel_weights) "
-            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
-            (
-                session_id,
-                query_summary[:200],
-                json.dumps(result.channel_scores),
-                json.dumps(result.fused_scores),
-                result.skill_name,
-                result.threshold_used,
-                json.dumps(result.conflicts) if result.conflicts else None,
-                skill_overridden,
-                missing or None,
-                result.selection_ms,
-                json.dumps(DEFAULT_WEIGHTS),
-            ),
+        get_skill_analytics_repo().record_selection_outcome(
+            session_id=session_id,
+            query_summary=query_summary,
+            channel_scores_json=json.dumps(result.channel_scores),
+            fused_scores_json=json.dumps(result.fused_scores),
+            selected_skill=result.skill_name,
+            threshold_used=result.threshold_used,
+            conflicts_json=json.dumps(result.conflicts) if result.conflicts else None,
+            skill_overridden=skill_overridden,
+            tools_requested_missing=missing or None,
+            selection_ms=result.selection_ms,
+            channel_weights_json=json.dumps(DEFAULT_WEIGHTS),
         )
-        db.commit()
     except Exception:
         logger.debug("Failed to record selection outcome", exc_info=True)

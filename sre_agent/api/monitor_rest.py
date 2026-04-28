@@ -26,13 +26,12 @@ async def rest_briefing(hours: int = Query(12, ge=1, le=72), _auth=Depends(verif
 
 def _compute_kpi_dashboard_sync(days: int) -> dict:
     """Sync helper for KPI computation — runs off the event loop via to_thread."""
-    from .. import db
+    from ..repositories import get_monitor_repo
 
+    repo = get_monitor_repo()
     kpis: dict[str, dict] = {}
 
     try:
-        database = db.get_database()
-
         # 1. MTTD — Mean Time to Detect (scan interval proxy)
         from ..config import get_settings
 
@@ -45,12 +44,7 @@ def _compute_kpi_dashboard_sync(days: int) -> dict:
         }
 
         # 2. MTTR — Mean Time to Remediate
-        mttr_row = database.fetchone(
-            "SELECT AVG(duration_ms) as avg_ms FROM actions "
-            "WHERE status = 'completed' "
-            "AND timestamp >= EXTRACT(EPOCH FROM NOW() - INTERVAL '1 day' * ?)::BIGINT * 1000",
-            (days,),
-        )
+        mttr_row = repo.fetch_mttr(days)
         mttr_seconds = int((mttr_row["avg_ms"] or 0) / 1000) if mttr_row else 0
         has_remediations = mttr_row and mttr_row["avg_ms"] is not None
         kpis["mttr"] = {
@@ -68,12 +62,7 @@ def _compute_kpi_dashboard_sync(days: int) -> dict:
         }
 
         # 3. Auto-remediation success rate
-        fix_row = database.fetchone(
-            "SELECT COUNT(*) FILTER (WHERE status = 'completed') AS good, "
-            "COUNT(*) AS total FROM actions "
-            "WHERE timestamp >= EXTRACT(EPOCH FROM NOW() - INTERVAL '1 day' * ?)::BIGINT * 1000",
-            (days,),
-        )
+        fix_row = repo.fetch_fix_rate(days)
         fix_total = fix_row["total"] if fix_row else 0
         fix_rate = round(fix_row["good"] / max(fix_total, 1), 3) if fix_row else 0
         kpis["auto_fix_success"] = {
@@ -92,12 +81,7 @@ def _compute_kpi_dashboard_sync(days: int) -> dict:
         }
 
         # 4. False positive rate (noise)
-        noise_row = database.fetchone(
-            "SELECT COUNT(*) FILTER (WHERE noise_score > 0.7) AS noise, "
-            "COUNT(*) AS total FROM findings "
-            "WHERE timestamp >= EXTRACT(EPOCH FROM NOW() - INTERVAL '1 day' * ?)::BIGINT * 1000",
-            (days,),
-        )
+        noise_row = repo.fetch_false_positive_rate(days)
         fp_rate = round(noise_row["noise"] / max(noise_row["total"], 1), 3) if noise_row else 0
         kpis["false_positive_rate"] = {
             "label": "False Positive Rate",
@@ -108,13 +92,7 @@ def _compute_kpi_dashboard_sync(days: int) -> dict:
         }
 
         # 5. Selector recall@5 (from latest eval or selection log)
-        selector_row = database.fetchone(
-            "SELECT COUNT(*) FILTER (WHERE skill_overridden IS NULL) AS correct, "
-            "COUNT(*) AS total FROM skill_selection_log "
-            "WHERE session_id != '__weight_snapshot__' "
-            "AND timestamp > NOW() - INTERVAL '%s days'",
-            (days,),
-        )
+        selector_row = repo.fetch_selector_recall(days)
         recall = round(selector_row["correct"] / max(selector_row["total"], 1), 3) if selector_row else 0
         kpis["selector_recall"] = {
             "label": "Selector Recall",
@@ -125,13 +103,7 @@ def _compute_kpi_dashboard_sync(days: int) -> dict:
         }
 
         # 6. Selector latency p99
-        latency_row = database.fetchone(
-            "SELECT PERCENTILE_CONT(0.99) WITHIN GROUP (ORDER BY selection_ms) AS p99 "
-            "FROM skill_selection_log "
-            "WHERE session_id != '__weight_snapshot__' "
-            "AND timestamp > NOW() - INTERVAL '%s days'",
-            (days,),
-        )
+        latency_row = repo.fetch_selector_latency_p99(days)
         p99_ms = int(latency_row["p99"] or 0) if latency_row else 0
         kpis["selector_latency_p99"] = {
             "label": "Selector Latency p99",
@@ -142,11 +114,7 @@ def _compute_kpi_dashboard_sync(days: int) -> dict:
         }
 
         # 7. Agent-caused incidents (actions with status='rolled_back')
-        rollback_row = database.fetchone(
-            "SELECT COUNT(*) as cnt FROM actions WHERE status = 'rolled_back' "
-            "AND timestamp >= EXTRACT(EPOCH FROM NOW() - INTERVAL '1 day' * ?)::BIGINT * 1000",
-            (days,),
-        )
+        rollback_row = repo.fetch_rollback_count(days)
         agent_incidents = rollback_row["cnt"] if rollback_row else 0
         kpis["agent_caused_incidents"] = {
             "label": "Agent-Caused Incidents",
@@ -157,14 +125,7 @@ def _compute_kpi_dashboard_sync(days: int) -> dict:
         }
 
         # 8. Time-to-Resolution (finding detected → verified fixed)
-        ttr_row = database.fetchone(
-            "SELECT AVG(a.timestamp - f.timestamp) / 1000 as avg_seconds "
-            "FROM actions a JOIN findings f ON a.finding_id = f.id "
-            "WHERE a.status = 'completed' "
-            "AND a.verification_status = 'verified' "
-            "AND a.timestamp >= EXTRACT(EPOCH FROM NOW() - INTERVAL '1 day' * %s)::BIGINT * 1000",
-            (days,),
-        )
+        ttr_row = repo.fetch_time_to_resolution(days)
         ttr_seconds = int(ttr_row["avg_seconds"] or 0) if ttr_row else 0
         kpis["time_to_resolution"] = {
             "label": "Time to Resolution",
@@ -176,14 +137,7 @@ def _compute_kpi_dashboard_sync(days: int) -> dict:
         }
 
         # 9. Self-heal rate (findings that resolved without any action)
-        self_heal_row = database.fetchone(
-            "SELECT "
-            "COUNT(*) FILTER (WHERE resolved = 1 AND id NOT IN (SELECT finding_id FROM actions WHERE finding_id IS NOT NULL)) AS self_healed, "
-            "COUNT(*) FILTER (WHERE resolved = 1) AS total_resolved "
-            "FROM findings "
-            "WHERE timestamp >= EXTRACT(EPOCH FROM NOW() - INTERVAL '1 day' * %s)::BIGINT * 1000",
-            (days,),
-        )
+        self_heal_row = repo.fetch_self_heal_rate(days)
         self_heal_rate = (
             round((self_heal_row["self_healed"] or 0) / max(self_heal_row["total_resolved"] or 1, 1), 3)
             if self_heal_row
@@ -199,18 +153,7 @@ def _compute_kpi_dashboard_sync(days: int) -> dict:
         }
 
         # 10. Token cost per resolution
-        token_cost_row = database.fetchone(
-            "SELECT AVG(total_tokens) as avg_tokens FROM ("
-            "  SELECT pe.finding_id, "
-            "  SUM(COALESCE((phase->>'evidence_length')::int, 0)) as total_tokens "
-            "  FROM plan_executions pe, jsonb_array_elements(pe.phase_details) as phase "
-            "  WHERE pe.status IN ('complete', 'partial') "
-            "  AND pe.timestamp > NOW() - INTERVAL '%s days' "
-            "  AND pe.finding_id IS NOT NULL AND pe.finding_id != '' "
-            "  GROUP BY pe.finding_id"
-            ") sub",
-            (days,),
-        )
+        token_cost_row = repo.fetch_token_cost_per_resolution(days)
         avg_tokens = int(token_cost_row["avg_tokens"] or 0) if token_cost_row else 0
         kpis["tokens_per_resolution"] = {
             "label": "Evidence per Resolution",
@@ -222,15 +165,7 @@ def _compute_kpi_dashboard_sync(days: int) -> dict:
         }
 
         # 11. Routing accuracy (% of routing decisions not overridden by user)
-        override_row = database.fetchone(
-            "SELECT "
-            "COUNT(*) FILTER (WHERE routing_skill IS NOT NULL AND feedback = 'positive') AS confirmed, "
-            "COUNT(*) FILTER (WHERE routing_skill IS NOT NULL AND feedback = 'negative') AS rejected, "
-            "COUNT(*) FILTER (WHERE routing_skill IS NOT NULL) AS total "
-            "FROM tool_turns "
-            "WHERE timestamp > NOW() - INTERVAL '%s days'",
-            (days,),
-        )
+        override_row = repo.fetch_routing_accuracy(days)
         if override_row and (override_row["total"] or 0) > 0:
             routing_accuracy = round(
                 (override_row["total"] - (override_row["rejected"] or 0)) / override_row["total"], 3
@@ -282,16 +217,9 @@ async def list_postmortems(
 ):
     """List auto-generated postmortems, newest first."""
     try:
-        from .. import db
+        from ..repositories import get_monitor_repo
 
-        database = db.get_database()
-        rows = database.fetchall(
-            "SELECT id, incident_type, plan_id, timeline, root_cause, "
-            "contributing_factors, blast_radius, actions_taken, prevention, "
-            "metrics_impact, confidence, generated_at "
-            "FROM postmortems ORDER BY generated_at DESC LIMIT ?",
-            (limit,),
-        )
+        rows = get_monitor_repo().fetch_postmortems(limit)
 
         results = []
         for row in rows:
@@ -410,15 +338,9 @@ async def fix_strategy_effectiveness(
 ):
     """Which fix strategies work for which root causes."""
     try:
-        from .. import db
+        from ..repositories import get_monitor_repo
 
-        database = db.get_database()
-        rows = database.fetchall(
-            "SELECT category, tool, status, verification_status "
-            "FROM actions "
-            "WHERE timestamp >= EXTRACT(EPOCH FROM NOW() - INTERVAL '1 day' * ?)::BIGINT * 1000",
-            (days,),
-        )
+        rows = get_monitor_repo().fetch_fix_strategies(days)
 
         strategies: dict[str, dict] = {}
         for r in rows:
@@ -460,16 +382,12 @@ async def agent_learning_feed(
     events: list[dict] = []
 
     try:
-        from .. import db
+        from ..repositories import get_monitor_repo
 
-        database = db.get_database()
+        repo = get_monitor_repo()
 
         # Weight snapshots
-        weight_rows = database.fetchall(
-            "SELECT channel_weights, timestamp FROM skill_selection_log "
-            "WHERE session_id = '__weight_snapshot__' "
-            "ORDER BY timestamp DESC LIMIT 5"
-        )
+        weight_rows = repo.fetch_weight_snapshots(5)
         for r in weight_rows:
             events.append(
                 {
@@ -481,14 +399,7 @@ async def agent_learning_feed(
             )
 
         # Recent routing decisions (show WHY queries were routed)
-        routing_rows = database.fetchall(
-            "SELECT query_summary, selected_skill, channel_scores, fused_scores "
-            "FROM skill_selection_log "
-            "WHERE session_id != '__weight_snapshot__' "
-            "AND timestamp > NOW() - INTERVAL '%s days' "
-            "ORDER BY timestamp DESC LIMIT 5",
-            (days,),
-        )
+        routing_rows = repo.fetch_recent_routing_decisions(days, 5)
         for r in routing_rows:
             try:
                 ch = (
@@ -514,14 +425,7 @@ async def agent_learning_feed(
                 logger.debug("Failed to parse routing decision for learning feed", exc_info=True)
 
         # Selection stats
-        sel_row = database.fetchone(
-            "SELECT COUNT(*) as total, "
-            "COUNT(DISTINCT selected_skill) as skills_used, "
-            "SUM(CASE WHEN skill_overridden IS NOT NULL THEN 1 ELSE 0 END) as overrides "
-            "FROM skill_selection_log "
-            "WHERE timestamp > NOW() - INTERVAL '%s days'",
-            (days,),
-        )
+        sel_row = repo.fetch_selection_summary(days)
         if sel_row and sel_row["total"] > 0:
             events.append(
                 {
@@ -532,11 +436,7 @@ async def agent_learning_feed(
             )
 
         # Postmortem count
-        pm_row = database.fetchone(
-            "SELECT COUNT(*) as cnt FROM postmortems "
-            "WHERE generated_at > EXTRACT(EPOCH FROM NOW() - INTERVAL '%s days')::BIGINT * 1000",
-            (days,),
-        )
+        pm_row = repo.fetch_postmortem_count(days)
         if pm_row and pm_row["cnt"] > 0:
             events.append(
                 {
@@ -738,38 +638,15 @@ async def plan_analytics(
 ):
     """Plan execution analytics — template usage, phase success rates, durations."""
     try:
-        from ..db import get_database
+        from ..repositories import get_monitor_repo
 
-        db = get_database()
+        repo = get_monitor_repo()
 
         # Overall stats
-        rows = db.fetchall(
-            "SELECT template_name, incident_type, status, "
-            "COUNT(*) as count, "
-            "AVG(total_duration_ms) as avg_duration_ms, "
-            "AVG(phases_completed::float / NULLIF(phases_total, 0)) as avg_completion_rate, "
-            "AVG(confidence) as avg_confidence "
-            "FROM plan_executions "
-            "WHERE timestamp > NOW() - INTERVAL '%s days' "
-            "GROUP BY template_name, incident_type, status "
-            "ORDER BY count DESC",
-            (days,),
-        )
+        rows = repo.fetch_plan_stats(days)
 
         # Phase-level breakdown
-        phase_rows = db.fetchall(
-            "SELECT "
-            "template_name, "
-            "phase->>'phase_id' as phase_id, "
-            "phase->>'status' as phase_status, "
-            "COUNT(*) as count, "
-            "AVG((phase->>'confidence')::float) as avg_confidence "
-            "FROM plan_executions, jsonb_array_elements(phase_details) as phase "
-            "WHERE timestamp > NOW() - INTERVAL '%s days' "
-            "GROUP BY template_name, phase->>'phase_id', phase->>'status' "
-            "ORDER BY template_name, phase_id",
-            (days,),
-        )
+        phase_rows = repo.fetch_plan_phase_stats(days)
 
         # Build response
         by_template: dict[str, Any] = {}
@@ -819,24 +696,12 @@ async def plan_analytics(
         return {"templates": [], "total_executions": 0, "days": days}
 
 
-def _build_activity_events(database, days: int = 7) -> list[dict]:
+def _build_activity_events(repo, days: int = 7) -> list[dict]:
     """Aggregate recent agent activity into plain-English events."""
     try:
         events: list[dict] = []
 
-        actions = database.fetchall(
-            "SELECT "
-            "COALESCE(category, 'unknown') as category, "
-            "COALESCE(namespace, '') as namespace, "
-            "COUNT(*) as cnt, "
-            "status "
-            "FROM actions "
-            "WHERE timestamp >= EXTRACT(EPOCH FROM NOW() - INTERVAL '1 day' * %s)::BIGINT * 1000 "
-            "AND status IN ('completed', 'failed', 'rolled_back') "
-            "GROUP BY category, namespace, status "
-            "ORDER BY cnt DESC",
-            (days,),
-        )
+        actions = repo.fetch_activity_actions(days)
         for row in actions or []:
             cat = row["category"].replace("_", " ")
             ns = row["namespace"] or "cluster-wide"
@@ -853,13 +718,7 @@ def _build_activity_events(database, days: int = 7) -> list[dict]:
                 }
             )
 
-        healed = database.fetchall(
-            "SELECT COUNT(*) as cnt FROM findings "
-            "WHERE resolved = 1 "
-            "AND id NOT IN (SELECT finding_id FROM actions WHERE finding_id IS NOT NULL) "
-            "AND timestamp >= EXTRACT(EPOCH FROM NOW() - INTERVAL '1 day' * %s)::BIGINT * 1000",
-            (days,),
-        )
+        healed = repo.fetch_self_healed_count(days)
         healed_count = healed[0]["cnt"] if healed and healed[0]["cnt"] else 0
         if healed_count > 0:
             events.append(
@@ -871,13 +730,7 @@ def _build_activity_events(database, days: int = 7) -> list[dict]:
                 }
             )
 
-        postmortems = database.fetchall(
-            "SELECT COUNT(*) as cnt, "
-            "MAX(summary) as latest_summary "
-            "FROM postmortems "
-            "WHERE created_at >= NOW() - INTERVAL '%s days'",
-            (days,),
-        )
+        postmortems = repo.fetch_postmortem_activity(days)
         pm_count = postmortems[0]["cnt"] if postmortems and postmortems[0]["cnt"] else 0
         if pm_count > 0:
             summary = postmortems[0].get("latest_summary", "")
@@ -893,16 +746,7 @@ def _build_activity_events(database, days: int = 7) -> list[dict]:
                 }
             )
 
-        investigations = database.fetchall(
-            "SELECT finding_type, target, COUNT(*) as cnt "
-            "FROM findings "
-            "WHERE investigated = 1 "
-            "AND timestamp >= EXTRACT(EPOCH FROM NOW() - INTERVAL '1 day' * %s)::BIGINT * 1000 "
-            "GROUP BY finding_type, target "
-            "ORDER BY cnt DESC "
-            "LIMIT 5",
-            (days,),
-        )
+        investigations = repo.fetch_investigated_findings(days, 5)
         for row in investigations or []:
             ft = (row["finding_type"] or "issue").replace("_", " ")
             target = row["target"] or ""
@@ -927,11 +771,11 @@ def _build_activity_events(database, days: int = 7) -> list[dict]:
 
 def _get_agent_activity_sync(days: int) -> dict:
     """Sync helper for activity endpoint."""
-    from .. import db
+    from ..repositories import get_monitor_repo
 
     try:
-        database = db.get_database()
-        events = _build_activity_events(database, days)
+        repo = get_monitor_repo()
+        events = _build_activity_events(repo, days)
         return {"events": events, "period_days": days}
     except Exception:
         return {"events": [], "period_days": days}

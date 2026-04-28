@@ -41,22 +41,9 @@ def _compute_confidence_calibration(days: int) -> dict:
         dict with brier_score, accuracy_pct, rating, total_predictions, buckets[]
     """
     try:
-        from .. import db
+        from ..repositories import get_analytics_repo
 
-        database = db.get_database()
-        cutoff_sql = "EXTRACT(EPOCH FROM NOW() - INTERVAL '1 day' * ?) * 1000"
-
-        # Query investigations joined with actions to get confidence + verification pairs
-        query = f"""
-            SELECT i.confidence, a.verification_status
-            FROM investigations i
-            INNER JOIN actions a ON a.finding_id = i.finding_id
-            WHERE i.confidence IS NOT NULL
-              AND a.verification_status IS NOT NULL
-              AND a.timestamp > {cutoff_sql}
-        """
-
-        rows = database.fetchall(query, (days,))
+        rows = get_analytics_repo().fetch_confidence_pairs(days)
 
         if len(rows) < 5:
             return {
@@ -162,21 +149,9 @@ def _compute_accuracy_stats(days: int) -> dict:
         memory_stats = memory_store.get_accuracy_stats(days)
 
         # Get override rate from tool_usage table (PostgreSQL)
-        from .. import db
+        from ..repositories import get_analytics_repo
 
-        database = db.get_database()
-        cutoff_sql = "EXTRACT(EPOCH FROM NOW() - INTERVAL '1 day' * ?) * 1000"
-
-        # Query for confirmation-required actions
-        override_query = f"""
-            SELECT
-                COUNT(*) FILTER (WHERE requires_confirmation = TRUE) as total_proposed,
-                COUNT(*) FILTER (WHERE requires_confirmation = TRUE AND was_confirmed = FALSE) as rejected_actions
-            FROM tool_usage
-            WHERE timestamp > TO_TIMESTAMP({cutoff_sql})
-        """
-
-        override_row = database.fetchone(override_query, (days,))
+        override_row = get_analytics_repo().fetch_override_rate(days)
 
         total_proposed = override_row["total_proposed"] if override_row else 0
         rejected_actions = override_row["rejected_actions"] if override_row else 0
@@ -245,22 +220,12 @@ def _compute_cost_stats(days: int) -> dict:
         )
 
     try:
-        from .. import db
+        from ..repositories import get_analytics_repo
 
-        database = db.get_database()
-        interval_sql = "NOW() - INTERVAL '1 day' * ?"
+        repo = get_analytics_repo()
 
         # Current period token totals (split by type for cost calculation)
-        totals_row = database.fetchone(
-            f"SELECT "
-            f"  COALESCE(SUM(input_tokens), 0) AS total_input, "
-            f"  COALESCE(SUM(output_tokens), 0) AS total_output, "
-            f"  COALESCE(SUM(cache_read_tokens), 0) AS total_cache_read, "
-            f"  COALESCE(SUM(cache_creation_tokens), 0) AS total_cache_write, "
-            f"  COUNT(DISTINCT session_id) AS total_incidents "
-            f"FROM tool_turns WHERE timestamp > {interval_sql} AND input_tokens IS NOT NULL",
-            (days,),
-        )
+        totals_row = repo.fetch_token_totals(days)
 
         if not totals_row or totals_row["total_incidents"] == 0:
             return {
@@ -288,14 +253,7 @@ def _compute_cost_stats(days: int) -> dict:
         current_avg = total_tokens / total_incidents if total_incidents > 0 else 0
 
         # Previous period for trend
-        prev_row = database.fetchone(
-            f"SELECT "
-            f"  COALESCE(SUM(input_tokens + output_tokens), 0) AS total_tokens, "
-            f"  COUNT(DISTINCT session_id) AS total_incidents "
-            f"FROM tool_turns "
-            f"WHERE timestamp > {interval_sql} AND timestamp <= {interval_sql} AND input_tokens IS NOT NULL",
-            (days * 2, days),
-        )
+        prev_row = repo.fetch_prev_period_tokens(days)
         prev_tokens = int(prev_row["total_tokens"]) if prev_row else 0
         prev_incidents = int(prev_row["total_incidents"]) if prev_row else 0
         previous_avg = prev_tokens / prev_incidents if prev_incidents > 0 else 0
@@ -303,16 +261,7 @@ def _compute_cost_stats(days: int) -> dict:
         delta_pct = round((current_avg - previous_avg) / previous_avg * 100, 1) if previous_avg > 0 else 0.0
 
         # By-mode breakdown
-        by_mode_rows = database.fetchall(
-            f"SELECT agent_mode, "
-            f"  COUNT(DISTINCT session_id) AS incident_count, "
-            f"  COALESCE(SUM(input_tokens), 0) AS input_tokens, "
-            f"  COALESCE(SUM(output_tokens), 0) AS output_tokens, "
-            f"  COALESCE(SUM(input_tokens + output_tokens), 0) AS total_tokens "
-            f"FROM tool_turns WHERE timestamp > {interval_sql} AND input_tokens IS NOT NULL "
-            f"GROUP BY agent_mode ORDER BY total_tokens DESC",
-            (days,),
-        )
+        by_mode_rows = repo.fetch_tokens_by_mode(days)
 
         by_mode = [
             {
@@ -512,15 +461,11 @@ def _compute_recommendations() -> dict:
 
     # Type 2: Check for unused tool capabilities
     try:
-        from .. import db
+        from ..repositories import get_analytics_repo
 
-        database = db.get_database()
+        repo = get_analytics_repo()
         # Check if git tools unused
-        git_usage = database.fetchone(
-            "SELECT COUNT(*) AS cnt FROM tool_usage "
-            "WHERE tool_name LIKE '%%git%%' "
-            "AND timestamp > EXTRACT(EPOCH FROM NOW() - INTERVAL '30 days') * 1000"
-        )
+        git_usage = repo.fetch_tool_usage_by_pattern("%%git%%")
         if git_usage and git_usage["cnt"] == 0:
             recommendations.append(
                 {
@@ -531,11 +476,7 @@ def _compute_recommendations() -> dict:
                 }
             )
         # Check if predict tools unused
-        predict_usage = database.fetchone(
-            "SELECT COUNT(*) AS cnt FROM tool_usage "
-            "WHERE tool_name LIKE '%%predict%%' "
-            "AND timestamp > EXTRACT(EPOCH FROM NOW() - INTERVAL '30 days') * 1000"
-        )
+        predict_usage = repo.fetch_tool_usage_by_pattern("%%predict%%")
         if predict_usage and predict_usage["cnt"] == 0:
             recommendations.append(
                 {
@@ -558,8 +499,6 @@ async def record_user_events(request: Request, _auth=Depends(verify_token)):
     """Record a batch of user session events. Fire-and-forget."""
     import json
 
-    from ..db import get_database
-
     try:
         body = await request.json()
         events = body.get("events", [])
@@ -567,20 +506,19 @@ async def record_user_events(request: Request, _auth=Depends(verify_token)):
             return {"status": "ok", "recorded": 0}
 
         user_id = request.headers.get("x-forwarded-user", "")
-        db = get_database()
+        from ..repositories import get_analytics_repo
+
+        repo = get_analytics_repo()
 
         for event in events[:50]:  # cap at 50 per batch
-            db.execute(
-                "INSERT INTO user_events (session_id, user_id, event_type, page, data) VALUES (%s, %s, %s, %s, %s)",
-                (
-                    event.get("session_id", ""),
-                    user_id,
-                    event.get("event_type", "unknown"),
-                    event.get("page", ""),
-                    json.dumps(event.get("data", {})),
-                ),
+            repo.insert_user_event(
+                event.get("session_id", ""),
+                user_id,
+                event.get("event_type", "unknown"),
+                event.get("page", ""),
+                json.dumps(event.get("data", {})),
             )
-        db.commit()
+        repo.commit()
         return {"status": "ok", "recorded": len(events)}
     except Exception:
         logger.debug("Failed to record user events", exc_info=True)
@@ -594,77 +532,29 @@ async def session_analytics(
 ):
     """Aggregated session analytics — page views, time-on-page, agent queries by page."""
     try:
-        from ..db import get_database
+        from ..repositories import get_analytics_repo
 
-        db = get_database()
+        repo = get_analytics_repo()
 
         # Summary totals
-        summary_row = db.fetchone(
-            "SELECT COUNT(*) as total_views, "
-            "COUNT(DISTINCT session_id) as total_sessions, "
-            "COUNT(DISTINCT page) as unique_pages "
-            "FROM user_events WHERE event_type = 'page_view' "
-            "AND timestamp > NOW() - INTERVAL '%s days'",
-            (days,),
-        )
-        total_queries_row = db.fetchone(
-            "SELECT COUNT(*) as total_queries "
-            "FROM user_events WHERE event_type = 'agent_query' "
-            "AND timestamp > NOW() - INTERVAL '%s days'",
-            (days,),
-        )
-        avg_duration_row = db.fetchone(
-            "SELECT AVG((data->>'duration_ms')::int) as avg_ms "
-            "FROM user_events WHERE event_type = 'page_leave' "
-            "AND timestamp > NOW() - INTERVAL '%s days'",
-            (days,),
-        )
+        summary_row = repo.fetch_session_summary(days)
+        total_queries_row = repo.fetch_total_queries(days)
+        avg_duration_row = repo.fetch_avg_page_duration(days)
 
         # Top pages by visit count
-        page_rows = db.fetchall(
-            "SELECT page, COUNT(*) as views, COUNT(DISTINCT session_id) as sessions "
-            "FROM user_events WHERE event_type = 'page_view' "
-            "AND timestamp > NOW() - INTERVAL '%s days' "
-            "GROUP BY page ORDER BY views DESC LIMIT 20",
-            (days,),
-        )
+        page_rows = repo.fetch_top_pages(days)
 
         # Average time on page
-        duration_rows = db.fetchall(
-            "SELECT page, AVG((data->>'duration_ms')::int) as avg_ms, "
-            "COUNT(*) as sample_count "
-            "FROM user_events WHERE event_type = 'page_leave' "
-            "AND timestamp > NOW() - INTERVAL '%s days' "
-            "GROUP BY page ORDER BY avg_ms DESC LIMIT 20",
-            (days,),
-        )
+        duration_rows = repo.fetch_page_durations(days)
 
         # Agent queries by page
-        query_rows = db.fetchall(
-            "SELECT page, COUNT(*) as queries "
-            "FROM user_events WHERE event_type = 'agent_query' "
-            "AND timestamp > NOW() - INTERVAL '%s days' "
-            "GROUP BY page ORDER BY queries DESC LIMIT 20",
-            (days,),
-        )
+        query_rows = repo.fetch_queries_by_page(days)
 
         # Top follow-up suggestions clicked
-        suggestion_rows = db.fetchall(
-            "SELECT data->>'text' as suggestion, COUNT(*) as clicks "
-            "FROM user_events WHERE event_type = 'suggestion_click' "
-            "AND timestamp > NOW() - INTERVAL '%s days' "
-            "GROUP BY data->>'text' ORDER BY clicks DESC LIMIT 10",
-            (days,),
-        )
+        suggestion_rows = repo.fetch_top_suggestions(days)
 
         # Feature usage
-        feature_rows = db.fetchall(
-            "SELECT data->>'feature' as feature, COUNT(*) as uses "
-            "FROM user_events WHERE event_type = 'feature_use' "
-            "AND timestamp > NOW() - INTERVAL '%s days' "
-            "GROUP BY data->>'feature' ORDER BY uses DESC LIMIT 10",
-            (days,),
-        )
+        feature_rows = repo.fetch_feature_usage(days)
 
         return {
             "summary": {

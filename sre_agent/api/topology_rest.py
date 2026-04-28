@@ -64,10 +64,10 @@ async def get_topology(
 
     finding_status: dict[str, str] = {}
     try:
-        from ..db import get_database
+        from ..repositories import get_monitor_repo
 
-        db = get_database()
-        active_findings = db.fetchall("SELECT category, severity, resources FROM findings WHERE resolved = 0")
+        _topo_repo = get_monitor_repo()
+        active_findings = _topo_repo.fetch_active_findings()
         for f in active_findings or []:
             sev = f.get("severity", "")
             for res_str in (f.get("resources") or "").split(","):
@@ -81,11 +81,7 @@ async def get_topology(
     try:
         from ..change_risk import score_deployment_change
 
-        risk_findings = db.fetchall(
-            "SELECT resources, category FROM findings "
-            "WHERE category = 'audit_deployment' AND resolved = 0 "
-            "AND timestamp > EXTRACT(EPOCH FROM NOW() - INTERVAL '2 hours')::BIGINT * 1000"
-        )
+        risk_findings = _topo_repo.fetch_deployment_risk_findings()
         for f in risk_findings or []:
             for res_str in (f.get("resources") or "").split(","):
                 res_str = res_str.strip()
@@ -101,11 +97,7 @@ async def get_topology(
 
     recent_changes: set[str] = set()
     try:
-        recent = db.fetchall(
-            "SELECT resources FROM findings "
-            "WHERE category = 'audit_deployment' "
-            "AND timestamp > EXTRACT(EPOCH FROM NOW() - INTERVAL '15 minutes')::BIGINT * 1000"
-        )
+        recent = _topo_repo.fetch_recent_deployments(15)
         for f in recent or []:
             for res_str in (f.get("resources") or "").split(","):
                 if res_str.strip():

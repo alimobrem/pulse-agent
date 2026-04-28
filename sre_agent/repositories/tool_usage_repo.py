@@ -276,6 +276,80 @@ class ToolUsageRepository(BaseRepository):
             (days, limit),
         )
 
+    # -- Chain discovery (tool_chains.py) --------------------------------------
+
+    def fetch_session_count(self) -> dict | None:
+        """Count distinct sessions in tool_usage."""
+        return self.db.fetchone("SELECT COUNT(DISTINCT session_id) AS cnt FROM tool_usage")
+
+    def fetch_bigrams(self, min_frequency: int, limit: int) -> list[dict]:
+        """Discover frequent tool call bigrams."""
+        return self.db.fetchall(
+            """
+            WITH ordered AS (
+                SELECT session_id, tool_name,
+                       LAG(tool_name) OVER (PARTITION BY session_id ORDER BY turn_number, id) AS prev_tool
+                FROM tool_usage
+                WHERE status = 'success'
+            ),
+            bigram_counts AS (
+                SELECT prev_tool AS from_tool, tool_name AS to_tool, COUNT(*) AS frequency
+                FROM ordered
+                WHERE prev_tool IS NOT NULL
+                GROUP BY prev_tool, tool_name
+                HAVING COUNT(*) >= %s
+            ),
+            from_totals AS (
+                SELECT prev_tool AS tool, COUNT(*) AS total
+                FROM ordered
+                WHERE prev_tool IS NOT NULL
+                GROUP BY prev_tool
+            )
+            SELECT b.from_tool, b.to_tool, b.frequency,
+                   ROUND(b.frequency::numeric / f.total, 4) AS probability
+            FROM bigram_counts b
+            JOIN from_totals f ON b.from_tool = f.tool
+            ORDER BY b.frequency DESC, b.from_tool ASC, b.to_tool ASC
+            LIMIT %s
+            """,
+            (min_frequency, limit),
+        )
+
+    def fetch_trigrams(self, min_frequency: int, limit: int) -> list[dict]:
+        """Discover frequent 3-tool sequences."""
+        return self.db.fetchall(
+            """
+            WITH ordered AS (
+                SELECT session_id, tool_name,
+                       LAG(tool_name, 1) OVER (PARTITION BY session_id ORDER BY turn_number, id) AS prev_1,
+                       LAG(tool_name, 2) OVER (PARTITION BY session_id ORDER BY turn_number, id) AS prev_2
+                FROM tool_usage
+                WHERE status = 'success'
+            ),
+            trigram_counts AS (
+                SELECT prev_2 AS tool_a, prev_1 AS tool_b, tool_name AS tool_c,
+                       COUNT(*) AS frequency
+                FROM ordered
+                WHERE prev_1 IS NOT NULL AND prev_2 IS NOT NULL
+                GROUP BY prev_2, prev_1, tool_name
+                HAVING COUNT(*) >= %s
+            ),
+            pair_totals AS (
+                SELECT prev_2 AS tool_a, prev_1 AS tool_b, COUNT(*) AS total
+                FROM ordered
+                WHERE prev_1 IS NOT NULL AND prev_2 IS NOT NULL
+                GROUP BY prev_2, prev_1
+            )
+            SELECT t.tool_a, t.tool_b, t.tool_c, t.frequency,
+                   ROUND(t.frequency::numeric / p.total, 4) AS probability
+            FROM trigram_counts t
+            JOIN pair_totals p ON t.tool_a = p.tool_a AND t.tool_b = p.tool_b
+            ORDER BY t.frequency DESC
+            LIMIT %s
+            """,
+            (min_frequency, limit),
+        )
+
 
 # -- Singleton ---------------------------------------------------------------
 

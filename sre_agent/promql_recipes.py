@@ -1032,9 +1032,8 @@ def record_query_result(query: str, *, success: bool, series_count: int = 0, cat
     try:
         if not query:
             return
-        from .db import get_database
+        from .repositories import get_promql_repo
 
-        db = get_database()
         normalized = normalize_query(query)
         qhash = hashlib.sha256(normalized.encode()).hexdigest()
 
@@ -1042,28 +1041,11 @@ def record_query_result(query: str, *, success: bool, series_count: int = 0, cat
         if not category:
             category = _detect_category(query)
 
+        repo = get_promql_repo()
         if success:
-            db.execute(
-                "INSERT INTO promql_queries (query_hash, query_template, category, success_count, last_success, avg_series_count) "
-                "VALUES (%s, %s, %s, 1, NOW(), %s) "
-                "ON CONFLICT (query_hash) DO UPDATE SET "
-                "category = COALESCE(NULLIF(promql_queries.category, ''), %s), "
-                "success_count = promql_queries.success_count + 1, "
-                "last_success = NOW(), "
-                "avg_series_count = (promql_queries.avg_series_count + %s) / 2",
-                (qhash, normalized, category, float(series_count), category, float(series_count)),
-            )
+            repo.record_success(qhash, normalized, category, float(series_count))
         else:
-            db.execute(
-                "INSERT INTO promql_queries (query_hash, query_template, category, failure_count, last_failure) "
-                "VALUES (%s, %s, %s, 1, NOW()) "
-                "ON CONFLICT (query_hash) DO UPDATE SET "
-                "category = COALESCE(NULLIF(promql_queries.category, ''), %s), "
-                "failure_count = promql_queries.failure_count + 1, "
-                "last_failure = NOW()",
-                (qhash, normalized, category, category),
-            )
-        db.commit()
+            repo.record_failure(qhash, normalized, category)
     except Exception:
         logger.debug("Failed to record query result", exc_info=True)
 
@@ -1071,14 +1053,10 @@ def record_query_result(query: str, *, success: bool, series_count: int = 0, cat
 def get_query_reliability(query_template: str) -> dict | None:
     """Return success/failure counts for a normalized query template."""
     try:
-        from .db import get_database
+        from .repositories import get_promql_repo
 
-        db = get_database()
         qhash = hashlib.sha256(query_template.encode()).hexdigest()
-        row = db.fetchone(
-            "SELECT success_count, failure_count, avg_series_count FROM promql_queries WHERE query_hash = %s",
-            (qhash,),
-        )
+        row = get_promql_repo().fetch_reliability(qhash)
         if row:
             return {"success_count": row[0], "failure_count": row[1], "avg_series_count": row[2]}
     except Exception:
@@ -1089,15 +1067,9 @@ def get_query_reliability(query_template: str) -> dict | None:
 def get_reliable_queries(category: str, min_success: int = 3) -> list[dict]:
     """Return queries with high success rates for a category."""
     try:
-        from .db import get_database
+        from .repositories import get_promql_repo
 
-        db = get_database()
-        rows = db.fetchall(
-            "SELECT query_template, success_count, failure_count, avg_series_count "
-            "FROM promql_queries WHERE category = %s AND success_count >= %s "
-            "ORDER BY success_count DESC LIMIT 20",
-            (category, min_success),
-        )
+        rows = get_promql_repo().fetch_reliable_queries(category, min_success)
         return [
             {"query_template": r[0], "success_count": r[1], "failure_count": r[2], "avg_series_count": r[3]}
             for r in rows

@@ -30,22 +30,10 @@ async def metrics_response_latency(
     _auth=Depends(verify_token),
 ):
     """Agent response p95 latency from tool usage data."""
-    from .. import db
+    from ..repositories import get_analytics_repo
 
     try:
-        database = db.get_database()
-        row = database.fetchone(
-            "SELECT "
-            "  percentile_cont(0.5) WITHIN GROUP (ORDER BY duration_ms) AS p50, "
-            "  percentile_cont(0.95) WITHIN GROUP (ORDER BY duration_ms) AS p95, "
-            "  percentile_cont(0.99) WITHIN GROUP (ORDER BY duration_ms) AS p99, "
-            "  AVG(duration_ms) AS avg_ms, "
-            "  COUNT(*) AS cnt "
-            "FROM tool_usage "
-            "WHERE timestamp >= NOW() - INTERVAL '1 day' * ? "
-            "AND duration_ms > 0",
-            (period,),
-        )
+        row = get_analytics_repo().fetch_response_latency(period)
         if not row or row["cnt"] == 0:
             return {"period_days": period, "p50_ms": None, "p95_ms": None, "p99_ms": None, "count": 0}
 
@@ -69,14 +57,10 @@ async def metrics_eval_trend(
     _auth=Depends(verify_token),
 ):
     """Eval score trend with sparkline data for release tracking."""
-    from .. import db
+    from ..repositories import get_analytics_repo
 
     try:
-        database = db.get_database()
-        rows = database.fetchall(
-            "SELECT score, pass, scenarios, timestamp FROM eval_runs WHERE suite = ? ORDER BY id DESC LIMIT ?",
-            (suite, releases),
-        )
+        rows = get_analytics_repo().fetch_eval_scores(suite, releases)
         if not rows:
             return {"suite": suite, "sparkline": [], "current_score": None, "runs_count": 0}
 
@@ -117,17 +101,12 @@ async def usage_summary(
 ):
     """Tool usage summary split by agent (interactive) vs pipeline (autonomous)."""
     try:
-        from ..db import get_database
-
-        db = get_database()
         import time as _time
 
+        from ..repositories import get_analytics_repo
+
         cutoff_s = _time.time() - days * 86400
-        rows = db.fetchall(
-            "SELECT agent_mode, COUNT(*) as calls, COALESCE(SUM(duration_ms), 0) as total_ms "
-            "FROM tool_usage WHERE timestamp > to_timestamp(?) GROUP BY agent_mode",
-            (cutoff_s,),
-        )
+        rows = get_analytics_repo().fetch_usage_by_mode(cutoff_s)
         agent_calls = 0
         agent_ms = 0
         pipeline_calls = 0
@@ -164,9 +143,8 @@ async def list_interactions(
 ):
     """Query the user_interactions audit log."""
     try:
-        from ..db import get_database
+        from ..repositories import get_analytics_repo
 
-        db = get_database()
         where = []
         params: list = []
         if actor:
@@ -179,11 +157,7 @@ async def list_interactions(
             where.append("item_id = ?")
             params.append(item_id)
         clause = f"WHERE {' AND '.join(where)}" if where else ""
-        params.append(limit)
-        rows = db.fetchall(
-            f"SELECT * FROM user_interactions {clause} ORDER BY timestamp DESC LIMIT ?",
-            tuple(params),
-        )
+        rows = get_analytics_repo().fetch_interactions(clause, tuple(params), limit)
         return {"interactions": rows or [], "count": len(rows or [])}
     except Exception as e:
         logger.error("Failed to list interactions: %s", e)

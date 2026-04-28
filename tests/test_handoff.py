@@ -11,21 +11,21 @@ from sre_agent.context_bus import ContextEntry, get_context_bus
 from sre_agent.db import Database, reset_database, set_database
 from sre_agent.handoff_tools import request_security_scan, request_sre_investigation
 from sre_agent.monitor.cluster_monitor import ClusterMonitor
+from sre_agent.repositories.context_bus_repo import ContextBusRepository, get_context_bus_repo
 
 
 @pytest.fixture(autouse=True)
 def _use_temp_db(monkeypatch, tmp_path):
     """Use a temp database for each test."""
-    import sre_agent.context_bus as _cb
     import sre_agent.monitor as _mon
     from tests.conftest import _TEST_DB_URL
 
     db = Database(_TEST_DB_URL)
     set_database(db)
     _mon.findings._tables_ensured = False
-    _cb._tables_ensured = False
+    ContextBusRepository._tables_ensured = False
     _mon._ensure_tables()
-    _cb._ensure_tables()
+    get_context_bus_repo().ensure_tables()
     for table in ("actions", "investigations", "findings", "context_entries"):
         try:
             db.execute(f"TRUNCATE {table} RESTART IDENTITY CASCADE")
@@ -35,7 +35,7 @@ def _use_temp_db(monkeypatch, tmp_path):
     yield
     reset_database()
     _mon.findings._tables_ensured = False
-    _cb._tables_ensured = False
+    ContextBusRepository._tables_ensured = False
 
 
 class TestRequestSecurityScan:
