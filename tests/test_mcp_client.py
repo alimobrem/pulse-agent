@@ -265,3 +265,34 @@ class TestConcurrentConnectSkillMcp:
             for name, _ in skill_paths:
                 assert name in _connections
                 assert _connections[name].connected
+
+
+class TestNonBuiltinStdioBlocked:
+    """Verify user-created skills cannot use stdio transport."""
+
+    def setup_method(self):
+        disconnect_all()
+
+    def teardown_method(self):
+        disconnect_all()
+
+    def test_non_builtin_stdio_returns_none(self, tmp_path):
+        skill_dir = tmp_path / "user_skill"
+        skill_dir.mkdir()
+        (skill_dir / "mcp.yaml").write_text("server:\n  url: npx some-tool\n  transport: stdio\ntoolsets: []\n")
+        result = connect_skill_mcp("user_skill", skill_dir, builtin=False)
+        assert result is None
+
+    def test_builtin_stdio_allowed(self, tmp_path):
+        skill_dir = tmp_path / "builtin_skill"
+        skill_dir.mkdir()
+        (skill_dir / "mcp.yaml").write_text("server:\n  url: npx some-tool\n  transport: stdio\ntoolsets: []\n")
+        result = connect_skill_mcp("builtin_skill", skill_dir, builtin=True)
+        assert result is not None
+
+    def test_non_builtin_sse_allowed(self, tmp_path):
+        skill_dir = tmp_path / "user_skill_sse"
+        skill_dir.mkdir()
+        (skill_dir / "mcp.yaml").write_text("server:\n  url: http://localhost:9999\n  transport: sse\ntoolsets: []\n")
+        result = connect_skill_mcp("user_skill_sse", skill_dir, builtin=False)
+        assert result is not None
