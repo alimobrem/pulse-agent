@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import contextvars
 import logging
+import threading
 import uuid
 from contextlib import asynccontextmanager
 from importlib.metadata import version as pkg_version
@@ -43,6 +44,8 @@ from .ws_endpoints import websocket_auto_agent, websocket_monitor
 logger = logging.getLogger("pulse_agent.api")
 
 request_id_var: contextvars.ContextVar[str] = contextvars.ContextVar("request_id", default="")
+
+_mcp_shutdown = threading.Event()
 
 
 class CorrelationMiddleware(BaseHTTPMiddleware):
@@ -102,6 +105,8 @@ async def lifespan(app: FastAPI):
             from ..mcp_client import connect_skill_mcp
 
             for skill in skills.values():
+                if _mcp_shutdown.is_set():
+                    break
                 if (skill.path / "mcp.yaml").exists():
                     try:
                         conn = await asyncio.to_thread(connect_skill_mcp, skill.name, skill.path, builtin=skill.builtin)
@@ -144,16 +149,22 @@ async def lifespan(app: FastAPI):
     yield
 
     watchdog_task.cancel()
-    if mcp_task is not None and not mcp_task.done():
-        mcp_task.cancel()
 
-    # Cleanup MCP connections and async clients on shutdown
+    # Signal MCP background loop to stop, then disconnect, then cancel the task
+    _mcp_shutdown.set()
     try:
         from ..mcp_client import disconnect_all
 
         disconnect_all()
     except Exception:
         logger.debug("MCP disconnect cleanup failed", exc_info=True)
+
+    if mcp_task is not None and not mcp_task.done():
+        mcp_task.cancel()
+        try:
+            await asyncio.wait_for(asyncio.shield(mcp_task), timeout=5.0)
+        except (asyncio.CancelledError, TimeoutError):
+            pass
 
     try:
         from ..async_db import reset_async_database

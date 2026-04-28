@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from ..prometheus import get_prometheus_client
+from ..prometheus import PrometheusConfigError, get_prometheus_client
 from .findings import _make_finding
 from .registry import SEVERITY_WARNING
 
@@ -20,6 +20,9 @@ def _query_prometheus(query: str) -> list[dict]:
             logger.debug("Prometheus query failed: %s", data.get("error", "unknown"))
             return []
         return data.get("data", {}).get("result", [])
+    except PrometheusConfigError as e:
+        logger.warning("Prometheus config error: %s", e)
+        return []
     except Exception as e:
         logger.debug("Prometheus query error: %s", e)
         return []

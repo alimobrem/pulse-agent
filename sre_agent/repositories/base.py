@@ -23,7 +23,6 @@ class BaseRepository:
     def __init__(self, db: Database | None = None):
         self._db = db
         self._db_injected = db is not None
-        self._async_db: AsyncDatabase | None = None
 
     @property
     def db(self) -> Database:
@@ -35,9 +34,11 @@ class BaseRepository:
         return get_database()
 
     async def get_async_db(self) -> AsyncDatabase:
-        """Return the async database, creating the pool on first call."""
-        if self._async_db is None:
-            from ..async_db import get_async_database
+        """Return the async database singleton.
 
-            self._async_db = await get_async_database()
-        return self._async_db
+        Always delegates to ``get_async_database()`` so that
+        ``reset_async_database()`` is respected without stale caches.
+        """
+        from ..async_db import get_async_database
+
+        return await get_async_database()

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import threading
 
 from sre_agent.db import Database, get_database, reset_database, set_database
@@ -344,3 +345,29 @@ class TestConnectionPoolLeaks:
         db.execute("DROP TABLE leak_ff")
         db.commit()
         db.close()
+
+
+# ---------------------------------------------------------------------------
+# BaseRepository async_db stale-pool regression
+# ---------------------------------------------------------------------------
+
+
+class TestBaseRepositoryAsyncDbStalePool:
+    """Verify BaseRepository.get_async_db() does not cache a stale pool
+    after reset_async_database() is called."""
+
+    def test_get_async_db_returns_fresh_pool_after_reset(self, monkeypatch):
+        monkeypatch.setenv("PULSE_AGENT_DATABASE_URL", _TEST_DB_URL)
+
+        from sre_agent.async_db import reset_async_database
+        from sre_agent.repositories.base import BaseRepository
+
+        async def _run():
+            repo = BaseRepository()
+            db1 = await repo.get_async_db()
+            await reset_async_database()
+            db2 = await repo.get_async_db()
+            assert db1 is not db2, "get_async_db() returned stale cached pool after reset"
+            await reset_async_database()
+
+        asyncio.run(_run())

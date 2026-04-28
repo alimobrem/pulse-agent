@@ -1115,6 +1115,30 @@ class TestScanHpaSaturation:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
+# ═══════════════════════════════════════════════════════════════════════════════
+# PrometheusConfigError — degraded finding instead of silent swallow
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+class TestScanFiringAlertsPrometheusConfigError:
+    """scan_firing_alerts must emit a degraded finding when Prometheus
+    cannot be reached due to configuration (e.g., missing CA cert)."""
+
+    def test_emits_degraded_finding_on_config_error(self):
+        from sre_agent.prometheus import PrometheusConfigError
+
+        mock_client = MagicMock()
+        mock_client.request.side_effect = PrometheusConfigError("No CA cert found")
+        with patch("sre_agent.monitor.scanners.get_prometheus_client", return_value=mock_client):
+            findings = scan_firing_alerts()
+
+        assert len(findings) == 1
+        assert findings[0]["category"] == "monitoring"
+        assert "unavailable" in findings[0]["title"].lower()
+        assert "No CA cert found" in findings[0]["summary"]
+        assert findings[0]["severity"] == SEVERITY_WARNING
+
+
 class TestParallelScannerErrorIsolation:
     """Verify that a scanner raising an exception in asyncio.gather does not
     prevent other scanners from completing and returning their results."""

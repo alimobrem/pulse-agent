@@ -18,6 +18,13 @@ import urllib.request
 
 logger = logging.getLogger("pulse_agent.prometheus")
 
+
+class PrometheusConfigError(RuntimeError):
+    """Raised when Prometheus cannot be reached due to configuration (e.g., missing CA)."""
+
+    pass
+
+
 _LOCAL_DEFAULT = "https://thanos-querier.openshift-monitoring.svc:9091"
 _ACM_DEFAULT = "http://observability-thanos-query.open-cluster-management-observability.svc:9090"
 _ACM_NAMESPACE = "open-cluster-management-observability"
@@ -154,7 +161,7 @@ class PrometheusClient:
                 except Exception:
                     logger.debug("Failed to load CA from %s", ca_path)
 
-        raise RuntimeError(
+        raise PrometheusConfigError(
             "No CA certificate found for Prometheus TLS. Set PULSE_AGENT_PROMETHEUS_INSECURE=true to skip verification."
         )
 

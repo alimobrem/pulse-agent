@@ -2,12 +2,17 @@
 
 from __future__ import annotations
 
+import threading
+import time
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from sre_agent.mcp_client import (
     MCPConnection,
+    _connections,
+    _connections_lock,
     connect_mcp_server,
+    connect_skill_mcp,
     disconnect_all,
     list_mcp_connections,
     list_mcp_tools,
@@ -80,7 +85,7 @@ class TestConnectMCPServer:
         config = {"server": {"url": "nonexistent_binary_xyz_12345", "transport": "stdio"}, "toolsets": []}
         conn = connect_mcp_server("test", config)
         assert not conn.connected
-        assert "not found" in conn.error.lower() or "Failed" in conn.error
+        assert "not allowed" in conn.error.lower() or "not found" in conn.error.lower()
 
 
 class TestMCPConnection:
@@ -201,3 +206,62 @@ class TestMcpTokenForwarding:
             call_args = mock_urlopen.call_args
             req = call_args[0][0]
             assert not req.has_header("Authorization")
+
+
+class TestConcurrentConnectSkillMcp:
+    """Verify _connections dict is safe under concurrent access."""
+
+    def setup_method(self):
+        disconnect_all()
+
+    def teardown_method(self):
+        disconnect_all()
+
+    def test_concurrent_connect_skill_mcp_no_runtime_error(self, tmp_path):
+        """3 concurrent threads calling connect_skill_mcp must not raise RuntimeError
+        from dict mutation, and _connections must have correct entries afterward."""
+        # Create 3 skill dirs with mcp.yaml
+        skill_paths = []
+        for i in range(3):
+            skill_dir = tmp_path / f"skill_{i}"
+            skill_dir.mkdir()
+            mcp_yaml = skill_dir / "mcp.yaml"
+            mcp_yaml.write_text(f"server:\n  url: http://localhost:999{i}\n  transport: sse\ntoolsets: []\n")
+            skill_paths.append((f"skill_{i}", skill_dir))
+
+        def slow_connect(name, config, **kwargs):
+            """Simulate a slow MCP connection."""
+            time.sleep(0.05)
+            return MCPConnection(
+                name=name,
+                url=config["server"]["url"],
+                transport="sse",
+                toolsets=[],
+                connected=True,
+                tools=[f"{name}_tool"],
+            )
+
+        errors: list[Exception] = []
+
+        def worker(skill_name, skill_path):
+            try:
+                connect_skill_mcp(skill_name, skill_path, builtin=True, max_retries=1)
+            except Exception as e:
+                errors.append(e)
+
+        with (
+            patch("sre_agent.mcp_client.connect_mcp_server", side_effect=slow_connect),
+            patch("sre_agent.mcp_client.register_mcp_tools", return_value=1),
+        ):
+            threads = [threading.Thread(target=worker, args=(name, path)) for name, path in skill_paths]
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join(timeout=10)
+
+        assert not errors, f"Threads raised: {errors}"
+        with _connections_lock:
+            assert len(_connections) == 3
+            for name, _ in skill_paths:
+                assert name in _connections
+                assert _connections[name].connected

@@ -10,7 +10,7 @@ from typing import Any
 from ..config import get_settings
 from ..errors import ToolError
 from ..k8s_client import get_apps_client, get_autoscaling_client, get_core_client, get_custom_client, safe
-from ..prometheus import PrometheusBackend, get_prometheus_client
+from ..prometheus import PrometheusBackend, PrometheusConfigError, get_prometheus_client
 from .findings import _make_finding, _skip_namespace
 from .registry import SEVERITY_CRITICAL, SEVERITY_INFO, SEVERITY_WARNING
 
@@ -288,6 +288,16 @@ def scan_firing_alerts() -> list[dict]:
                             resources=resources,
                         )
                     )
+    except PrometheusConfigError as e:
+        findings.append(
+            _make_finding(
+                severity="warning",
+                category="monitoring",
+                title="Prometheus monitoring unavailable",
+                summary=str(e),
+                resources=[],
+            )
+        )
     except Exception as e:
         logger.debug("Alert scan failed (monitoring may not be available): %s", e)
     return findings

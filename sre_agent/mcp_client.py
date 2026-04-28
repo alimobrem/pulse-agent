@@ -12,6 +12,7 @@ import json
 import logging
 import select
 import subprocess
+import threading
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -45,6 +46,7 @@ class MCPConnection:
 
 # Global MCP connections
 _connections: dict[str, MCPConnection] = {}
+_connections_lock = threading.Lock()
 _request_id_counter = itertools.count(1)
 
 
@@ -577,14 +579,17 @@ def connect_skill_mcp(
         return None
 
     # Reuse existing connection to the same server URL
-    for existing_conn in _connections.values():
-        if existing_conn.url == server_url and existing_conn.connected:
-            _connections[skill_name] = existing_conn
-            logger.info("MCP reused existing connection for skill '%s' (same server)", skill_name)
-            return existing_conn
+    with _connections_lock:
+        for existing_conn in _connections.values():
+            if existing_conn.url == server_url and existing_conn.connected:
+                _connections[skill_name] = existing_conn
+                logger.info("MCP reused existing connection for skill '%s' (same server)", skill_name)
+                return existing_conn
 
     conn = connect_mcp_server(skill_name, config, max_retries=max_retries)
-    _connections[skill_name] = conn
+
+    with _connections_lock:
+        _connections[skill_name] = conn
 
     if conn.connected:
         register_mcp_tools(conn)
@@ -594,18 +599,19 @@ def connect_skill_mcp(
 
 def disconnect_all() -> None:
     """Disconnect all MCP servers."""
-    for _name, conn in _connections.items():
-        if conn.process:
-            try:
-                conn.process.terminate()
-                conn.process.wait(timeout=5)
-            except Exception:
+    with _connections_lock:
+        for _name, conn in _connections.items():
+            if conn.process:
                 try:
-                    conn.process.kill()
+                    conn.process.terminate()
+                    conn.process.wait(timeout=5)
                 except Exception:
-                    logger.debug("Suppressed exception", exc_info=True)
-            conn.connected = False
-    _connections.clear()
+                    try:
+                        conn.process.kill()
+                    except Exception:
+                        logger.debug("Suppressed exception", exc_info=True)
+                conn.connected = False
+        _connections.clear()
 
 
 def add_standalone_server(name: str, url: str, transport: str = "sse") -> MCPConnection:
