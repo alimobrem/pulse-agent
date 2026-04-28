@@ -114,12 +114,7 @@ async def lifespan(app: FastAPI):
 
             revalidate_skills()
 
-        asyncio.create_task(_connect_mcp_background())
-
-        # Re-validate skills now that TOOL_REGISTRY is populated (MCP tools added in background)
-        from ..skill_loader import revalidate_skills
-
-        revalidate_skills()
+        mcp_task = asyncio.create_task(_connect_mcp_background())
     except Exception as e:
         logger.warning("Skill loading failed: %s", e)
 
@@ -148,14 +143,25 @@ async def lifespan(app: FastAPI):
     yield
 
     watchdog_task.cancel()
+    if not mcp_task.done():
+        mcp_task.cancel()
 
-    # Cleanup MCP connections on shutdown
+    # Cleanup MCP connections and async clients on shutdown
     try:
         from ..mcp_client import disconnect_all
 
         disconnect_all()
     except Exception:
         logger.debug("MCP disconnect cleanup failed", exc_info=True)
+
+    try:
+        from ..async_db import reset_async_database
+        from ..async_k8s import close_async_clients
+
+        await reset_async_database()
+        await close_async_clients()
+    except Exception:
+        logger.debug("Async cleanup failed", exc_info=True)
 
 
 def _get_agent_version() -> str:

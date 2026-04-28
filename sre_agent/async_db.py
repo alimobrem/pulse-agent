@@ -18,6 +18,7 @@ A ``translate_query()`` helper converts ``?`` placeholders for migration ease.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
 from typing import Any
@@ -126,14 +127,25 @@ class AsyncDatabase:
 # ---------------------------------------------------------------------------
 
 _async_db: AsyncDatabase | None = None
+_async_db_lock: asyncio.Lock | None = None
+
+
+def _get_lock() -> asyncio.Lock:
+    global _async_db_lock
+    if _async_db_lock is None:
+        _async_db_lock = asyncio.Lock()
+    return _async_db_lock
 
 
 async def get_async_database() -> AsyncDatabase:
     """Return the async database singleton, creating the pool on first call."""
     global _async_db
-    if _async_db is None:
-        _async_db = AsyncDatabase()
-        await _async_db.connect()
+    if _async_db is not None:
+        return _async_db
+    async with _get_lock():
+        if _async_db is None:
+            _async_db = AsyncDatabase()
+            await _async_db.connect()
     return _async_db
 
 
