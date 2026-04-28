@@ -135,9 +135,9 @@ def extract_tokens(query: str) -> list[str]:
 
 def _get_db():
     """Get database connection. Separate function for easy mocking."""
-    from .db import get_database
+    from .repositories import get_tool_usage_repo
 
-    return get_database()
+    return get_tool_usage_repo().db
 
 
 def learn(

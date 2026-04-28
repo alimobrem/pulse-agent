@@ -75,17 +75,9 @@ def score_deployment_change(
 
     # Historical failure rate
     try:
-        from .db import get_database
+        from .repositories import get_monitor_repo
 
-        db = get_database()
-        row = db.fetchone(
-            "SELECT COUNT(*) as total, "
-            "SUM(CASE WHEN verification_status = 'still_failing' THEN 1 ELSE 0 END) as failures "
-            "FROM actions WHERE category = 'workloads' "
-            "AND reasoning LIKE %s "
-            "AND timestamp > EXTRACT(EPOCH FROM NOW() - INTERVAL '30 days')::BIGINT * 1000",
-            (f"%{deployment_name}%",),
-        )
+        row = get_monitor_repo().fetch_deployment_failure_rate(deployment_name)
         if row and row["total"] > 0:
             failure_rate = row["failures"] / row["total"]
             if failure_rate > 0.3:

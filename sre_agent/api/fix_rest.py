@@ -22,17 +22,13 @@ router = APIRouter(tags=["fix-history"])
 
 def get_fix_history_summary(days: int = 7) -> dict:
     """Aggregate fix history statistics for the last N days."""
-    from .. import db
+    from ..repositories import get_monitor_repo
 
     try:
-        database = db.get_database()
+        repo = get_monitor_repo()
 
         # Get all actions within the time window using SQL interval
-        actions = database.fetchall(
-            "SELECT status, category, duration_ms, verification_status FROM actions "
-            "WHERE timestamp >= EXTRACT(EPOCH FROM NOW() - INTERVAL '1 day' * ?)::BIGINT * 1000",
-            (days,),
-        )
+        actions = repo.fetch_actions_for_summary(days)
 
         # Single-pass aggregation
         total_actions = len(actions)
@@ -92,17 +88,10 @@ def get_fix_history_summary(days: int = 7) -> dict:
         }
 
         # Calculate trend (current week vs previous week) using SQL intervals
-        current_week_count_row = database.fetchone(
-            "SELECT COUNT(*) as cnt FROM actions "
-            "WHERE timestamp >= EXTRACT(EPOCH FROM NOW() - INTERVAL '7 days')::BIGINT * 1000"
-        )
+        current_week_count_row = repo.fetch_current_week_action_count()
         current_week_count = current_week_count_row["cnt"] if current_week_count_row else 0
 
-        previous_week_count_row = database.fetchone(
-            "SELECT COUNT(*) as cnt FROM actions "
-            "WHERE timestamp >= EXTRACT(EPOCH FROM NOW() - INTERVAL '14 days')::BIGINT * 1000 "
-            "  AND timestamp < EXTRACT(EPOCH FROM NOW() - INTERVAL '7 days')::BIGINT * 1000"
-        )
+        previous_week_count_row = repo.fetch_previous_week_action_count()
         previous_week_count = previous_week_count_row["cnt"] if previous_week_count_row else 0
 
         trend = {
@@ -185,20 +174,9 @@ async def rest_fix_history_resolutions(
 ):
     """Recent resolution outcomes — what was fixed, how, and whether it worked."""
     try:
-        from .. import db
+        from ..repositories import get_monitor_repo
 
-        database = db.get_database()
-        rows = database.fetchall(
-            "SELECT id, finding_id, category, tool, status, reasoning, "
-            "verification_status, verification_evidence, verification_timestamp, "
-            "timestamp, duration_ms "
-            "FROM actions "
-            "WHERE timestamp >= EXTRACT(EPOCH FROM NOW() - INTERVAL '1 day' * ?)::BIGINT * 1000 "
-            "AND verification_status IS NOT NULL "
-            "ORDER BY timestamp DESC "
-            "LIMIT ?",
-            (days, limit),
-        )
+        rows = get_monitor_repo().fetch_resolutions(days, limit)
 
         resolutions = []
         for r in rows:

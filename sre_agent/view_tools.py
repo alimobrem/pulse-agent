@@ -890,10 +890,9 @@ def get_topology_graph(
 
     finding_status: dict[str, str] = {}
     try:
-        from .db import get_database
+        from .repositories import get_monitor_repo
 
-        db = get_database()
-        rows = db.fetchall("SELECT severity, resources FROM findings WHERE resolved = 0")
+        rows = get_monitor_repo().fetch_unresolved_finding_status()
         for f in rows or []:
             sev = f.get("severity", "")
             for res_str in (f.get("resources") or "").split(","):

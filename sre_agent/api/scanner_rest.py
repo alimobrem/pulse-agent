@@ -79,20 +79,10 @@ def get_scanner_coverage(days: int = 7) -> dict:
     # Try to get per-scanner finding stats from the database
     per_scanner = []
     try:
-        from .. import db
-
-        database = db.get_database()
+        from ..repositories import get_monitor_repo
 
         # Single batch query instead of N+1 per-scanner queries
-        stats_rows = database.fetchall(
-            "SELECT category, "
-            "  COUNT(*) AS total_count, "
-            "  COUNT(*) FILTER (WHERE severity IN ('critical', 'warning')) AS actionable_count "
-            "FROM findings "
-            "WHERE timestamp >= EXTRACT(EPOCH FROM NOW() - INTERVAL '1 day' * ?)::BIGINT * 1000 "
-            "GROUP BY category",
-            (days,),
-        )
+        stats_rows = get_monitor_repo().fetch_scanner_finding_stats(days)
         stats_by_cat = {r["category"]: r for r in stats_rows} if stats_rows else {}
 
         for scanner_id, _ in all_scanners:

@@ -289,10 +289,9 @@ def gather_cluster_context(mode: str = "sre") -> str:
 
     def _fetch_view_count():
         try:
-            from . import db
+            from .repositories import get_monitor_repo
 
-            database = db.get_database()
-            row = database.fetchone("SELECT COUNT(*) as cnt FROM views")
+            row = get_monitor_repo().fetch_view_count()
             return f"Saved views: {row['cnt']}" if row else None
         except Exception:
             return None

@@ -512,15 +512,9 @@ def _populate_risk_levels() -> None:
 def get_tool_avg_latency(tool_name: str) -> int:
     """Get average latency for a tool from usage history (ms)."""
     try:
-        from .db import get_database
+        from .repositories import get_monitor_repo
 
-        db = get_database()
-        row = db.fetchone(
-            "SELECT AVG(duration_ms) as avg_ms FROM tool_usage "
-            "WHERE tool_name = %s AND status = 'success' "
-            "AND timestamp > NOW() - INTERVAL '7 days'",
-            (tool_name,),
-        )
+        row = get_monitor_repo().fetch_tool_avg_latency(tool_name)
         return int(row["avg_ms"]) if row and row["avg_ms"] else 0
     except Exception:
         return 0

@@ -67,33 +67,22 @@ def save_postmortem(postmortem: Postmortem) -> None:
     try:
         import json
 
-        from .db import get_database
+        from .repositories import get_monitor_repo
 
-        db = get_database()
-        db.execute(
-            "INSERT INTO postmortems (id, incident_type, plan_id, timeline, root_cause, "
-            "contributing_factors, blast_radius, actions_taken, prevention, metrics_impact, "
-            "confidence, generated_at) "
-            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) "
-            "ON CONFLICT (id) DO UPDATE SET "
-            "timeline = EXCLUDED.timeline, root_cause = EXCLUDED.root_cause, "
-            "confidence = EXCLUDED.confidence",
-            (
-                postmortem.id,
-                postmortem.incident_type,
-                postmortem.plan_id,
-                postmortem.timeline,
-                postmortem.root_cause,
-                json.dumps(postmortem.contributing_factors),
-                json.dumps(postmortem.blast_radius),
-                json.dumps(postmortem.actions_taken),
-                json.dumps(postmortem.prevention),
-                postmortem.metrics_impact,
-                postmortem.confidence,
-                postmortem.generated_at,
-            ),
+        get_monitor_repo().save_postmortem(
+            postmortem_id=postmortem.id,
+            incident_type=postmortem.incident_type,
+            plan_id=postmortem.plan_id,
+            timeline=postmortem.timeline,
+            root_cause=postmortem.root_cause,
+            contributing_factors_json=json.dumps(postmortem.contributing_factors),
+            blast_radius_json=json.dumps(postmortem.blast_radius),
+            actions_taken_json=json.dumps(postmortem.actions_taken),
+            prevention_json=json.dumps(postmortem.prevention),
+            metrics_impact=postmortem.metrics_impact,
+            confidence=postmortem.confidence,
+            generated_at=postmortem.generated_at,
         )
-        db.commit()
         logger.info("Saved postmortem %s for %s", postmortem.id, postmortem.incident_type)
     except Exception:
         logger.debug("Failed to save postmortem", exc_info=True)

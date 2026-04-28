@@ -342,11 +342,10 @@ def _parse_dep_id(graph, dep_id: str) -> dict:
 
 def _get_finding_from_db(finding_id: str) -> dict | None:
     """Look up a finding by ID from the database.  Returns ``None`` if missing."""
-    from ..db import get_database
-
     try:
-        db = get_database()
-        return db.fetchone("SELECT * FROM findings WHERE id = ?", (finding_id,))
+        from ..repositories import get_monitor_repo
+
+        return get_monitor_repo().fetch_finding_by_id(finding_id)
     except Exception:
         logger.debug("Failed to fetch finding %s", finding_id)
         return None
@@ -439,8 +438,6 @@ async def get_finding_learning(
 
     from pathlib import Path
 
-    from ..db import get_database
-
     result: dict[str, Any] = {"finding_id": finding_id}
     base_dir = Path(__file__).parent.parent
 
@@ -530,19 +527,14 @@ async def get_finding_learning(
     result["confidence_delta"] = None
     result["weight_impact"] = None
     try:
-        db = get_database()
+        from ..repositories import get_monitor_repo as _get_learning_repo
 
-        inv_row = db.fetchone(
-            "SELECT confidence FROM investigations WHERE finding_id = ? ORDER BY timestamp DESC LIMIT 1",
-            (finding_id,),
-        )
+        _learning_repo = _get_learning_repo()
+
+        inv_row = _learning_repo.fetch_investigation_confidence(finding_id)
         if inv_row and inv_row.get("confidence") is not None:
             before_conf = float(inv_row["confidence"])
-            ver_row = db.fetchone(
-                "SELECT verification_status FROM actions WHERE finding_id = ? AND verification_status IS NOT NULL "
-                "ORDER BY timestamp DESC LIMIT 1",
-                (finding_id,),
-            )
+            ver_row = _learning_repo.fetch_verification_status(finding_id)
             if ver_row:
                 after_conf = (
                     min(1.0, before_conf + 0.05) if ver_row["verification_status"] == "verified" else before_conf
@@ -554,11 +546,7 @@ async def get_finding_learning(
                 }
 
         if cat:
-            weight_row = db.fetchone(
-                "SELECT channel_weights FROM skill_selection_log "
-                "WHERE session_id = '__weight_snapshot__' "
-                "ORDER BY timestamp DESC LIMIT 1"
-            )
+            weight_row = _learning_repo.fetch_latest_weight_snapshot()
             if weight_row and weight_row.get("channel_weights"):
                 weights = weight_row["channel_weights"]
                 if isinstance(weights, str):

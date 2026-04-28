@@ -163,16 +163,10 @@ def _get_node_capacity() -> list[dict]:
 
 def _get_stale_findings() -> list[dict]:
     try:
-        from .db import get_database
+        from .repositories import get_monitor_repo
 
-        db = get_database()
         cutoff = int(time.time()) - 72 * 3600
-        rows = db.fetchall(
-            """SELECT id, title, created_at FROM inbox_items
-            WHERE item_type = 'task' AND status IN ('new', 'triaged')
-            AND created_at < ?""",
-            (cutoff,),
-        )
+        rows = get_monitor_repo().fetch_stale_inbox_items(cutoff)
         return [
             {"title": r["title"], "hours_stale": (time.time() - r["created_at"]) / 3600, "finding_id": r["id"]}
             for r in rows

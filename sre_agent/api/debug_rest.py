@@ -75,10 +75,9 @@ async def debug_memory():
         result["tool_registry_count"] = {"error": str(e)}
 
     try:
-        from ..db import get_database
+        from ..repositories import get_context_bus_repo
 
-        db = get_database()
-        row = db.fetchone("SELECT COUNT(*) AS cnt FROM context_entries")
+        row = get_context_bus_repo().fetch_context_entry_count()
         result["context_bus_entries"] = row["cnt"] if row else 0
     except Exception as e:
         result["context_bus_entries"] = {"error": str(e)}

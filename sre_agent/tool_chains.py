@@ -23,46 +23,17 @@ def discover_chains(
 ) -> dict:
     """Discover frequent tool call bigrams from tool_usage."""
     try:
-        from .db import get_database
+        from .repositories import get_tool_usage_repo
 
-        db = get_database()
+        repo = get_tool_usage_repo()
 
-        session_row = db.fetchone("SELECT COUNT(DISTINCT session_id) AS cnt FROM tool_usage")
+        session_row = repo.fetch_session_count()
         total_sessions = session_row["cnt"] if session_row else 0
 
         if total_sessions == 0:
             return {"bigrams": [], "total_sessions_analyzed": 0}
 
-        bigram_rows = db.fetchall(
-            """
-            WITH ordered AS (
-                SELECT session_id, tool_name,
-                       LAG(tool_name) OVER (PARTITION BY session_id ORDER BY turn_number, id) AS prev_tool
-                FROM tool_usage
-                WHERE status = 'success'
-            ),
-            bigram_counts AS (
-                SELECT prev_tool AS from_tool, tool_name AS to_tool, COUNT(*) AS frequency
-                FROM ordered
-                WHERE prev_tool IS NOT NULL
-                GROUP BY prev_tool, tool_name
-                HAVING COUNT(*) >= %s
-            ),
-            from_totals AS (
-                SELECT prev_tool AS tool, COUNT(*) AS total
-                FROM ordered
-                WHERE prev_tool IS NOT NULL
-                GROUP BY prev_tool
-            )
-            SELECT b.from_tool, b.to_tool, b.frequency,
-                   ROUND(b.frequency::numeric / f.total, 4) AS probability
-            FROM bigram_counts b
-            JOIN from_totals f ON b.from_tool = f.tool
-            ORDER BY b.frequency DESC, b.from_tool ASC, b.to_tool ASC
-            LIMIT %s
-            """,
-            (min_frequency, limit),
-        )
+        bigram_rows = repo.fetch_bigrams(min_frequency, limit)
 
         bigrams = [
             {
@@ -92,42 +63,9 @@ def discover_trigrams(
     frequency and probability (how often tool_c follows the A→B pair).
     """
     try:
-        from .db import get_database
+        from .repositories import get_tool_usage_repo
 
-        db = get_database()
-
-        rows = db.fetchall(
-            """
-            WITH ordered AS (
-                SELECT session_id, tool_name,
-                       LAG(tool_name, 1) OVER (PARTITION BY session_id ORDER BY turn_number, id) AS prev_1,
-                       LAG(tool_name, 2) OVER (PARTITION BY session_id ORDER BY turn_number, id) AS prev_2
-                FROM tool_usage
-                WHERE status = 'success'
-            ),
-            trigram_counts AS (
-                SELECT prev_2 AS tool_a, prev_1 AS tool_b, tool_name AS tool_c,
-                       COUNT(*) AS frequency
-                FROM ordered
-                WHERE prev_1 IS NOT NULL AND prev_2 IS NOT NULL
-                GROUP BY prev_2, prev_1, tool_name
-                HAVING COUNT(*) >= %s
-            ),
-            pair_totals AS (
-                SELECT prev_2 AS tool_a, prev_1 AS tool_b, COUNT(*) AS total
-                FROM ordered
-                WHERE prev_1 IS NOT NULL AND prev_2 IS NOT NULL
-                GROUP BY prev_2, prev_1
-            )
-            SELECT t.tool_a, t.tool_b, t.tool_c, t.frequency,
-                   ROUND(t.frequency::numeric / p.total, 4) AS probability
-            FROM trigram_counts t
-            JOIN pair_totals p ON t.tool_a = p.tool_a AND t.tool_b = p.tool_b
-            ORDER BY t.frequency DESC
-            LIMIT %s
-            """,
-            (min_frequency, limit),
-        )
+        rows = get_tool_usage_repo().fetch_trigrams(min_frequency, limit)
 
         return [
             {

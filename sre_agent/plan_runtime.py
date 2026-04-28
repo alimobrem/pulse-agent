@@ -512,9 +512,7 @@ class PlanRuntime:
             import json
             import uuid
 
-            from .db import get_database
-
-            db = get_database()
+            from .repositories import get_monitor_repo
 
             phase_details = []
             for pid, out in result.phase_outputs.items():
@@ -530,27 +528,19 @@ class PlanRuntime:
 
             max_confidence = max((o.confidence for o in result.phase_outputs.values()), default=0)
 
-            db.execute(
-                "INSERT INTO plan_executions "
-                "(id, template_id, template_name, incident_type, finding_id, status, "
-                "phases_total, phases_completed, total_duration_ms, phase_details, confidence) "
-                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) "
-                "ON CONFLICT (id) DO NOTHING",
-                (
-                    f"pe-{uuid.uuid4().hex[:12]}",
-                    plan.id,
-                    plan.name,
-                    plan.incident_type,
-                    incident.get("id", ""),
-                    result.status,
-                    result.phases_total,
-                    result.phases_completed,
-                    result.total_duration_ms,
-                    json.dumps(phase_details),
-                    max_confidence,
-                ),
+            get_monitor_repo().record_plan_execution(
+                execution_id=f"pe-{uuid.uuid4().hex[:12]}",
+                template_id=plan.id,
+                template_name=plan.name,
+                incident_type=plan.incident_type,
+                finding_id=incident.get("id", ""),
+                status=result.status,
+                phases_total=result.phases_total,
+                phases_completed=result.phases_completed,
+                total_duration_ms=result.total_duration_ms,
+                phase_details_json=json.dumps(phase_details),
+                confidence=max_confidence,
             )
-            db.commit()
         except Exception:
             logger.debug("Failed to record plan execution", exc_info=True)
 
@@ -561,34 +551,24 @@ class PlanRuntime:
         try:
             import json
 
-            from .db import get_database
+            from .repositories import get_monitor_repo
 
-            db = get_database()
-            db.execute(
-                "INSERT INTO skill_selection_log "
-                "(session_id, query_summary, selected_skill, threshold_used, "
-                "selection_ms, channel_weights) "
-                "VALUES (%s, %s, %s, %s, %s, %s)",
-                (
-                    f"plan:{plan_id}",
-                    f"phase:{phase_id} status={output.status} confidence={output.confidence:.2f}",
-                    output.skill_id,
-                    0.0,
-                    0,
-                    json.dumps(
-                        {
-                            "phase_id": phase_id,
-                            "status": output.status,
-                            "findings": output.findings,
-                            "evidence": output.evidence_summary[:2000],
-                            "actions": output.actions_taken,
-                            "risk_flags": output.risk_flags,
-                            "confidence": output.confidence,
-                        }
-                    ),
+            get_monitor_repo().record_phase_trace(
+                session_id=f"plan:{plan_id}",
+                query_summary=f"phase:{phase_id} status={output.status} confidence={output.confidence:.2f}",
+                selected_skill=output.skill_id,
+                channel_weights_json=json.dumps(
+                    {
+                        "phase_id": phase_id,
+                        "status": output.status,
+                        "findings": output.findings,
+                        "evidence": output.evidence_summary[:2000],
+                        "actions": output.actions_taken,
+                        "risk_flags": output.risk_flags,
+                        "confidence": output.confidence,
+                    }
                 ),
             )
-            db.commit()
         except Exception:
             logger.debug("Failed to store phase trace", exc_info=True)
 
