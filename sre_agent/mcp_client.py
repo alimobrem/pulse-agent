@@ -598,9 +598,13 @@ def connect_skill_mcp(
 
 
 def disconnect_all() -> None:
-    """Disconnect all MCP servers."""
+    """Disconnect all MCP servers and unregister their tools."""
+    from .tool_registry import unregister_tool
+
     with _connections_lock:
         for _name, conn in _connections.items():
+            for tool_name in conn.tools:
+                unregister_tool(tool_name)
             if conn.process:
                 try:
                     conn.process.terminate()

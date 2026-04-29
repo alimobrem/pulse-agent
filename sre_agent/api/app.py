@@ -92,7 +92,7 @@ async def lifespan(app: FastAPI):
 
     import asyncio
 
-    # Load skill packages
+    _mcp_shutdown.clear()
     mcp_task = None
     try:
         from ..skill_loader import load_skills
