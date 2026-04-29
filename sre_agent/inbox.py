@@ -754,6 +754,9 @@ def _finding_corr_key(finding: dict[str, Any]) -> str:
 
             name = _strip_pod_hash(name)
         return f"{category}:{namespace}:{kind}/{name}"
+    title = finding.get("title", "")
+    if title:
+        return f"{category}:{namespace}:{title}"
     return f"{category}:{namespace}"
 
 
@@ -761,13 +764,12 @@ def bridge_finding_to_inbox(finding: dict[str, Any]) -> str:
     """Create or update an inbox item from a monitor finding."""
     finding_id = finding.get("id", "")
     repo = get_inbox_repo()
+    corr_key = _finding_corr_key(finding)
 
     existing = repo.find_active_by_finding_id(finding_id)
 
-    if existing is None:
-        corr_key = _finding_corr_key(finding)
-        if corr_key:
-            existing = repo.find_active_by_correlation_task(corr_key)
+    if existing is None and corr_key:
+        existing = repo.find_active_by_correlation_task(corr_key)
 
     if existing:
         existing_item = _deserialize_row(existing)
@@ -784,6 +786,19 @@ def bridge_finding_to_inbox(finding: dict[str, Any]) -> str:
         repo.update_resources_and_priority(existing_item["id"], merged_resources, priority, now)
         return existing_item["id"]
 
+    # Check for recently-resolved item with same correlation key — reopen instead of creating duplicate
+    if corr_key:
+        recent = repo.find_recently_resolved(corr_key)
+        if recent:
+            recent_item = _deserialize_row(recent)
+            now = int(time.time())
+            metadata = recent_item.get("metadata", {})
+            metadata.pop("triaged", None)
+            metadata.pop("investigation_id", None)
+            metadata.pop("action_plan", None)
+            repo.update_triage_result(recent_item["id"], "new", metadata, finding.get("summary", ""), now)
+            return recent_item["id"]
+
     item = {
         "item_type": "task",
         "title": finding.get("title", "Unknown finding"),
@@ -793,7 +808,7 @@ def bridge_finding_to_inbox(finding: dict[str, Any]) -> str:
         "noise_score": finding.get("noiseScore", 0),
         "namespace": finding.get("namespace"),
         "resources": finding.get("resources", []),
-        "correlation_key": _finding_corr_key(finding),
+        "correlation_key": corr_key,
         "created_by": "system:monitor",
         "finding_id": finding_id,
     }

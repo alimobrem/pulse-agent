@@ -603,7 +603,14 @@ class TestFindingCorrKey:
         assert "abc123-xyz" not in key
         assert "crashloop:prod:Pod/" in key
 
-    def test_no_resources_fallback(self):
+    def test_no_resources_with_title(self):
+        from sre_agent.inbox import _finding_corr_key
+
+        finding = {"category": "security", "namespace": "", "title": "Security: Resource Limits"}
+        key = _finding_corr_key(finding)
+        assert key == "security::Security: Resource Limits"
+
+    def test_no_resources_no_title_fallback(self):
         from sre_agent.inbox import _finding_corr_key
 
         finding = {"category": "alerts", "namespace": "monitoring"}
@@ -624,6 +631,68 @@ class TestFindingCorrKey:
             "resources": [{"kind": "Pod", "name": "worker-def-456", "namespace": "prod"}],
         }
         assert _finding_corr_key(f1) != _finding_corr_key(f2)
+
+
+class TestBridgeReopensResolved:
+    """bridge_finding_to_inbox should reopen a recently-resolved item instead of creating a duplicate."""
+
+    def test_reopens_recently_resolved_item(self):
+        from sre_agent.inbox import bridge_finding_to_inbox, get_inbox_item
+        from sre_agent.repositories.inbox_repo import get_inbox_repo
+
+        finding = {
+            "id": "f-sec-1",
+            "category": "security",
+            "namespace": "",
+            "title": "Security: Resource Limits",
+            "summary": "5 containers without limits",
+            "severity": "warning",
+            "confidence": 0.8,
+            "resources": [],
+        }
+        item_id = bridge_finding_to_inbox(finding)
+        assert item_id.startswith("inb-")
+
+        # Resolve the item
+        repo = get_inbox_repo()
+        now = int(time.time())
+        repo.update_status(item_id, "resolved", now)
+
+        # Same finding recurs — should reopen, not create new
+        finding["id"] = "f-sec-2"
+        reopened_id = bridge_finding_to_inbox(finding)
+        assert reopened_id == item_id
+
+        item = get_inbox_item(reopened_id)
+        assert item["status"] == "new"
+
+    def test_creates_new_if_resolved_too_long_ago(self):
+        from sre_agent.inbox import bridge_finding_to_inbox
+        from sre_agent.repositories.inbox_repo import get_inbox_repo
+
+        finding = {
+            "id": "f-sec-3",
+            "category": "security",
+            "namespace": "",
+            "title": "Security: Resource Limits",
+            "summary": "old finding",
+            "severity": "warning",
+            "confidence": 0.8,
+            "resources": [],
+        }
+        item_id = bridge_finding_to_inbox(finding)
+
+        # Resolve the item and backdate it beyond the 1-hour window
+        repo = get_inbox_repo()
+        old_time = int(time.time()) - 7200
+        repo.update_status(item_id, "resolved", old_time)
+        repo.db.execute("UPDATE inbox_items SET updated_at = ? WHERE id = ?", (old_time, item_id))
+        repo.db.commit()
+
+        # Same finding recurs — should create new (old one is too stale)
+        finding["id"] = "f-sec-4"
+        new_id = bridge_finding_to_inbox(finding)
+        assert new_id != item_id
 
 
 class TestSweepStaleItems:

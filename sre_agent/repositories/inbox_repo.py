@@ -220,12 +220,19 @@ class InboxRepository(BaseRepository):
     def find_recently_resolved(
         self,
         corr_key: str,
-        item_type: str,
-        since: int,
+        item_type: str | None = None,
+        since: int | None = None,
     ) -> Any | None:
+        if since is None:
+            since = int(__import__("time").time()) - 3600
+        if item_type:
+            return self.db.fetchone(
+                "SELECT * FROM inbox_items WHERE correlation_key = ? AND item_type = ? AND status IN ('resolved', 'archived') AND updated_at > ?",
+                (corr_key, item_type, since),
+            )
         return self.db.fetchone(
-            "SELECT * FROM inbox_items WHERE correlation_key = ? AND item_type = ? AND status IN ('resolved', 'archived') AND updated_at > ?",
-            (corr_key, item_type, since),
+            "SELECT * FROM inbox_items WHERE correlation_key = ? AND status IN ('resolved', 'archived') AND updated_at > ? ORDER BY updated_at DESC LIMIT 1",
+            (corr_key, since),
         )
 
     def update_resources_and_priority(
