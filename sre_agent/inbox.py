@@ -343,12 +343,18 @@ def claim_item(item_id: str, username: str) -> bool:
         return False
 
     now = int(time.time())
-    get_inbox_repo().update_claim(item_id, username, now)
-    _publish_event("inbox_item_claimed", item_id, {"claimed_by": username, "claimed_at": now})
-
     current = item["status"]
-    if current in ("triaged", "new"):
-        update_item_status(item_id, "claimed")
+    target_status = "claimed" if current in ("triaged", "new") else current
+
+    get_inbox_repo().update_claim_and_status(item_id, username, target_status, now)
+
+    updated = get_inbox_item(item_id)
+    if not updated or updated["claimed_by"] != username:
+        return False
+
+    _publish_event("inbox_item_claimed", item_id, {"claimed_by": username, "claimed_at": now})
+    if target_status != current:
+        _publish_event("inbox_item_updated", item_id, {"status": target_status})
 
     _generate_view_for_item(item_id, item, username)
 

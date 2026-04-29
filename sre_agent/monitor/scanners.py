@@ -771,6 +771,7 @@ def get_all_scanner_instances() -> list[FunctionScanner]:
         scan_warning_events,
     )
     from .trend_scanners import (
+        get_trend_degraded_finding,
         scan_disk_pressure_forecast,
         scan_error_rate_acceleration,
         scan_hpa_exhaustion_trend,
@@ -789,6 +790,7 @@ def get_all_scanner_instances() -> list[FunctionScanner]:
         FunctionScanner(_meta("trend_disk"), scan_disk_pressure_forecast),
         FunctionScanner(_meta("trend_hpa"), scan_hpa_exhaustion_trend),
         FunctionScanner(_meta("trend_errors"), scan_error_rate_acceleration),
+        FunctionScanner(_meta("trend_degraded"), get_trend_degraded_finding),
     ]
 
 

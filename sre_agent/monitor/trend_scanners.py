@@ -14,19 +14,22 @@ logger = logging.getLogger("pulse_agent.monitor")
 
 _last_prometheus_error_time: float = 0.0
 _PROMETHEUS_ERROR_COOLDOWN = 300
+_prometheus_degraded: bool = False
 
 
 def _query_prometheus(query: str) -> list[dict]:
     """Query Prometheus via unified client and return results."""
-    global _last_prometheus_error_time
+    global _last_prometheus_error_time, _prometheus_degraded
     try:
         data = get_prometheus_client().query(query, timeout=15)
         if data.get("status") != "success":
             logger.debug("Prometheus query failed: %s", data.get("error", "unknown"))
             return []
+        _prometheus_degraded = False
         return data.get("data", {}).get("result", [])
     except PrometheusConfigError as e:
         logger.warning("Prometheus config error: %s", e)
+        _prometheus_degraded = True
         return []
     except Exception as e:
         now = time.time()
@@ -35,7 +38,24 @@ def _query_prometheus(query: str) -> list[dict]:
             logger.warning("Prometheus query error (suppressing for %ds): %s", _PROMETHEUS_ERROR_COOLDOWN, e)
         else:
             logger.debug("Prometheus query error (suppressed): %s", e)
+        _prometheus_degraded = True
         return []
+
+
+def get_trend_degraded_finding() -> list[dict]:
+    """Return a degraded finding if Prometheus queries failed this cycle."""
+    if not _prometheus_degraded:
+        return []
+    return [
+        _make_finding(
+            severity="info",
+            category="monitoring",
+            title="Trend monitoring degraded",
+            summary="Prometheus trend queries failed — predictive scanners returned no data",
+            resources=[],
+            auto_fixable=False,
+        )
+    ]
 
 
 def scan_memory_pressure_forecast() -> list[dict]:

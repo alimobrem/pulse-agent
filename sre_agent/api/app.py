@@ -110,6 +110,8 @@ async def lifespan(app: FastAPI):
                 if (skill.path / "mcp.yaml").exists():
                     try:
                         conn = await asyncio.to_thread(connect_skill_mcp, skill.name, skill.path, builtin=skill.builtin)
+                        if _mcp_shutdown.is_set():
+                            break
                         if conn and conn.connected:
                             logger.info("MCP connected for skill '%s': %d tools", skill.name, len(conn.tools))
                         elif conn:
