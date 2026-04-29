@@ -1121,6 +1121,7 @@ def _prune_stale_resources() -> None:
     repo = get_inbox_repo()
     rows = repo.fetch_open_items_with_resources()
     pruned_count = 0
+    resolved_count = 0
     for row in rows:
         item_resources = json.loads(row["resources"] or "[]")
         prunable = [r for r in item_resources if r.get("kind") in _PRUNABLE_KINDS]
@@ -1128,11 +1129,17 @@ def _prune_stale_resources() -> None:
             continue
         alive = [r for r in item_resources if r.get("kind") not in _PRUNABLE_KINDS or _resource_exists(r)]
         if len(alive) < len(item_resources):
-            repo.update_item_resources_raw(row["id"], json.dumps(alive))
+            if not alive and prunable:
+                now = int(time.time())
+                repo.resolve_item(row["id"], now)
+                _publish_event("inbox_item_resolved", row["id"], {"resolved_at": now, "reason": "resources_gone"})
+                resolved_count += 1
+            else:
+                repo.update_item_resources_raw(row["id"], json.dumps(alive))
             pruned_count += len(item_resources) - len(alive)
-    if pruned_count:
+    if pruned_count or resolved_count:
         repo.commit()
-        _inbox_logger.info("Pruned %d stale resources from inbox items", pruned_count)
+        _inbox_logger.info("Pruned %d stale resources, auto-resolved %d items", pruned_count, resolved_count)
 
 
 def run_generator_cycle() -> None:
