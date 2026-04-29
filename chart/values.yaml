@@ -107,7 +107,8 @@ mcp:
     - core
     - config
     - helm
-    - observability
+    - metrics
+    - openshift
 
 # ACM Multicluster Observability — enables fleet metrics via Thanos
 # Set enabled=true when deploying on an ACM hub with multicluster-observability-operator
