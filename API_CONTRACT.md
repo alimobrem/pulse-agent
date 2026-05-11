@@ -55,7 +55,9 @@ Defines the REST and WebSocket protocol between the Pulse UI and Pulse Agent. Bo
 | `GET` | `/monitor/history` | token | Paginated scan run history (query: `limit`, `offset`) |
 | `GET` | `/analytics/confidence` | token | Confidence calibration: Brier score, accuracy %, rating (good/fair/poor), prediction buckets (query: `days` 1-365) |
 | `GET` | `/analytics/accuracy` | token | Agent accuracy: quality score trend, anti-patterns, learning stats, operator override rate (query: `days` 1-365) |
-| `GET` | `/analytics/cost` | token | Token cost per incident with trending, by-mode breakdown (query: `days` 1-365) |
+| `GET` | `/analytics/cost` | token | Token cost per incident with trending, by-mode breakdown, 30-day forecast (query: `days` 1-365) |
+| `GET` | `/analytics/budget` | token | Investigation budget (used/remaining/max) and optional cost budget status |
+| `GET` | `/metrics` | none | Prometheus metrics endpoint (tokens, cost, investigations, scanners, autofix) |
 | `GET` | `/analytics/intelligence` | token | 8 intelligence sections as structured dicts: query reliability, error hotspots, token efficiency, harness effectiveness, routing accuracy, feedback analysis, token trending, dashboard patterns (query: `days` 1-90, `mode`) |
 | `GET` | `/analytics/prompt` | token | Prompt section breakdown, cache hit rate, version drift history (query: `days` 1-365, `skill`) |
 | `GET` | `/recommendations` | token | Contextual capability recommendations: unused scanners, untried features (max 4) |

@@ -113,7 +113,7 @@ See [docs/SKILL_DEVELOPER_GUIDE.md](docs/SKILL_DEVELOPER_GUIDE.md) for creating 
 - **Secret Hygiene** -- Find old unrotated secrets, env-exposed secrets, unused secrets
 
 ### Autonomous Monitor
-- **18 Scanners** -- 17 infrastructure scanners (crashlooping pods, pending pods, failed deployments, node pressure, certificate expiry, firing alerts, OOM-killed pods, image pull errors, degraded operators, DaemonSet gaps, HPA saturation, security posture, plus 5 audit scanners) + 1 SLO burn rate scanner
+- **24 Scanners** -- 13 reactive (crashlooping pods, pending pods, failed deployments, node pressure, certificate expiry, firing alerts, OOM-killed pods, image pull errors, degraded operators, DaemonSet gaps, HPA saturation, SLO burn rate, security posture) + 5 audit + 4 predictive trend (memory/disk pressure forecast, HPA exhaustion, error rate acceleration) + 2 proactive
 - **Auto-Fix** -- Trust level 3 auto-fixes safe categories (crashloop pod deletion, deployment restarts). Trust level 4 fixes everything automatically with rollback snapshots
 - **Confidence Scores** -- Every finding, investigation, and action includes a 0-100% confidence score
 - **Noise Learning** -- Tracks transient findings and assigns noise scores to suppress flaky alerts
@@ -123,6 +123,13 @@ See [docs/SKILL_DEVELOPER_GUIDE.md](docs/SKILL_DEVELOPER_GUIDE.md) for creating 
 - **36 MCP Tools** from the OpenShift MCP server (sidecar pod) across 11 toolsets: core, config, helm, observability, openshift, ossm, netedge, tekton, kiali, kubevirt, kcp
 - **Auto-Discovery** -- MCP tools registered alongside native tools at startup
 - **Toggle from UI** -- Enable/disable individual toolsets from the Toolbox page
+
+### Cost Observability
+- **Prometheus `/metrics`** -- Token usage, estimated USD cost, investigation budget, scanner runs, autofix outcomes exposed as Prometheus counters/gauges for alerting via cluster monitoring stack
+- **Budget API** -- `GET /analytics/budget` returns real-time investigation budget (used/remaining) and optional cost budget status
+- **Cost Forecast** -- 30-day projected spend based on last 7 days of daily token totals
+- **Cost Budget** -- Optional daily dollar-amount cap (`PULSE_AGENT_COST_BUDGET_USD`) pauses investigations when exceeded
+- **ServiceMonitor** -- Helm template for Prometheus Operator scraping (`metrics.serviceMonitor.enabled`)
 
 ### Self-Improving Agent
 - **Incident Memory** -- Every interaction stored with query, tool sequence, resolution, and outcome
