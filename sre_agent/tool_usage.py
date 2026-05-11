@@ -216,6 +216,13 @@ def record_turn(
             routing_used_llm=routing_used_llm,
         )
 
+        try:
+            from .observability import record_token_metrics
+
+            record_token_metrics(input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens)
+        except Exception:
+            logger.debug("Prometheus token recording failed", exc_info=True)
+
         # Feed adaptive tool predictor
         try:
             from .tool_predictor import learn as _learn_tools

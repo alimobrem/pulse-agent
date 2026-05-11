@@ -212,6 +212,7 @@ Rules: validate inputs with `_validate_k8s_name()`/`_validate_k8s_namespace()`, 
 - `tool_categories.py` — tool category definitions extracted from skill_loader.py
 - `mcp_client.py` — MCP server connections (SSE transport), tool/prompt discovery, registration
 - `self_tools.py` — 12 self-description + 4 skill management + 3 K8s API introspection tools
+- `observability.py` — Prometheus metrics registry (tokens, cost, investigations, scanners, autofix); `/metrics` endpoint mounted in `app.py`
 - `prompt_log.py` — prompt logging (hash, sections, tokens, version tracking) for observability and debugging
 - `component_registry.py` — 25 component kinds registered (metrics, data, visualization, status, detail, layout, action); data-driven prompt hints
 - `slo_registry.py` — SLO definition CRUD, live Prometheus burn-rate queries, persistence to `slo_definitions` table
@@ -269,5 +270,7 @@ Rules: validate inputs with `_validate_k8s_name()`/`_validate_k8s_namespace()`, 
 | `PULSE_AGENT_HARNESS` | Enable harness optimizations | `1` |
 | `PULSE_AGENT_MAX_TRUST_LEVEL` | Server-side max trust level (0-4) | `3` |
 | `PULSE_AGENT_MEMORY` | Enable self-improving memory | `1` (enabled) |
+| `PULSE_AGENT_COST_BUDGET_USD` | Daily cost budget in USD (0=disabled) | `0` |
+| `PULSE_AGENT_COST_BUDGET_WARNING_PCT` | Cost budget warning threshold (%) | `80` |
 
 *One of Vertex AI or Anthropic API key is required.

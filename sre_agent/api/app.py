@@ -198,6 +198,14 @@ def _get_agent_version() -> str:
 app = FastAPI(title="Pulse Agent API", version=_get_agent_version(), lifespan=lifespan)
 app.add_middleware(CorrelationMiddleware)
 
+from prometheus_client import make_asgi_app as _make_metrics_app
+
+app.mount("/metrics", _make_metrics_app())
+
+from ..observability import BUILD_INFO
+
+BUILD_INFO.info({"version": _get_agent_version()})
+
 PROTOCOL_VERSION = "2"
 
 # Include REST routers

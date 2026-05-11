@@ -171,6 +171,10 @@ class PulseAgentSettings(BaseSettings):
         "registry.redhat.io,registry.access.redhat.com,quay.io,image-registry.openshift-image-registry.svc"
     )
 
+    # Cost budget
+    cost_budget_usd: float = 0.0
+    cost_budget_warning_pct: int = 80
+
     # Prometheus
     thanos_url: str = ""
     acm_thanos_url: str = ""

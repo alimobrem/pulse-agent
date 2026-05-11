@@ -280,6 +280,25 @@ def _compute_cost_stats(days: int) -> dict:
         # Cache savings: what it would have cost if cache_read tokens were charged at full input price
         cache_savings = round(total_cache_read * (INPUT_PRICE - CACHE_READ_PRICE) / 1_000_000, 2)
 
+        forecast = None
+        try:
+            daily_rows = repo.fetch_daily_cost_totals(7)
+            if len(daily_rows) >= 3:
+                daily_costs = [
+                    _estimate_cost(
+                        int(r["input_t"]), int(r["output_t"]), int(r["cache_read_t"]), int(r["cache_write_t"])
+                    )
+                    for r in daily_rows
+                ]
+                avg_daily = sum(daily_costs) / len(daily_costs)
+                forecast = {
+                    "avg_daily_usd": round(avg_daily, 2),
+                    "projected_30d_usd": round(avg_daily * 30, 2),
+                    "based_on_days": len(daily_costs),
+                }
+        except Exception:
+            logger.debug("Cost forecast failed", exc_info=True)
+
         return {
             "avg_tokens_per_incident": round(current_avg, 1),
             "trend": {
@@ -297,6 +316,7 @@ def _compute_cost_stats(days: int) -> dict:
                 "output_usd": round(total_output * OUTPUT_PRICE / 1_000_000, 2),
                 "cache_savings_usd": cache_savings,
             },
+            "forecast": forecast,
         }
 
     except Exception as e:
@@ -328,6 +348,46 @@ def get_cost_stats(
     and total token usage across all sessions.
     """
     return _compute_cost_stats(days)
+
+
+@router.get("/budget")
+def get_budget_status(_token: None = Depends(verify_token)):
+    """Investigation and cost budget status."""
+    from ..config import get_settings
+
+    settings = get_settings()
+
+    investigation = {
+        "max_daily": settings.monitor.max_daily_investigations,
+        "used_today": 0,
+        "remaining": settings.monitor.max_daily_investigations,
+    }
+    try:
+        from ..monitor.cluster_monitor import get_cluster_monitor_sync
+
+        monitor = get_cluster_monitor_sync()
+        if monitor:
+            used = monitor._daily_investigation_count
+            investigation["used_today"] = used
+            investigation["remaining"] = max(0, settings.monitor.max_daily_investigations - used)
+    except Exception:
+        logger.debug("Could not read investigation budget from monitor", exc_info=True)
+
+    cost = None
+    if settings.cost_budget_usd > 0:
+        cost_stats = _compute_cost_stats(1)
+        spent = cost_stats["cost"]["total_usd"]
+        limit_usd = settings.cost_budget_usd
+        warn_pct = settings.cost_budget_warning_pct
+        cost = {
+            "daily_limit_usd": limit_usd,
+            "spent_today_usd": spent,
+            "remaining_usd": round(max(0, limit_usd - spent), 2),
+            "warning_threshold_pct": warn_pct,
+            "status": ("ok" if spent < limit_usd * warn_pct / 100 else "warning" if spent < limit_usd else "exceeded"),
+        }
+
+    return {"investigation": investigation, "cost": cost}
 
 
 @router.get("/intelligence")

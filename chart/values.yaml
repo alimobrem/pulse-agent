@@ -110,6 +110,11 @@ mcp:
     - metrics
     - openshift
 
+# Prometheus metrics — expose /metrics for cluster monitoring stack
+metrics:
+  serviceMonitor:
+    enabled: false
+
 # ACM Multicluster Observability — enables fleet metrics via Thanos
 # Set enabled=true when deploying on an ACM hub with multicluster-observability-operator
 acm:

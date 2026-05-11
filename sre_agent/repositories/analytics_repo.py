@@ -89,6 +89,21 @@ class AnalyticsRepository(BaseRepository):
             (days,),
         )
 
+    def fetch_daily_cost_totals(self, days: int) -> list[dict]:
+        """Fetch daily token totals for cost forecasting."""
+        return self.db.fetchall(
+            "SELECT DATE(timestamp) AS day, "
+            "  COALESCE(SUM(input_tokens), 0) AS input_t, "
+            "  COALESCE(SUM(output_tokens), 0) AS output_t, "
+            "  COALESCE(SUM(cache_read_tokens), 0) AS cache_read_t, "
+            "  COALESCE(SUM(cache_creation_tokens), 0) AS cache_write_t "
+            "FROM tool_turns "
+            "WHERE timestamp > NOW() - INTERVAL '1 day' * ? "
+            "AND input_tokens IS NOT NULL "
+            "GROUP BY DATE(timestamp) ORDER BY day",
+            (days,),
+        )
+
     # -- Recommendations -------------------------------------------------------
 
     def fetch_tool_usage_by_pattern(self, pattern: str, days: int = 30) -> dict | None:
