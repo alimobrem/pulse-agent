@@ -201,11 +201,12 @@ def _compute_cost_stats(days: int) -> dict:
     trends comparing current period vs previous period, breakdown by agent_mode,
     and estimated dollar cost using Vertex AI pricing.
     """
-    # Vertex AI pricing (per 1M tokens) — Claude Opus on Vertex
-    INPUT_PRICE = 15.0
-    OUTPUT_PRICE = 75.0
-    CACHE_READ_PRICE = 1.875
-    CACHE_WRITE_PRICE = 18.75
+    from ..observability import TOKEN_PRICES
+
+    INPUT_PRICE = TOKEN_PRICES["input"]
+    OUTPUT_PRICE = TOKEN_PRICES["output"]
+    CACHE_READ_PRICE = TOKEN_PRICES["cache_read"]
+    CACHE_WRITE_PRICE = TOKEN_PRICES["cache_write"]
 
     def _estimate_cost(input_t: int, output_t: int, cache_read_t: int = 0, cache_write_t: int = 0) -> float:
         return round(
@@ -367,16 +368,31 @@ def get_budget_status(_token: None = Depends(verify_token)):
 
         monitor = get_cluster_monitor_sync()
         if monitor:
-            used = monitor._daily_investigation_count
+            used, max_daily = monitor.get_investigation_budget()
             investigation["used_today"] = used
-            investigation["remaining"] = max(0, settings.monitor.max_daily_investigations - used)
+            investigation["remaining"] = max(0, max_daily - used)
     except Exception:
         logger.debug("Could not read investigation budget from monitor", exc_info=True)
 
     cost = None
     if settings.cost_budget_usd > 0:
-        cost_stats = _compute_cost_stats(1)
-        spent = cost_stats["cost"]["total_usd"]
+        from ..observability import TOKEN_PRICES
+        from ..repositories import get_analytics_repo
+
+        totals = get_analytics_repo().fetch_token_totals(1)
+        if totals and totals["total_incidents"] > 0:
+            spent = round(
+                (
+                    int(totals["total_input"]) * TOKEN_PRICES["input"]
+                    + int(totals["total_output"]) * TOKEN_PRICES["output"]
+                    + int(totals["total_cache_read"]) * TOKEN_PRICES["cache_read"]
+                    + int(totals["total_cache_write"]) * TOKEN_PRICES["cache_write"]
+                )
+                / 1_000_000,
+                2,
+            )
+        else:
+            spent = 0.0
         limit_usd = settings.cost_budget_usd
         warn_pct = settings.cost_budget_warning_pct
         cost = {

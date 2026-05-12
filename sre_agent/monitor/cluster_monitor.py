@@ -28,6 +28,22 @@ from .investigations import (
 )
 from .registry import SEVERITY_CRITICAL, SEVERITY_WARNING
 from .scanners import ALL_SCANNERS, get_all_scanner_instances
+
+try:
+    from ..observability import (
+        ACTIVE_FINDINGS,
+        AUTOFIX_TOTAL,
+        INVESTIGATION_BUDGET_MAX,
+        INVESTIGATION_BUDGET_REMAINING,
+        INVESTIGATIONS_TOTAL,
+        SCAN_DURATION_SECONDS,
+        SCANNER_RUNS_TOTAL,
+        TOKEN_PRICES,
+    )
+
+    _METRICS_AVAILABLE = True
+except ImportError:
+    _METRICS_AVAILABLE = False
 from .webhook import _send_webhook
 
 if TYPE_CHECKING:
@@ -83,6 +99,7 @@ class ClusterMonitor:
         self._noise_threshold = get_settings().monitor.noise_threshold
         self._noise_suppressed = 0
         self._noise_suppressed_last_scan = 0
+        self._cost_budget_cache: tuple[float, float] | None = None
         self._session_id = f"mon-{uuid.uuid4().hex[:12]}"
 
         # Shared Anthropic client (async)
@@ -116,6 +133,10 @@ class ClusterMonitor:
     @property
     def subscriber_count(self) -> int:
         return len(self._subscribers)
+
+    def get_investigation_budget(self) -> tuple[int, int]:
+        """Return (used_today, max_daily) for the investigation budget."""
+        return (self._daily_investigation_count, get_settings().monitor.max_daily_investigations)
 
     @property
     def effective_trust_level(self) -> int:
@@ -399,12 +420,8 @@ class ClusterMonitor:
                 if not approved:
                     action_report["status"] = "failed"
                     action_report["error"] = "Rejected by user or approval timed out"
-                    try:
-                        from ..observability import AUTOFIX_TOTAL
-
+                    if _METRICS_AVAILABLE:
                         AUTOFIX_TOTAL.labels(outcome="skipped").inc()
-                    except Exception:
-                        pass
                     await self._broadcast_raw(action_report)
                     save_action(
                         action_report,
@@ -436,12 +453,8 @@ class ClusterMonitor:
                 action_report["beforeState"] = before_state
                 action_report["afterState"] = after_state
                 action_report["durationMs"] = duration_ms
-                try:
-                    from ..observability import AUTOFIX_TOTAL
-
+                if _METRICS_AVAILABLE:
                     AUTOFIX_TOTAL.labels(outcome="success").inc()
-                except Exception:
-                    pass
                 fixes_this_cycle += 1
                 self._recent_fix_ids.add(finding["id"])
 
@@ -494,22 +507,14 @@ class ClusterMonitor:
                     action_report["durationMs"] = duration_ms
                     self._recent_fix_ids.add(finding["id"])
                     _resolve_finding_inbox(finding["id"], finding)
-                    try:
-                        from ..observability import AUTOFIX_TOTAL
-
+                    if _METRICS_AVAILABLE:
                         AUTOFIX_TOTAL.labels(outcome="success").inc()
-                    except Exception:
-                        pass
                 else:
                     action_report["status"] = "failed"
                     action_report["error"] = str(e)
                     action_report["durationMs"] = duration_ms
-                    try:
-                        from ..observability import AUTOFIX_TOTAL
-
+                    if _METRICS_AVAILABLE:
                         AUTOFIX_TOTAL.labels(outcome="failure").inc()
-                    except Exception:
-                        pass
 
                     logger.info(
                         "Auto-fix failed: category=%s finding=%s error=%s",
@@ -720,32 +725,40 @@ class ClusterMonitor:
                 self._daily_investigation_count,
                 max_daily,
             )
-            try:
-                from ..observability import INVESTIGATION_BUDGET_REMAINING
-
+            if _METRICS_AVAILABLE:
                 INVESTIGATION_BUDGET_REMAINING.set(0)
-            except Exception:
-                pass
             return
 
-        # Cost budget gate
+        # Cost budget gate (cached — only queries DB every 5 minutes)
         _budget_usd = _settings.cost_budget_usd
         if _budget_usd > 0:
             try:
-                from ..repositories import get_analytics_repo
+                now_t = time.time()
+                cached = self._cost_budget_cache
+                if cached and (now_t - cached[0]) < 300:
+                    today_cost = cached[1]
+                else:
+                    from ..repositories import get_analytics_repo
 
-                totals = get_analytics_repo().fetch_token_totals(1)
-                if totals and totals["total_incidents"] > 0:
-                    _in = int(totals["total_input"])
-                    _out = int(totals["total_output"])
-                    today_cost = (_in * 15.0 + _out * 75.0) / 1_000_000
-                    if today_cost >= _budget_usd:
-                        logger.warning(
-                            "Daily cost budget exceeded ($%.2f / $%.2f) — pausing investigations",
-                            today_cost,
-                            _budget_usd,
+                    totals = get_analytics_repo().fetch_token_totals(1)
+                    if totals and totals["total_incidents"] > 0:
+                        _in = int(totals["total_input"])
+                        _out = int(totals["total_output"])
+                        today_cost = (
+                            (_in * TOKEN_PRICES["input"] + _out * TOKEN_PRICES["output"]) / 1_000_000
+                            if _METRICS_AVAILABLE
+                            else (_in * 15.0 + _out * 75.0) / 1_000_000
                         )
-                        return
+                    else:
+                        today_cost = 0.0
+                    self._cost_budget_cache = (now_t, today_cost)
+                if today_cost >= _budget_usd:
+                    logger.warning(
+                        "Daily cost budget exceeded ($%.2f / $%.2f) — pausing investigations",
+                        today_cost,
+                        _budget_usd,
+                    )
+                    return
             except Exception:
                 logger.debug("Cost budget check failed", exc_info=True)
 
@@ -830,13 +843,9 @@ class ClusterMonitor:
                     self._investigation_fingerprints[key] = content_hash
                     investigations_run += 1
                     self._daily_investigation_count += 1
-                    try:
-                        from ..observability import INVESTIGATION_BUDGET_REMAINING, INVESTIGATIONS_TOTAL
-
+                    if _METRICS_AVAILABLE:
                         INVESTIGATIONS_TOTAL.inc()
                         INVESTIGATION_BUDGET_REMAINING.set(max(0, max_daily - self._daily_investigation_count))
-                    except Exception:
-                        pass
                     task = asyncio.create_task(
                         self._try_plan_execution(finding),
                         name=f"plan-{finding.get('id', 'unknown')[:12]}",
@@ -893,13 +902,9 @@ class ClusterMonitor:
                 )
                 investigations_run += 1
                 self._daily_investigation_count += 1
-                try:
-                    from ..observability import INVESTIGATION_BUDGET_REMAINING, INVESTIGATIONS_TOTAL
-
+                if _METRICS_AVAILABLE:
                     INVESTIGATIONS_TOTAL.inc()
                     INVESTIGATION_BUDGET_REMAINING.set(max(0, max_daily - self._daily_investigation_count))
-                except Exception:
-                    pass
                 self._recent_investigations[key] = now
                 self._investigation_fingerprints[key] = content_hash
 
@@ -1236,12 +1241,8 @@ class ClusterMonitor:
         for pr in parallel_results:
             scanner_results.append(pr["result"])
             all_findings.extend(pr["findings"])
-            try:
-                from ..observability import SCANNER_RUNS_TOTAL
-
+            if _METRICS_AVAILABLE:
                 SCANNER_RUNS_TOTAL.labels(scanner=pr["result"]["name"]).inc()
-            except Exception:
-                pass
 
         # Deduplicate
         current_keys = set()
@@ -1355,18 +1356,10 @@ class ClusterMonitor:
 
         scan_duration = time.time() - scan_start
         scan_duration_ms = int(scan_duration * 1000)
-        try:
-            from ..observability import (
-                ACTIVE_FINDINGS,
-                INVESTIGATION_BUDGET_MAX,
-                SCAN_DURATION_SECONDS,
-            )
-
+        if _METRICS_AVAILABLE:
             SCAN_DURATION_SECONDS.set(scan_duration)
             ACTIVE_FINDINGS.set(len(self._last_findings))
             INVESTIGATION_BUDGET_MAX.set(get_settings().monitor.max_daily_investigations)
-        except Exception:
-            pass
         await self._broadcast_raw(
             {
                 "type": "monitor_status",
