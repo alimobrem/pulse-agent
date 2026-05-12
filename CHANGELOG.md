@@ -2,6 +2,29 @@
 
 All notable changes to Pulse Agent are documented in this file.
 
+## [2.7.0] - 2026-05-12
+
+### Features
+- Prometheus `/metrics` endpoint — token usage, cost, investigations, scanner runs, autofix outcomes as counters/gauges
+- `GET /analytics/budget` — real-time investigation budget (used/remaining) and optional cost budget status
+- 30-day cost forecast in `/analytics/cost` based on 7-day daily token totals
+- Optional daily dollar-amount budget enforcement (`PULSE_AGENT_COST_BUDGET_USD`) pauses investigations when exceeded
+- ServiceMonitor Helm template for Prometheus Operator scraping
+- `observability.py` — centralized Prometheus metrics registry with `record_token_metrics()` helper
+
+### Fixes
+- fix: exclude resolved items from Needs Attention list and count
+- fix: atomic claim, trend degraded finding, MCP shutdown race
+- fix: inbox dedup — reopen recently-resolved items instead of creating duplicates
+- fix: auto-resolve inbox items when all referenced resources are gone
+- fix: inbox resolution falls back to correlation_key when finding_id misses
+- fix: MCP toolset 'observability' → 'metrics' + 'openshift'
+- fix: disconnect_all unregisters tools, clear _mcp_shutdown on restart
+
+### Tests
+- 12 new observability tests (metric registration, counter increments, gauge operations, label cardinality)
+- Total: 2372 backend tests, 2021 frontend tests
+
 ## [2.4.0] - 2026-04-17
 
 ### Features
